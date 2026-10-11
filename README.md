@@ -8,6 +8,13 @@ There is no manual — working out how the console behaves is part of the exerci
 <p align="center"><sub>What a finished T3 looks like (12 s from a real solution, frames 600–960, scaled 6×):
 the paddle returns the ball and the green score bar grows; a miss resets the score and relaunches the ball.</sub></p>
 
+**Bonus:** [tasks/T4.md](tasks/T4.md) is a second game, Breakout, for anyone who finishes early or wants
+to try a skill on a game it was not written for.
+
+<p align="center"><img src="media/t4-breakout.gif" alt="T4 Breakout running on VESPER-16: the ball breaks the last bricks, the wall refills and the ball waits on the paddle" width="384"></p>
+<p align="center"><sub>What a finished T4 looks like (12 s from a real solution, frames 600–960, scaled 6×):
+the last bricks break, the full wall comes back and the ball rests on the paddle until A is pressed.</sub></p>
+
 ## Design concepts
 
 These illustrations show a possible physical design for the VESPER-16 processor and handheld
@@ -48,8 +55,8 @@ cd VESPER-16
 Both print `OK 30 frames` and write `out/fill/frame_0000.png …`. Open `player.html` in a browser
 and drop the output folder (or a `--gif` file) onto it to watch the frames.
 
-Where `tasks/T3.md` writes `bin/vesper`, Windows users run `.\bin\vesper.exe`.
-Save your program as `solutions/T3.vsa`.
+Where the task files write `bin/vesper`, Windows users run `.\bin\vesper.exe`.
+Save your program as `solutions/T3.vsa` (bonus: `solutions/T4.vsa`).
 
 ## Rules for the exercise
 
@@ -68,8 +75,9 @@ bin/vesper.exe      assembler + emulator (Windows x64)
 examples/fill.vsa   small sample program
 examples/pixel.vsa  small sample program
 tasks/T3.md         the game task
+tasks/T4.md         bonus game (Breakout)
 player.html         offline viewer for --out folders and --gif files
-media/              the demo GIF and design concept images above
+media/              the demo GIFs and design concept images above
 solutions/          save your game here
 locked/             later workshop parts (password-protected)
 unlock.py           opens a locked part into unlocked/part-<n>/
