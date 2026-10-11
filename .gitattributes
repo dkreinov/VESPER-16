@@ -1,0 +1,3 @@
+bin/* binary
+locked/*.zip binary
+*.vsa text eol=lf

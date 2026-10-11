@@ -1,38 +1,58 @@
 # VESPER-16 development kit
 
-Build the game described in [tasks/T3.md](tasks/T3.md).
+Write the game described in [tasks/T3.md](tasks/T3.md) for the VESPER-16 handheld console.
+The kit contains the console's assembler + emulator and two tiny example programs.
+There is no manual — working out how the console behaves is part of the exercise.
 
 ## Requirements
 
-- Linux x86-64 to run the supplied assembler and emulator.
-- A browser to open the frame player.
-
-The emulator is a self-contained Linux executable. Windows users need a Linux
-environment such as WSL, a Linux VM or a remote Linux machine. It does not run
-directly in PowerShell or on macOS.
+- **Linux x86-64** (`bin/vesper`) or **Windows x64** (`bin/vesper.exe`). Both are self-contained
+  executables and behave identically. macOS: use a Linux VM or container.
+- A web browser for the frame viewer (`player.html`).
+- Python 3 — only for `unlock.py` (and the grader, which also needs numpy), used later in the workshop.
 
 ## Start
 
+Linux:
 ```sh
 git clone https://github.com/dkreinov/VESPER-16.git
 cd VESPER-16
 chmod +x bin/vesper
-mkdir -p solutions
 bin/vesper run examples/fill.vsa --frames 30 --out out/fill
 ```
 
-Open `player.html` in a browser and drop the generated output folder into it.
-Read `tasks/T3.md` for the complete game requirements and submission path.
-You may search the web and test the console. This kit imposes no simulator-call
-limit. Leave the supplied task and emulator unchanged.
+Windows (PowerShell):
+```powershell
+git clone https://github.com/dkreinov/VESPER-16.git
+cd VESPER-16
+.\bin\vesper.exe run examples\fill.vsa --frames 30 --out out\fill
+```
+
+Both print `OK 30 frames` and write `out/fill/frame_0000.png …`. Open `player.html` in a browser
+and drop the output folder (or a `--gif` file) onto it to watch the frames.
+
+Where `tasks/T3.md` writes `bin/vesper`, Windows users run `.\bin\vesper.exe`.
+Save your program as `solutions/T3.vsa`.
+
+## Rules for the exercise
+
+- Leave `bin/`, `examples/` and `tasks/` unchanged.
+- This kit imposes no limit on emulator runs. If your presenter announces a run budget for a stage,
+  count your `vesper run` calls yourself (`vesper asm` is free).
+- Some later parts of the workshop are in `locked/`. Your presenter gives the password for each part
+  when it starts; then run `python unlock.py <part> <password>` (it extracts into `unlocked/part-<n>/`).
+  Don't try to open them earlier.
 
 ## Files
 
 ```text
-bin/vesper          assembler and emulator
+bin/vesper          assembler + emulator (Linux x86-64)
+bin/vesper.exe      assembler + emulator (Windows x64)
 examples/fill.vsa   small sample program
 examples/pixel.vsa  small sample program
-tasks/T3.md        game task
-player.html        viewer for generated frames or GIFs
-solutions/         save your game here
+tasks/T3.md         the game task
+player.html         offline viewer for --out folders and --gif files
+solutions/          save your game here
+locked/             later workshop parts (password-protected)
+unlock.py           opens a locked part into unlocked/part-<n>/
 ```
