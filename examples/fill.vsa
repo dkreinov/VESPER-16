@@ -1,0 +1,12 @@
+; fill.vsa
+
+        LDW #0x8000, r1
+        LDW #1536, r2
+        LDW #0xCC, r3
+fill:   ST r3, [r1]
+        ADD #1, r1
+        SUB #1, r2
+        CMP #0, r2
+        BNE fill
+idle:   FRAME
+        JMP idle

@@ -1,0 +1,19 @@
+; pixel.vsa
+
+.equ VRAM, 0x8000
+
+        LDW #VRAM, r1
+        LDW #1536, r2
+        MOV #0, r3
+clear:  ST r3, [r1]
+        ADD #1, r1
+        SUB #1, r2
+        CMP #0, r2
+        BNE clear
+
+        LDW #VRAM+280, r1
+        LDW #0x70, r3
+        ST r3, [r1]
+
+idle:   FRAME
+        JMP idle

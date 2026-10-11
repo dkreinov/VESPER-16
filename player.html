@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VESPER-16 Frame Player</title>
+<style>
+  :root {
+    --bg: #14161c; --panel: #1d2029; --edge: #2c303c; --text: #e6e8ee; --muted: #8b90a0;
+    --accent: #3fa9f5; --accent2: #ffd93d; --bezel: #0b0c10;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #eef0f4; --panel: #ffffff; --edge: #d5d9e2; --text: #1b1e27; --muted: #626879;
+      --accent: #1f7fcf; --accent2: #b88a00; --bezel: #23262f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .04em; }
+  h1 span { color: var(--accent2); }
+  .sub { color: var(--muted); }
+  .drop { border: 2px dashed var(--edge); border-radius: 12px; padding: 18px; text-align: center;
+          background: var(--panel); transition: border-color .15s; }
+  .drop.over { border-color: var(--accent); }
+  .drop p { margin: 4px 0 12px; color: var(--muted); }
+  .btn { appearance: none; border: 1px solid var(--edge); background: var(--bg); color: var(--text);
+         border-radius: 8px; padding: 7px 12px; font: inherit; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  label.btn input { display: none; }
+  .console { margin-top: 18px; background: var(--bezel); border-radius: 18px; padding: 22px;
+             box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 2px #2a2d36; }
+  .screen-wrap { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000;
+                 border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 3px #000; }
+  canvas { width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  .grid { position: absolute; inset: 0; pointer-events: none; display: none;
+          background-image: linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px);
+          background-size: calc(100% / 64) calc(100% / 48); }
+  .grid.on { display: block; }
+  .empty { position: absolute; inset: 0; display: grid; place-items: center; color: #555b6b;
+           font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+  .controls .spacer { flex: 1; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 14px; }
+  .readout { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #c9cdd8; }
+  .info { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 10px 12px; }
+  .card h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px;
+            margin-right: 6px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
+  select { background: var(--bg); color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 8px; font: inherit; }
+  kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--edge); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  .keys { color: var(--muted); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>VESPER<span>-16</span> frame player</h1>
+    <div class="sub">offline viewer for <span class="mono">--out</span> folders and <span class="mono">--gif</span> files</div>
+  </header>
+
+  <div class="drop" id="drop">
+    <p>Drop a frames folder, a set of <span class="mono">frame_NNNN.png</span> files, or a <span class="mono">.gif</span> here.</p>
+    <label class="btn primary">Open folder<input type="file" id="dirInput" webkitdirectory directory multiple></label>
+    <label class="btn">Open files / GIF<input type="file" id="fileInput" accept=".png,.gif,image/png,image/gif" multiple></label>
+  </div>
+
+  <div class="console">
+    <div class="screen-wrap">
+      <canvas id="screen" width="64" height="48"></canvas>
+      <div class="grid" id="grid"></div>
+      <div class="empty" id="empty">no frames loaded</div>
+    </div>
+    <input type="range" id="scrub" min="0" max="0" value="0" disabled>
+    <div class="controls">
+      <button class="btn" id="first" title="First frame (Home)">&#x23EE;</button>
+      <button class="btn" id="prev" title="Previous frame (&larr;)">&#x25C0;&#xFE0E;&#x25AE;</button>
+      <button class="btn primary" id="play" title="Play / pause (Space)">Play</button>
+      <button class="btn" id="next" title="Next frame (&rarr;)">&#x25AE;&#x25B6;&#xFE0E;</button>
+      <button class="btn" id="last" title="Last frame (End)">&#x23ED;</button>
+      <select id="fps" title="Playback speed">
+        <option value="5">5 fps</option><option value="10">10 fps</option><option value="15">15 fps</option>
+        <option value="30" selected>30 fps</option><option value="60">60 fps</option>
+      </select>
+      <label class="readout"><input type="checkbox" id="loop" checked> loop</label>
+      <label class="readout"><input type="checkbox" id="gridToggle"> grid</label>
+      <span class="spacer"></span>
+      <span class="readout" id="counter">frame &ndash; / &ndash;</span>
+    </div>
+  </div>
+
+  <div class="info">
+    <div class="card"><h3>Source</h3><div class="mono" id="src">&ndash;</div></div>
+    <div class="card"><h3>Pixel under cursor</h3><div class="mono" id="pix">&ndash;</div></div>
+    <div class="card"><h3>Frame</h3><div class="mono" id="fname">&ndash;</div></div>
+  </div>
+  <div class="keys"><kbd>Space</kbd> play/pause &nbsp; <kbd>&larr;</kbd><kbd>&rarr;</kbd> step &nbsp; <kbd>Home</kbd><kbd>End</kbd> first/last &nbsp; <kbd>G</kbd> grid</div>
+</main>
+
+<script>
+(() => {
+  const W = 64, H = 48;
+  const PALETTE = [
+    ["BLACK", "#000000"], ["NAVY", "#1B2A55"], ["PLUM", "#6B2D5C"], ["FOREST", "#1E6B3A"],
+    ["RUST", "#A0522D"], ["SLATE", "#4A5060"], ["SILVER", "#A8B0B8"], ["WHITE", "#FFFFFF"],
+    ["RED", "#E8333A"], ["ORANGE", "#FF8C1A"], ["YELLOW", "#FFD93D"], ["GREEN", "#3CD25A"],
+    ["SKY", "#3FA9F5"], ["VIOLET", "#8A6CF0"], ["PINK", "#FF7FB0"], ["SAND", "#E8C9A0"],
+  ];
+  const HEX2NAME = Object.fromEntries(PALETTE.map(([n, h], i) => [h, `${i} ${n}`]));
+
+  const $ = id => document.getElementById(id);
+  const canvas = $("screen"), ctx = canvas.getContext("2d");
+  let frames = [];   // array of {name, data: ImageData(64x48)}
+  let cur = 0, playing = false, timer = null;
+
+  // ---------- loading
+  function toImageData(img) {
+    const c = document.createElement("canvas");
+    c.width = img.width; c.height = img.height;
+    const cx = c.getContext("2d");
+    cx.drawImage(img, 0, 0);
+    // downscale nearest-neighbour from --scale N output
+    const sx = img.width / W, sy = img.height / H;
+    const src = cx.getImageData(0, 0, img.width, img.height).data;
+    const out = new ImageData(W, H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const si = ((Math.floor(y * sy + sy / 2)) * img.width + Math.floor(x * sx + sx / 2)) * 4;
+      const di = (y * W + x) * 4;
+      out.data[di] = src[si]; out.data[di + 1] = src[si + 1]; out.data[di + 2] = src[si + 2]; out.data[di + 3] = 255;
+    }
+    return out;
+  }
+  function loadImage(file) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); res(img); };
+      img.onerror = rej;
+      img.src = url;
+    });
+  }
+
+  // minimal GIF decoder (global/local palettes, LZW) -> full frames
+  function decodeGif(buf) {
+    const b = new Uint8Array(buf);
+    let p = 0;
+    const u16 = () => { const v = b[p] | (b[p + 1] << 8); p += 2; return v; };
+    if (String.fromCharCode(...b.slice(0, 3)) !== "GIF") throw new Error("not a GIF");
+    p = 6;
+    const sw = u16(), sh = u16(), flags = b[p++]; p += 2;
+    let gct = null;
+    if (flags & 0x80) { const n = 2 << (flags & 7); gct = b.slice(p, p + n * 3); p += n * 3; }
+    const canvasBuf = new Uint8ClampedArray(sw * sh * 4);
+    const out = [];
+    let transparent = -1;
+    while (p < b.length) {
+      const t = b[p++];
+      if (t === 0x3B) break;
+      if (t === 0x21) {
+        const label = b[p++];
+        if (label === 0xF9) { const len = b[p]; const pf = b[p + 1]; transparent = (pf & 1) ? b[p + 4] : -1; p += len + 1; }
+        while (b[p] !== 0) p += b[p] + 1;
+        p++;
+        continue;
+      }
+      if (t !== 0x2C) throw new Error("bad GIF block");
+      const ix = u16(), iy = u16(), iw = u16(), ih = u16(), f2 = b[p++];
+      let ct = gct;
+      if (f2 & 0x80) { const n = 2 << (f2 & 7); ct = b.slice(p, p + n * 3); p += n * 3; }
+      const interlaced = !!(f2 & 0x40);
+      const minCode = b[p++];
+      const chunks = [];
+      while (b[p] !== 0) { chunks.push(b.slice(p + 1, p + 1 + b[p])); p += b[p] + 1; }
+      p++;
+      const data = new Uint8Array(chunks.reduce((a, c) => a + c.length, 0));
+      { let o = 0; for (const c of chunks) { data.set(c, o); o += c.length; } }
+      // LZW
+      const clear = 1 << minCode, eoi = clear + 1;
+      let size = minCode + 1, next = eoi + 1, prev = null;
+      let dict = [];
+      const reset = () => { dict = []; for (let i = 0; i < clear; i++) dict[i] = [i]; dict[clear] = []; dict[eoi] = null; size = minCode + 1; next = eoi + 1; prev = null; };
+      reset();
+      const pixels = new Uint8Array(iw * ih);
+      let pi = 0, bit = 0;
+      const total = data.length * 8;
+      while (bit + size <= total) {
+        let code = 0;
+        for (let i = 0; i < size; i++, bit++) if (data[bit >> 3] & (1 << (bit & 7))) code |= 1 << i;
+        if (code === clear) { reset(); continue; }
+        if (code === eoi) break;
+        let entry;
+        if (code < next && dict[code]) entry = dict[code];
+        else if (prev) entry = prev.concat([prev[0]]);
+        else break;
+        for (const v of entry) if (pi < pixels.length) pixels[pi++] = v;
+        if (prev && next < 4096) { dict[next++] = prev.concat([entry[0]]); if (next === (1 << size) && size < 12) size++; }
+        prev = entry;
+      }
+      const rowOrder = [];
+      if (interlaced) { for (const [s, st] of [[0, 8], [4, 8], [2, 4], [1, 2]]) for (let r = s; r < ih; r += st) rowOrder.push(r); }
+      else for (let r = 0; r < ih; r++) rowOrder.push(r);
+      for (let r = 0; r < ih; r++) for (let x = 0; x < iw; x++) {
+        const idx = pixels[r * iw + x];
+        if (idx === transparent) continue;
+        const di = ((iy + rowOrder[r]) * sw + ix + x) * 4;
+        canvasBuf[di] = ct[idx * 3]; canvasBuf[di + 1] = ct[idx * 3 + 1]; canvasBuf[di + 2] = ct[idx * 3 + 2]; canvasBuf[di + 3] = 255;
+      }
+      const c = document.createElement("canvas"); c.width = sw; c.height = sh;
+      c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(canvasBuf), sw, sh), 0, 0);
+      out.push(c);
+    }
+    return out;
+  }
+
+  async function loadFiles(list) {
+    const files = [...list];
+    const gif = files.find(f => /\.gif$/i.test(f.name));
+    stop();
+    try {
+      if (gif) {
+        const cs = decodeGif(await gif.arrayBuffer());
+        frames = cs.map((c, i) => ({ name: `${gif.name} #${String(i).padStart(4, "0")}`, data: toImageData(c) }));
+        $("src").textContent = `${gif.name} (${frames.length} frames)`;
+      } else {
+        const pngs = files.filter(f => /\.png$/i.test(f.name))
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        if (!pngs.length) { $("src").textContent = "no PNG or GIF files found"; return; }
+        frames = [];
+        for (const f of pngs) frames.push({ name: f.webkitRelativePath || f.name, data: toImageData(await loadImage(f)) });
+        const folder = (pngs[0].webkitRelativePath || "").split("/")[0];
+        $("src").textContent = `${folder ? folder + "/ " : ""}${frames.length} PNG frames`;
+      }
+    } catch (e) {
+      $("src").textContent = "could not read: " + e.message;
+      return;
+    }
+    cur = 0;
+    $("scrub").max = Math.max(0, frames.length - 1);
+    $("scrub").disabled = frames.length < 2;
+    $("empty").style.display = frames.length ? "none" : "grid";
+    show(0);
+  }
+
+  // ---------- playback
+  function show(i) {
+    if (!frames.length) return;
+    cur = Math.max(0, Math.min(frames.length - 1, i));
+    ctx.putImageData(frames[cur].data, 0, 0);
+    $("scrub").value = cur;
+    $("counter").textContent = `frame ${String(cur).padStart(4, "0")} / ${String(frames.length - 1).padStart(4, "0")}`;
+    $("fname").textContent = frames[cur].name;
+  }
+  function tick() {
+    if (cur + 1 >= frames.length) { if ($("loop").checked) show(0); else { stop(); return; } }
+    else show(cur + 1);
+  }
+  function play() {
+    if (frames.length < 2) return;
+    playing = true; $("play").textContent = "Pause";
+    clearInterval(timer); timer = setInterval(tick, 1000 / +$("fps").value);
+  }
+  function stop() { playing = false; $("play").textContent = "Play"; clearInterval(timer); }
+
+  $("play").onclick = () => playing ? stop() : play();
+  $("next").onclick = () => { stop(); show(cur + 1); };
+  $("prev").onclick = () => { stop(); show(cur - 1); };
+  $("first").onclick = () => { stop(); show(0); };
+  $("last").onclick = () => { stop(); show(frames.length - 1); };
+  $("scrub").oninput = e => { stop(); show(+e.target.value); };
+  $("fps").onchange = () => { if (playing) play(); };
+  $("gridToggle").onchange = e => $("grid").classList.toggle("on", e.target.checked);
+  $("dirInput").onchange = e => loadFiles(e.target.files);
+  $("fileInput").onchange = e => loadFiles(e.target.files);
+
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "SELECT") return;
+    if (e.code === "Space") { e.preventDefault(); playing ? stop() : play(); }
+    else if (e.key === "ArrowRight") { stop(); show(cur + 1); }
+    else if (e.key === "ArrowLeft") { stop(); show(cur - 1); }
+    else if (e.key === "Home") { stop(); show(0); }
+    else if (e.key === "End") { stop(); show(frames.length - 1); }
+    else if (e.key === "g" || e.key === "G") { const g = $("gridToggle"); g.checked = !g.checked; g.onchange({ target: g }); }
+  });
+
+  // pixel inspector
+  canvas.addEventListener("mousemove", e => {
+    if (!frames.length) return;
+    const r = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - r.left) / r.width * W), y = Math.floor((e.clientY - r.top) / r.height * H);
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    const d = frames[cur].data.data, i = (y * W + x) * 4;
+    const hex = "#" + [d[i], d[i + 1], d[i + 2]].map(v => v.toString(16).padStart(2, "0")).join("").toUpperCase();
+    $("pix").innerHTML = `<span class="swatch" style="background:${hex}"></span>col ${x}, row ${y} &middot; ${hex} ${HEX2NAME[hex] || ""}`;
+  });
+  canvas.addEventListener("mouseleave", () => { $("pix").textContent = "–"; });
+
+  // drag & drop (files or a folder)
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", async e => {
+    const items = [...(e.dataTransfer.items || [])];
+    const entries = items.map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+    if (entries.some(en => en.isDirectory)) {
+      const files = [];
+      const walk = en => new Promise(res => {
+        if (en.isFile) en.file(f => { files.push(f); res(); });
+        else {
+          const reader = en.createReader();
+          const batch = () => reader.readEntries(async ents => {
+            if (!ents.length) { res(); return; }
+            for (const x of ents) await walk(x);
+            batch();
+          });
+          batch();
+        }
+      });
+      for (const en of entries) await walk(en);
+      loadFiles(files);
+    } else loadFiles(e.dataTransfer.files);
+  });
+})();
+</script>
+</body>
+</html>
