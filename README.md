@@ -4,6 +4,10 @@ Write the game described in [tasks/T3.md](tasks/T3.md) for the VESPER-16 handhel
 The kit contains the console's assembler + emulator and two tiny example programs.
 There is no manual — working out how the console behaves is part of the exercise.
 
+<p align="center"><img src="media/t3-squash.gif" alt="T3 squash running on VESPER-16: the paddle returns the ball, the green score bar grows, a miss resets the game" width="384"></p>
+<p align="center"><sub>What a finished T3 looks like (12 s from a real solution, frames 600–960, scaled 6×):
+the paddle returns the ball and the green score bar grows; a miss resets the score and relaunches the ball.</sub></p>
+
 ## Requirements
 
 - **Linux x86-64** (`bin/vesper`) or **Windows x64** (`bin/vesper.exe`). Both are self-contained
@@ -52,6 +56,7 @@ examples/fill.vsa   small sample program
 examples/pixel.vsa  small sample program
 tasks/T3.md         the game task
 player.html         offline viewer for --out folders and --gif files
+media/              the demo GIF above
 solutions/          save your game here
 locked/             later workshop parts (password-protected)
 unlock.py           opens a locked part into unlocked/part-<n>/
