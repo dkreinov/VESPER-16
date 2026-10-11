@@ -8,6 +8,19 @@ There is no manual — working out how the console behaves is part of the exerci
 <p align="center"><sub>What a finished T3 looks like (12 s from a real solution, frames 600–960, scaled 6×):
 the paddle returns the ball and the green score bar grows; a miss resets the score and relaunches the ball.</sub></p>
 
+## Design concepts
+
+These illustrations show a possible physical design for the VESPER-16 processor and handheld
+console. They are design concepts; the development kit runs the machine in an emulator.
+
+![VESPER-16 processor package concept](media/vesper16-processor-concept.png)
+
+*Processor package concept.*
+
+![VESPER-16 exploded handheld console concept](media/vesper16-console-concept.png)
+
+*Exploded handheld console concept, showing the display, controls, board and V16 processor.*
+
 ## Requirements
 
 - **Linux x86-64** (`bin/vesper`) or **Windows x64** (`bin/vesper.exe`). Both are self-contained
@@ -56,7 +69,7 @@ examples/fill.vsa   small sample program
 examples/pixel.vsa  small sample program
 tasks/T3.md         the game task
 player.html         offline viewer for --out folders and --gif files
-media/              the demo GIF above
+media/              the demo GIF and design concept images above
 solutions/          save your game here
 locked/             later workshop parts (password-protected)
 unlock.py           opens a locked part into unlocked/part-<n>/
