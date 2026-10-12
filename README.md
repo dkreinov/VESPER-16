@@ -66,7 +66,8 @@ and roughly what that would cost at API prices, and scores it with the grader fr
 ```sh
 python measure.py start --label stage1          # just before you give the agent the task
 #   ... the agent works ...
-python measure.py stop                          # when the agent says it is done
+#   when it is done, type /status in the agent and copy its session ID
+python measure.py stop --session <ID>           # time, emulator runs, tokens, cost
 python measure.py show                          # all your attempts, from results.csv
 python measure.py grade                         # after part 4 is unlocked: scores attempts not graded yet
 ```
@@ -74,10 +75,12 @@ python measure.py grade                         # after part 4 is unlocked: scor
 Unlock the grader (part 4) only **after** the agent has finished, so it can't read it.
 
 - Use `--task T4` with `start` for the bonus game.
-- Start your agent **inside this folder**, so its session can be matched to the attempt.
-- Tokens are read from the agent's own logs on your computer: Claude Code and Codex are supported.
-  For another tool, read the numbers from its usage screen and run
-  `python measure.py stop --tokens-in N --tokens-out M --model <model>`.
+- The session ID tells `measure.py` which agent log to read (Codex: `/status` → Session/Thread;
+  Claude Code: `/status` → Session ID). It reads only the part of that session between `start` and `stop`,
+  so stages 1 and 2 can share one session. Without `--session` it asks for the ID.
+- Other agents (Cursor, …): press Enter at the ID prompt and type the token numbers from the tool's
+  usage screen, or use `--tokens-in N --tokens-out M --model <model>`.
+- Forgot something? `python measure.py redo --session <ID> [--since HH:MM]` re-measures the last attempt.
 - Cost uses the list prices in `measure.py`. To price another model (for example the one Codex
   uses), create `prices.json` here: `{"<model-name>": {"in": 1.25, "cache_read": 0.125, "out": 10}}`
   (US$ per million tokens).
