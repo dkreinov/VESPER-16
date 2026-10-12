@@ -5,7 +5,7 @@
     python measure.py stop [--session ID]                when the agent says it is done (ID from /status)
     python measure.py show                               all your measured attempts (results.csv)
     python measure.py grade                              (re)grade attempts that have no score yet
-    python measure.py redo [--session ID] [--since HH:MM] re-measure the last attempt
+    python measure.py redo [--session ID] [--since HH:MM] [--until HH:MM]   re-measure the last attempt
 
 Works with any agent. Time and emulator runs are always measured (bin/vesper logs every command
 to .vesper-runs.log). Tokens are read from the agent's own session logs on this computer:
@@ -14,7 +14,7 @@ Claude Code (~/.claude/projects) and Codex (~/.codex/sessions). For any other ag
 with the numbers from that tool's usage screen. If part 4 is unlocked, `stop` also grades.
 Standard library only; Linux, macOS and Windows.
 """
-import argparse, csv, datetime as dt, glob, json, os, subprocess, sys, time
+import argparse, csv, datetime as dt, glob, json, os, re, subprocess, sys, time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(KIT, ".measure", "state.json")
@@ -109,10 +109,7 @@ def claude_sessions(t0, t1, sid=None):
         files = [f for f in files if sid.lower() in f.lower()]
     out = []
     for fp in files:
-        try:
-            if os.path.getmtime(fp) < t0:
-                continue
-        except OSError:
+        if not sid and not recent(fp, t0):
             continue
         per_msg, models, cwd, first, last = {}, set(), None, None, None
         for d in jsonl(fp):
@@ -170,9 +167,24 @@ def codex_home():
     return os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
 
 
+def recent(fp, t0, days=7):
+    """Cheap pre-filter. Windows may not update the modified time of a log the agent keeps open,
+    so also accept files whose name (rollout-YYYY-MM-DD...) is from the last few days."""
+    try:
+        if os.path.getmtime(fp) >= t0 - 86400:
+            return True
+    except OSError:
+        return False
+    m = re.search(r"(\d{4}-\d{2}-\d{2})T", os.path.basename(fp))
+    if m:
+        d = dt.datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        return (dt.date.fromtimestamp(t0) - d).days <= days
+    return False
+
+
 def root_of(fp, t0):
     try:
-        if os.path.getmtime(fp) < t0:
+        if not recent(fp, t0):
             return None
         with open(fp, encoding="utf-8", errors="replace") as f:
             p = (json.loads(f.readline()).get("payload") or {})
@@ -189,10 +201,7 @@ def codex_sessions(t0, t1, sid=None):
         files = [f for f in files if sid.lower() in os.path.basename(f).lower() or (root_of(f, t0) or "-").startswith(sid.lower())]
     out = []
     for fp in files:
-        try:
-            if os.path.getmtime(fp) < t0:
-                continue
-        except OSError:
+        if not sid and not recent(fp, t0):
             continue
         cwd, before, during, models, first, last = None, None, None, set(), None, None
         for d in jsonl(fp):
@@ -204,7 +213,12 @@ def codex_sessions(t0, t1, sid=None):
                 cwd = p.get("cwd") or cwd
                 if p.get("model"):
                     models.add(p["model"])
-            u = find_total_usage(p) if typ == "event_msg" else None
+            if typ == "event_msg":
+                u = find_total_usage(p)
+            elif typ == "token_usage_record":            # newer Codex: per-response record with thread totals
+                u = p.get("thread_token_usage") if isinstance(p.get("thread_token_usage"), dict) else None
+            else:
+                u = None
             if not u:
                 continue
             ts = parse_ts(d.get("timestamp"))
@@ -442,11 +456,15 @@ def cmd_redo(a):
         if not rows:
             sys.exit("nothing to redo - stop an attempt first")
         r = rows[-1]   # older measure.py: no saved window; use the row's start minute, end now
-        st = dict(label=r["label"], task=r["task"],
-                  start=dt.datetime.strptime(r["started"], "%Y-%m-%d %H:%M").timestamp(), stop=now())
+        t = dt.datetime.strptime(r["started"], "%Y-%m-%d %H:%M").timestamp()
+        st = dict(label=r["label"], task=r["task"], start=t,
+                  stop=t + (float(r["wall_min"]) + 1) * 60 if r.get("wall_min") else now())
+    day = dt.datetime.fromtimestamp(st["start"]).date()
+    hm = lambda x: dt.datetime.combine(day, dt.datetime.strptime(x, "%H:%M").time()).timestamp()
     if a.since:
-        day = dt.datetime.fromtimestamp(st["start"]).date()
-        st["start"] = dt.datetime.combine(day, dt.datetime.strptime(a.since, "%H:%M").time()).timestamp()
+        st["start"] = hm(a.since)
+    if a.until:
+        st["stop"] = hm(a.until)
     row = measure(st["start"], st["stop"], st["label"], st["task"], a)
     if rows and rows[-1]["label"] == st["label"]:
         if not row["score"]:
@@ -474,6 +492,43 @@ def cmd_grade(a):
         if score:
             print("   (grades the current solutions/%s.vsa)" % r["task"])
     save_rows(rows)
+
+
+def cmd_inspect(a):
+    """Diagnostics: what the session log looks like, for reporting problems."""
+    import collections
+    sid = clean_id(a.session)
+    files = [f for f in glob.glob(os.path.join(codex_home(), "**", "*.jsonl"), recursive=True) +
+             glob.glob(os.path.join(claude_home(), "projects", "**", "*.jsonl"), recursive=True)
+             if sid and sid.lower() in f.lower()]
+    print("searched %s and %s" % (codex_home(), os.path.join(claude_home(), "projects")))
+    if not files:
+        print("no file name contains", sid)
+    t0 = None
+    if a.since:
+        t0 = dt.datetime.combine(dt.date.today(), dt.datetime.strptime(a.since, "%H:%M").time()).timestamp()
+    for fp in files:
+        print("\nfile:", fp, " modified:", dt.datetime.fromtimestamp(os.path.getmtime(fp)).strftime("%Y-%m-%d %H:%M"))
+        types, n, first, last, tok = collections.Counter(), 0, None, None, []
+        for d in jsonl(fp):
+            n += 1
+            p = d.get("payload") if isinstance(d.get("payload"), dict) else {}
+            key = "%s/%s" % (d.get("type"), p.get("type", "")) if p.get("type") else str(d.get("type"))
+            types[key] += 1
+            ts = parse_ts(d.get("timestamp"))
+            if ts:
+                first = ts if first is None else min(first, ts)
+                last = ts if last is None else max(last, ts)
+            if "token" in key or "usage" in json.dumps(p)[:4000]:
+                if len(tok) < 3 or (t0 and ts and ts >= t0 and len(tok) < 6):
+                    tok.append((d.get("timestamp"), key, json.dumps(p)[:300]))
+        fmt = lambda t: dt.datetime.fromtimestamp(t).strftime("%H:%M:%S") if t else "?"
+        print("lines: %d   first: %s   last: %s (local time)" % (n, fmt(first), fmt(last)))
+        for k, v in types.most_common(15):
+            print("   %5d  %s" % (v, k))
+        print("token-like lines (first few):")
+        for t in tok:
+            print("  ", t[0], t[1], t[2])
 
 
 def cmd_show(a):
@@ -504,11 +559,15 @@ def main():
         s.add_argument("--session", help="agent session ID from /status (Codex or Claude Code)")
         if name == "redo":
             s.add_argument("--since", help="HH:MM - attempt started at this local time")
+            s.add_argument("--until", help="HH:MM - attempt ended at this local time")
     sub.add_parser("show")
+    s = sub.add_parser("inspect")
+    s.add_argument("--session", required=True)
+    s.add_argument("--since")
     s = sub.add_parser("grade")
     s.add_argument("--last", action="store_true", help="regrade the latest attempt")
     a = ap.parse_args()
-    {"start": cmd_start, "stop": cmd_stop, "redo": cmd_redo, "show": cmd_show, "grade": cmd_grade}[a.cmd](a)
+    {"start": cmd_start, "stop": cmd_stop, "redo": cmd_redo, "show": cmd_show, "inspect": cmd_inspect, "grade": cmd_grade}[a.cmd](a)
 
 
 if __name__ == "__main__":
