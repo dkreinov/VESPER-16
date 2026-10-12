@@ -1,2 +1,6 @@
 out/
 unlocked/
+.measure/
+results.csv
+prices.json
+.vesper-runs.log

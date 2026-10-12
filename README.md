@@ -33,7 +33,7 @@ console. They are design concepts; the development kit runs the machine in an em
 - **Linux x86-64** (`bin/vesper`) or **Windows x64** (`bin/vesper.exe`). Both are self-contained
   executables and behave identically. macOS: use a Linux VM or container.
 - A web browser for the frame viewer (`player.html`).
-- Python 3 — only for `unlock.py` (and the grader, which also needs numpy), used later in the workshop.
+- Python 3 — for `measure.py` and `unlock.py` (the grader also needs numpy: `pip install numpy`).
 
 ## Start
 
@@ -58,6 +58,28 @@ and drop the output folder (or a `--gif` file) onto it to watch the frames.
 Where the task files write `bin/vesper`, Windows users run `.\bin\vesper.exe`.
 Save your program as `solutions/T3.vsa` (bonus: `solutions/T4.vsa`).
 
+## Measuring an attempt
+
+`measure.py` records how long an attempt took, how many emulator runs it used, the tokens it used
+and roughly what that would cost at API prices, and grades it once part 4 is unlocked.
+
+```sh
+python measure.py start --label stage1          # just before you give the agent the task
+#   ... the agent works ...
+python measure.py stop                          # when the agent says it is done
+python measure.py show                          # all your attempts, from results.csv
+```
+
+- Use `--task T4` with `start` for the bonus game.
+- Start your agent **inside this folder**, so its session can be matched to the attempt.
+- Tokens are read from the agent's own logs on your computer: Claude Code and Codex are supported.
+  For another tool, read the numbers from its usage screen and run
+  `python measure.py stop --tokens-in N --tokens-out M --model <model>`.
+- Cost uses the list prices in `measure.py`. To price another model (for example the one Codex
+  uses), create `prices.json` here: `{"<model-name>": {"in": 1.25, "cache_read": 0.125, "out": 10}}`
+  (US$ per million tokens).
+- Every `bin/vesper` command is logged to `.vesper-runs.log`; leave that file alone.
+
 ## Rules for the exercise
 
 - Leave `bin/`, `examples/` and `tasks/` unchanged.
@@ -81,4 +103,5 @@ media/              the demo GIFs and design concept images above
 solutions/          save your game here
 locked/             later workshop parts (password-protected)
 unlock.py           opens a locked part into unlocked/part-<n>/
+measure.py          measures an attempt: time, emulator runs, tokens, cost, score
 ```
