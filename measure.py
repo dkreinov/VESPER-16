@@ -326,20 +326,28 @@ def run_times(t0, t1):
     return ts
 
 
+def clean_id(x):
+    """Accept a bare session ID or a deep link such as codex://threads/<id>."""
+    x = (x or "").strip().strip('"').rstrip("/")
+    return x.rsplit("/", 1)[-1] if "/" in x else x
+
+
 def measure(t0, t1, label, task, a):
     note = []
     chosen, agent, models = [], "other", set()
     tot = dict(i=0, cw=0, cr=0, o=0)
-    sid = (a.session or "").strip()
+    sid = clean_id(a.session)
     if a.tokens_in is None and not sid and sys.stdin.isatty():
         print("\n  Session ID of the agent (Codex: /status -> Session/Thread; Claude Code: /status -> Session ID).")
-        sid = input("  Paste it, or press Enter to skip: ").strip()
+        sid = clean_id(input("  Paste it (or the codex://threads/... link), or press Enter to skip: "))
     if a.tokens_in is None:
         if sid:
             chosen = claude_sessions(t0, t1, sid) + codex_sessions(t0, t1, sid)
             if not chosen:
-                note.append("session %s has no activity in this attempt's time window (looked in %s and %s)"
-                            % (sid, os.path.join(claude_home(), "projects"), os.path.join(codex_home(), "sessions")))
+                msg = ("session %s: no log with activity in this time window under %s or %s"
+                       % (sid, os.path.join(claude_home(), "projects"), os.path.join(codex_home(), "sessions")))
+                print("  " + msg)
+                note.append(msg)
         else:   # no ID: accept only one unambiguous session started in this folder
             cands = [c for c in claude_sessions(t0, t1) + codex_sessions(t0, t1) if relation(c["cwd"]) == "kit"]
             def root(c):
