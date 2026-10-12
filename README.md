@@ -61,14 +61,17 @@ Save your program as `solutions/T3.vsa` (bonus: `solutions/T4.vsa`).
 ## Measuring an attempt
 
 `measure.py` records how long an attempt took, how many emulator runs it used, the tokens it used
-and roughly what that would cost at API prices, and grades it once part 4 is unlocked.
+and roughly what that would cost at API prices, and scores it with the grader from part 4.
 
 ```sh
 python measure.py start --label stage1          # just before you give the agent the task
 #   ... the agent works ...
 python measure.py stop                          # when the agent says it is done
 python measure.py show                          # all your attempts, from results.csv
+python measure.py grade                         # after part 4 is unlocked: scores attempts not graded yet
 ```
+
+Unlock the grader (part 4) only **after** the agent has finished, so it can't read it.
 
 - Use `--task T4` with `start` for the bonus game.
 - Start your agent **inside this folder**, so its session can be matched to the attempt.

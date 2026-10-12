@@ -4,6 +4,7 @@
     python measure.py start --label stage1 [--task T3]   before you give the agent the task
     python measure.py stop                               when the agent says it is done
     python measure.py show                               all your measured attempts (results.csv)
+    python measure.py grade                              (re)grade attempts that have no score yet
 
 Works with any agent. Time and emulator runs are always measured (bin/vesper logs every command
 to .vesper-runs.log). Tokens are read from the agent's own session logs on this computer:
@@ -238,7 +239,7 @@ def grade(task):
     g = os.path.join(KIT, "unlocked", "part-4", "grader", "grade.py")
     sol = os.path.join(KIT, "solutions", task + ".vsa")
     if not os.path.exists(g):
-        return "", "grader locked"
+        return "", "not graded yet (grader locked): unlock part 4 after the run, then `python measure.py grade`"
     if not os.path.exists(sol):
         return "0", "no solutions/%s.vsa" % task
     exe = os.path.join(KIT, "bin", "vesper.exe" if os.name == "nt" else "vesper")
@@ -333,6 +334,26 @@ def cmd_stop(a):
     print("\n  saved to results.csv - `python measure.py show` lists all attempts\n")
 
 
+def cmd_grade(a):
+    # Unlock part 4 only after the agent has finished (it must not see the grader), then run this.
+    if not os.path.exists(RESULTS):
+        sys.exit("no results yet")
+    rows = list(csv.DictReader(open(RESULTS, encoding="utf-8")))
+    todo = [r for r in rows if not r["score"]] or ([rows[-1]] if a.last else [])
+    if not todo:
+        print("every attempt already has a score (use --last to regrade the latest)")
+    for r in todo:
+        score, gnote = grade(r["task"])
+        r["score"] = score
+        print("%s: %s %s" % (r["label"], score or "-", gnote))
+        if score:
+            print("   (grades the current solutions/%s.vsa)" % r["task"])
+    with open(RESULTS, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+
+
 def cmd_show(a):
     if not os.path.exists(RESULTS):
         sys.exit("no results yet")
@@ -357,8 +378,10 @@ def main():
     s.add_argument("--tokens-out", type=int)
     s.add_argument("--model", help="model name for pricing (with --tokens-in)")
     sub.add_parser("show")
+    s = sub.add_parser("grade")
+    s.add_argument("--last", action="store_true", help="regrade the latest attempt")
     a = ap.parse_args()
-    {"start": cmd_start, "stop": cmd_stop, "show": cmd_show}[a.cmd](a)
+    {"start": cmd_start, "stop": cmd_stop, "show": cmd_show, "grade": cmd_grade}[a.cmd](a)
 
 
 if __name__ == "__main__":
