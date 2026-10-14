@@ -437,7 +437,12 @@ def measure(t0, t1, label, task, a):
     c = cost(tot, models)
     if c is None and (tot["i"] or tot["o"]):
         note.append("no price for %s - add it to prices.json" % (", ".join(sorted(models)) or "model"))
-    score, gnote = grade(task)
+    if getattr(a, "keep_score", None):
+        score, gnote = a.keep_score, ""
+    else:
+        if os.path.exists(os.path.join(KIT, "unlocked", "part-4", "grader", "grade.py")):
+            print("  grading solutions/%s.vsa ..." % task)
+        score, gnote = grade(task)
     if gnote:
         note.append(gnote)
     row = {
@@ -506,10 +511,10 @@ def cmd_redo(a):
         st["start"] = hm(a.since)
     if a.until:
         st["stop"] = hm(a.until)
+    same = rows and rows[-1]["label"] == st["label"]
+    a.keep_score = rows[-1]["score"] if same and rows[-1]["score"] else None   # no re-grading on redo
     row = measure(st["start"], st["stop"], st["label"], st["task"], a)
-    if rows and rows[-1]["label"] == st["label"]:
-        if not row["score"]:
-            row["score"] = rows[-1]["score"]
+    if same:
         rows[-1] = row
     else:
         rows.append(row)
