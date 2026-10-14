@@ -81,9 +81,10 @@ Unlock the grader (part 4) only **after** the agent has finished, so it can't re
 - Other agents (Cursor, …): press Enter at the ID prompt and type the token numbers from the tool's
   usage screen, or use `--tokens-in N --tokens-out M --model <model>`.
 - Forgot something? `python measure.py redo --session <ID> [--since HH:MM]` re-measures the last attempt.
-- Cost uses the list prices in `measure.py`. To price another model (for example the one Codex
-  uses), create `prices.json` here: `{"<model-name>": {"in": 1.25, "cache_read": 0.125, "out": 10}}`
-  (US$ per million tokens).
+- Cost is an estimate at API list prices (Oct 2026) for Claude, OpenAI/Codex, Cursor (Composer, Grok) and
+  Gemini models, listed at the top of `measure.py`. If you're on a subscription, read it as "what this would cost
+  on the API". For Cursor, give the model with `--model`, e.g. `--model composer-2.5`. To add or correct a price,
+  create `prices.json` here: `{"<model-name>": {"in": 2.0, "cache_read": 0.2, "out": 10}}` (US$ per million tokens).
 - Every `bin/vesper` command is logged to `.vesper-runs.log`; leave that file alone.
 
 ## Rules for the exercise

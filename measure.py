@@ -23,20 +23,60 @@ RESULTS = os.path.join(KIT, "results.csv")
 RUNLOG = os.path.join(KIT, ".vesper-runs.log")
 PRICES = os.path.join(KIT, "prices.json")
 
-# USD per million tokens. API list prices (Claude: Anthropic first-party API, Oct 2026).
-# Subscription users don't pay per token - read cost as "what this would cost on the API".
-# Add your models (e.g. the OpenAI model Codex uses) to prices.json next to this script:
-#   {"gpt-x": {"in": 1.25, "cache_read": 0.125, "out": 10}}   (longest matching prefix wins)
+# USD per million tokens, API list prices as of 2026-10-14 (standard tier, short prompts). Longest matching
+# prefix of the model name wins. Override or add models in prices.json next to this script:
+#   {"model-name": {"in": 2.0, "cache_read": 0.2, "cache_write": 2.5, "out": 10}}
+# Subscription users (ChatGPT, Claude, Cursor plans) don't pay per token: read the cost as "what this
+# would cost on the API". Accuracy target for the workshop: +-20%.
+#   Claude:  Anthropic API price list (claude-api reference, Oct 2026). Claude Code writes its cache with a
+#            1-hour lifetime, billed at 2x input, so cache_write = 2 x in.
+#   OpenAI (Codex): openai.com could not be checked directly; GPT-6.1 Sol per OpenAI's launch post as
+#            reported by aggregators, the rest from aggregators (OpenRouter, Requesty, CloudZero, ...).
+#            GPT-5.6 Sol: $4/$20 is a promotional price (to Nov 21 2026; list $5/$30).
+#            GPT-6 Luna: most sources $0.10/$0.50, one says $0.20/$1.20 - unconfirmed.
+#   Cursor:  first-party models (Composer, Grok) from Cursor's docs as quoted by third parties; Cursor bills
+#            third-party models (Claude, GPT, Gemini) at the provider's list price (+$0.25/M on Teams).
+#   Gemini:  aggregators; Gemini 3.1 Pro rises to $4/$18 above 200K-token prompts.
 DEFAULT_PRICES = {
-    "claude-fable-5":  {"in": 10.0, "cache_read": 1.00, "out": 50.0},
-    "claude-opus-5-5": {"in": 4.0,  "cache_read": 0.20, "out": 20.0},
-    "claude-opus-5":   {"in": 5.0,  "cache_read": 0.50, "out": 25.0},
-    "claude-opus-4":   {"in": 5.0,  "cache_read": 0.50, "out": 25.0},
-    "claude-sonnet-5": {"in": 2.0,  "cache_read": 0.20, "out": 10.0},
-    "claude-sonnet-4": {"in": 3.0,  "cache_read": 0.30, "out": 15.0},
-    "claude-haiku-5":  {"in": 0.10, "cache_read": 0.01, "out": 0.50},
-    "claude-haiku-4":  {"in": 1.0,  "cache_read": 0.10, "out": 5.0},
+    # Anthropic (Claude Code; also selectable in Cursor)
+    "claude-fable-5-1":  {"in": 10.0, "cache_read": 0.25, "out": 50.0},
+    "claude-fable-5":    {"in": 10.0, "cache_read": 1.00, "out": 50.0},
+    "claude-mythos-5":   {"in": 10.0, "cache_read": 0.25, "out": 50.0},
+    "claude-opus-5-5":   {"in": 4.0,  "cache_read": 0.20, "out": 20.0},
+    "claude-opus-5":     {"in": 5.0,  "cache_read": 0.50, "out": 25.0},
+    "claude-opus-4":     {"in": 5.0,  "cache_read": 0.50, "out": 25.0},
+    "claude-sonnet-5":   {"in": 2.0,  "cache_read": 0.20, "out": 10.0},
+    "claude-sonnet-4":   {"in": 3.0,  "cache_read": 0.30, "out": 15.0},
+    "claude-haiku-5":    {"in": 0.10, "cache_read": 0.01, "out": 0.50},
+    "claude-haiku-4":    {"in": 1.0,  "cache_read": 0.10, "out": 5.0},
+    # OpenAI (Codex; also selectable in Cursor)
+    "gpt-6.1-sol":       {"in": 2.0,  "cache_read": 0.10, "cache_write": 2.50, "out": 10.0},
+    "gpt-6-astra":       {"in": 10.0, "cache_read": 1.00, "cache_write": 12.50, "out": 50.0},
+    "gpt-6-sol":         {"in": 2.0,  "cache_read": 0.20, "out": 10.0},
+    "gpt-6-luna":        {"in": 0.10, "cache_read": 0.01, "cache_write": 0.125, "out": 0.50},
+    "gpt-5.6-sol":       {"in": 4.0,  "cache_read": 0.40, "out": 20.0},
+    "gpt-5.6-terra":     {"in": 2.0,  "cache_read": 0.20, "cache_write": 2.50, "out": 12.0},
+    "gpt-5.6-luna":      {"in": 0.20, "cache_read": 0.02, "out": 1.20},
+    # Cursor's own models (enter the name with --model, e.g. --model composer-2.5)
+    "composer-2.5":      {"in": 0.50, "cache_read": 0.20, "out": 2.50},
+    "composer-2.5-fast": {"in": 3.0,  "out": 15.0},
+    "grok-4.7":          {"in": 2.0,  "out": 6.0},
+    "grok-4.6":          {"in": 2.0,  "cache_read": 0.50, "out": 6.0},
+    "grok-4.6-fast":     {"in": 4.0,  "cache_read": 1.00, "out": 12.0},
+    "grok-4.5":          {"in": 2.0,  "cache_read": 0.50, "out": 6.0},
+    # Google (selectable in Cursor)
+    "gemini-3.1-pro":    {"in": 2.0,  "cache_read": 0.20, "out": 12.0},
+    "gemini-3.5-flash":  {"in": 1.50, "out": 9.0},
+    "gemini-3.1-flash-lite": {"in": 0.25, "out": 1.50},
 }
+
+
+def cache_write_price(model, pr):
+    if "cache_write" in pr:
+        return pr["cache_write"]
+    return pr["in"] * (2.0 if model.startswith("claude") else 1.25)
+
+
 FIELDS = ["label", "task", "agent", "models", "wall_min", "agent_active_min", "emulator_runs",
           "tokens_in", "tokens_cache_write", "tokens_cache_read", "tokens_out", "cost_usd", "score",
           "started", "note"]
@@ -263,22 +303,23 @@ def cost(tot, models):
     if not keys:
         return None
     pr = table[max(keys, key=len)]
-    cw = pr.get("cache_write", pr["in"] * 1.25)
+    cw = cache_write_price(m, pr)
     return (tot["i"] * pr["in"] + tot["cw"] * cw + tot["cr"] * pr.get("cache_read", pr["in"] * 0.1)
             + tot["o"] * pr["out"]) / 1e6
 
 
 def cost_multi(tot, models):
     # Several models (e.g. a main agent plus helper agents): price everything at the most expensive one.
-    table, best = prices(), None
+    table, best, bm = prices(), None, ""
     for m in models:
         keys = [k for k in table if m.startswith(k)]
         if keys:
             pr = table[max(keys, key=len)]
-            best = pr if best is None or pr["out"] > best["out"] else best
+            if best is None or pr["out"] > best["out"]:
+                best, bm = pr, m
     if not best:
         return None
-    cw = best.get("cache_write", best["in"] * 1.25)
+    cw = cache_write_price(bm, best)
     return (tot["i"] * best["in"] + tot["cw"] * cw + tot["cr"] * best.get("cache_read", best["in"] * 0.1)
             + tot["o"] * best["out"]) / 1e6
 
