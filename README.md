@@ -33,7 +33,7 @@ console. They are design concepts; the development kit runs the machine in an em
 - **Linux x86-64** (`bin/vesper`) or **Windows x64** (`bin/vesper.exe`). Both are self-contained
   executables and behave identically. macOS: use a Linux VM or container.
 - A web browser for the frame viewer (`player.html`).
-- Python 3 — for `measure.py` and `unlock.py` (the grader also needs numpy: `pip install numpy`).
+- Python 3.9+ and git — for `workshop.py` (the grader also needs numpy: `pip install numpy`).
 
 ## Start
 
@@ -58,34 +58,40 @@ and drop the output folder (or a `--gif` file) onto it to watch the frames.
 Where the task files write `bin/vesper`, Windows users run `.\bin\vesper.exe`.
 Save your program as `solutions/T3.vsa` (bonus: `solutions/T4.vsa`).
 
-## Measuring an attempt
+## Workshop
 
-`measure.py` records how long an attempt took, how many emulator runs it used, the tokens it used
-and roughly what that would cost at API prices, and scores it with the grader from part 4.
+`workshop.py` runs the exercise in three stages and measures each one: agent time, emulator runs,
+tokens, estimated API cost and score.
 
 ```sh
-python measure.py start --label stage1          # just before you give the agent the task
-#   ... the agent works ...
-#   when it is done, type /status in the agent and copy its session ID
-python measure.py stop --session <ID>           # time, emulator runs, tokens, cost
-python measure.py show                          # all your attempts, from results.csv
-python measure.py grade                         # after part 4 is unlocked: scores attempts not graded yet
+python workshop.py doctor                 # check this computer (start of the workshop)
+python workshop.py new s1                 # stage 1: a clean folder + the prompt to paste
+python workshop.py done                   # the agent is done: measure, (grade), results form
+python workshop.py skill                  # stage 2: the prompt that asks the SAME agent to write a skill
+python workshop.py harvest                # stage 2 is done: take the skill out and check it
+python workshop.py new s3 --skill own     # stage 3: a clean folder with your skill, a NEW agent thread
+python workshop.py done
+python workshop.py unlock 4 <password>    # the grader - only after your agent is done
+python workshop.py grade                  # scores the stages that are not graded yet
+python workshop.py show                   # your table
+python workshop.py cleanup                # removes everything workshop.py made
 ```
 
-Unlock the grader (part 4) only **after** the agent has finished, so it can't read it.
+Open each run folder that `new` prints as its own project in your agent (Codex, Claude Code or Cursor),
+in a new thread, and paste the prompt. Stage 2 uses the same thread as stage 1.
 
-- Use `--task T4` with `start` for the bonus game.
-- The session ID tells `measure.py` which agent log to read (Codex: `/status` → Session/Thread;
-  Claude Code: `/status` → Session ID). It reads only the part of that session between `start` and `stop`,
-  so stages 1 and 2 can share one session. Without `--session` it asks for the ID.
-- Other agents (Cursor, …): press Enter at the ID prompt and type the token numbers from the tool's
-  usage screen, or use `--tokens-in N --tokens-out M --model <model>`.
-- Forgot something? `python measure.py redo --session <ID> [--since HH:MM]` re-measures the last attempt.
-- Cost is an estimate at API list prices (Oct 2026) for Claude, OpenAI/Codex, Cursor (Composer, Grok) and
-  Gemini models, listed at the top of `measure.py`. If you're on a subscription, read it as "what this would cost
-  on the API". For Cursor, give the model with `--model`, e.g. `--model composer-2.5`. To add or correct a price,
-  create `prices.json` here: `{"<model-name>": {"in": 2.0, "cache_read": 0.2, "out": 10}}` (US$ per million tokens).
-- Every `bin/vesper` command is logged to `.vesper-runs.log`; leave that file alone.
+**What workshop.py does:** copies the kit into run folders under `%LOCALAPPDATA%esper-runs`
+(Windows) or `~/vesper-runs`, runs `git init` there, runs the emulator and the grader, reads your agent's
+local session logs to count tokens (it finds them by the `Workshop run:` line in the prompt), and opens the
+results form in your browser.
+**What it does not do:** it never starts or talks to an agent (you paste every prompt; the optional
+`shadow` command is the only exception), it sends nothing over the network, and it changes nothing
+outside its own folder unless you confirm.
+
+- The prompts are plain files in `prompts/`; read them before you paste them.
+- Cost is an estimate at API list prices (table at the top of `measure.py`); subscription users do not pay
+  per token. For Cursor, type the numbers from Cursor's usage screen when `done` asks.
+- If `doctor` shows RED, follow [MANUAL.md](MANUAL.md). More exercises: [HOMEWORK.md](HOMEWORK.md).
 
 ## Rules for the exercise
 
@@ -110,5 +116,9 @@ media/              the demo GIFs and design concept images above
 solutions/          save your game here
 locked/             later workshop parts (password-protected)
 unlock.py           opens a locked part into unlocked/part-<n>/
-measure.py          measures an attempt: time, emulator runs, tokens, cost, score
+workshop.py         runs and measures the workshop stages (uses measure.py)
+prompts/            the prompts you paste into your agent
+guides/             skill-writing guides used in stage 2 (with their licenses)
+MANUAL.md           the same exercise by hand
+HOMEWORK.md         more exercises
 ```
