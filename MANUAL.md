@@ -41,7 +41,7 @@ Work in a local folder, not on OneDrive. Replace `<name>` with your name and `<n
 
 ## Stage 3 — a new agent with the skill
 
-1. Make a second run folder as in stage 1, step 1, but with `$R3 = "$env:LOCALAPPDATAesper-manual\s3-<name><n>"`
+1. Make a second run folder as in stage 1, step 1, but with `$R3 = "$env:LOCALAPPDATA\vesper-manual\s3-<name><n>"`
    and `$R3` instead of `$R` in all commands of that step.
 2. Copy the skill into it:
    ```powershell
