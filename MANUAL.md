@@ -45,6 +45,7 @@ Work in a local folder, not on OneDrive. Replace `<name>` with your name and `<n
    and `$R3` instead of `$R` in all commands of that step.
 2. Copy the skill into it:
    ```powershell
+   mkdir $R3\.agents\skills, $R3\.claude\skills | Out-Null
    copy -Recurse $R\skill-out\vesper16 $R3\.agents\skills\vesper16
    copy -Recurse $R\skill-out\vesper16 $R3\.claude\skills\vesper16
    ```
