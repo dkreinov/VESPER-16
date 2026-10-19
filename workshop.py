@@ -799,6 +799,12 @@ def cmd_harvest(a):
     reg = Registry.load()
     act = reg.data.get("active")
     if not act or act["stage"] != "2":
+        done2 = [r for r in reg.data["rows"].values() if r["stage"] == "2"]
+        if done2:
+            rid = max(done2, key=lambda r: float(r["cutoff"] or 0))["run_id"]
+            sys.exit("Stage 2 of %s is already harvested.\n"
+                     "  Form again:  python workshop.py form %s 2\n"
+                     "  Next:        %s" % (rid, rid, next_cmd(act) if act else "python workshop.py new s3 --skill own"))
         sys.exit("harvest ends stage 2. Start stage 2 with:  python workshop.py skill")
     rid = act["run_id"]
     run = reg.data["runs"][rid]

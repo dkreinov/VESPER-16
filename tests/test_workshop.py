@@ -211,6 +211,9 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(reg.row(self.rid, "2")["skill_has_solution"], "removed")
         self.assertFalse(os.path.exists(
             os.path.join(self.w.ws_home(), ".skills", self.rid, "vesper16", "game.vsa")))
+        with self.assertRaises(SystemExit) as cm:               # harvest again -> points to form
+            run(self.w, "harvest", "--no-form")
+        self.assertIn("workshop.py form", str(cm.exception.code))
         run(self.w, "new", "s3", "--skill", "own")
         reg = self.w.Registry.load()
         s3 = reg.data["active"]["run_id"]
