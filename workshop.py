@@ -225,7 +225,8 @@ def cmd_doctor(a):
 
 # ------------------------------------------------------------------ run folders
 AGENTS_MD = "# Workshop run {run_id}\nThis folder is one isolated VESPER-16 workshop run.\n"
-SKILL_NOTE = "Skills are in .agents/skills/ and .claude/skills/. Read vesper16/SKILL.md before you start.\n"
+SKILL_NOTE = ("Skills are in .agents/skills/ (copies in .claude/skills/ and .cursor/skills/). "
+              "Read vesper16/SKILL.md before you start.\n")
 
 
 def git(folder, *args):
