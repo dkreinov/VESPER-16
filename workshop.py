@@ -150,6 +150,28 @@ def guides_dir():
     return d
 
 
+# The "builtin" stage-2 method: each agent's own skill creator (fallback: the bundled Anthropic guide).
+BUILTIN_HOW = {
+    "codex": "use your built-in skill creator: $skill-creator.",
+    "claude": ("use the skill-creator skill (the Claude Code plugin skill-creator@claude-plugins-official). "
+               "If you do not have it, read and follow the guide at {guide}/anthropic-skill-creator/SKILL.md."),
+    "cursor": ("use your built-in skill creator (/create-skill). If you do not have it, read and follow the "
+               "guide at {guide}/anthropic-skill-creator/SKILL.md."),
+}
+BUILTIN_STEP = {
+    "codex": "Codex: the prompt calls $skill-creator, Codex's built-in skill creator. Nothing to install.",
+    "claude": ("Claude Code: install the built-in skill creator first (once), in the same session:\n"
+               "         /plugin install skill-creator@claude-plugins-official\n"
+               "     (If you cannot install plugins, the prompt points the agent to the bundled guide.)"),
+    "cursor": ("Cursor: type /create-skill at the start of the message, then paste the prompt.\n"
+               "     (Older Cursor without /create-skill: the prompt points the agent to the bundled guide.)"),
+}
+
+
+def builtin_how(agent, guide):
+    return BUILTIN_HOW.get(agent, BUILTIN_HOW["claude"]).replace("{guide}", guide)
+
+
 def next_cmd(act):
     return {"1": "python workshop.py done", "2": "python workshop.py harvest",
             "3": "python workshop.py done"}[act["stage"]]
@@ -723,13 +745,19 @@ def cmd_skill(a):
     run = reg.data["runs"][rid]
     reg.data["active"] = {"run_id": rid, "stage": "2", "start": time.time()}
     reg.save()
-    prompt = render_prompt("stage2-" + run["method"], run_id=rid, guide=guides_dir().replace("\\", "/"))
+    guide = guides_dir().replace("\\", "/")
+    prompt = render_prompt("stage2-" + run["method"], run_id=rid, guide=guide,
+                           builtin_how=builtin_how(reg.data.get("agent", ""), guide))
     banner("STAGE 2 - the SAME agent writes a skill        run %s" % rid)
     print("\n  Skill-writing method: %s" % run["method"].upper())
     print("\n  1. Go back to the SAME thread as stage 1 (project %s)." % os.path.basename(run["folder"]))
-    print("\n  2. Copy everything between the PROMPT lines and send it.")
+    if run["method"] == "builtin":
+        print("\n  2. " + BUILTIN_STEP.get(reg.data.get("agent", ""), BUILTIN_STEP["claude"]))
+    else:
+        print("\n  2. The prompt names the guide the agent must follow (%s)." % run["method"])
+    print("\n  3. Copy everything between the PROMPT lines and send it.")
     prompt_block(prompt)
-    print("\n  3. Wait until the agent says the skill is written.")
+    print("\n  4. Wait until the agent says the skill is written.")
     next_box("python workshop.py harvest", "when the skill is written, run:")
     return 0
 

@@ -49,9 +49,16 @@ class PromptTest(unittest.TestCase):
         self.assertIn("solutions/T4.vsa", p)
         self.assertNotIn("{", p)
 
+    def test_builtin_names_each_agents_creator(self):
+        self.assertIn("$skill-creator", self.w.builtin_how("codex", "/g"))
+        self.assertIn("skill-creator@claude-plugins-official", self.w.builtin_how("claude", "/g"))
+        self.assertIn("/create-skill", self.w.builtin_how("cursor", "/g"))
+        self.assertIn("/g/anthropic-skill-creator/SKILL.md", self.w.builtin_how("cursor", "/g"))
+
     def test_stage2_variants_exist_and_no_bundling_ban(self):
         for m in self.w.METHODS:
-            p = self.w.render_prompt("stage2-" + m, run_id="s1-abcd", guide="/g")
+            p = self.w.render_prompt("stage2-" + m, run_id="s1-abcd", guide="/g",
+                                     builtin_how=self.w.builtin_how("codex", "/g"))
             self.assertIn("skill-out/vesper16", p)
             self.assertNotIn("Do not include your finished", p)
             self.assertNotIn("{", p)
