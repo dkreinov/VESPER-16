@@ -256,7 +256,7 @@ def make_run_folder(reg, run_id, task, skill_dir=None):
             with open(os.path.join(f, n), "w", encoding="utf-8") as fh:
                 fh.write(note)
         if skill_dir:
-            for sub in (".agents", ".claude"):
+            for sub in (".agents", ".claude", ".cursor"):     # Codex, Claude Code, Cursor
                 shutil.copytree(skill_dir, os.path.join(f, sub, "skills", "vesper16"))
         with open(os.path.join(f, ".gitignore"), "w") as fh:
             fh.write(".vesper-runs.log\nout/\n")
@@ -860,7 +860,7 @@ def cmd_shadow(a):
     reg.data["runs"][rid]["folder"] = f
     prompt = render_prompt("stage3" if skill else "stage1", task=a.task, run_id=rid)
     if agent == "codex":
-        cmd = ["codex", "exec", "--model", a.model, "--json", "--full-auto", "-C", f, prompt]
+        cmd = ["codex", "exec", "--model", a.model, "--json", "-s", "workspace-write", "--approve-for-me", "--skip-git-repo-check", "-C", f, prompt]
     else:
         cmd = ["claude", "-p", "--model", a.model, "--output-format", "json", "--permission-mode",
                "acceptEdits", "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep", prompt]
