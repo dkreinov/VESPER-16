@@ -226,6 +226,12 @@ class FlowTest(unittest.TestCase):
         self._solve(f3)
         run(self.w, "done", "--no-form")
         self.assertEqual(len(self.w.Registry.load().data["rows"]), 3)
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.w.show_compare(self.w.Registry.load())
+        self.assertIn("with skill", out.getvalue())
+        self.assertIn("Cost (USD)", out.getvalue())
 
     def test_detector_share_helper_vs_game(self):
         snap = os.path.join(self.tmp, "sol.vsa")

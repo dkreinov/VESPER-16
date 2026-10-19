@@ -13,7 +13,7 @@
 The tool never talks to an agent: you paste every prompt. It sends nothing over the network; it only
 opens the results form in your browser. See README.md (Workshop), MANUAL.md and HOMEWORK.md.
 """
-import argparse, csv, hashlib, io, json, os, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
+import argparse, csv, hashlib, io, json, math, os, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
 from urllib.parse import urlencode
 
 KIT = os.path.dirname(os.path.abspath(__file__))
@@ -631,6 +631,56 @@ def show_rows(rows):
         print("  ".join(str(v.get(n, ""))[:w].ljust(w) for n, w in cols))
 
 
+def _val(r, *keys):
+    """Sum of the fields, or None when all of them are empty."""
+    vals = [str((r or {}).get(k, "")).strip() for k in keys]
+    vals = [v for v in vals if v]
+    try:
+        return sum(float(v) for v in vals) if vals else None
+    except ValueError:
+        return None
+
+
+COMPARE = [("Time (min)", ("elapsed_min",), "%.1f"),
+           ("Emulator runs", ("emulator_runs",), "%d"),
+           ("Tokens in", ("tok_uncached", "tok_cache_read", "tok_cache_write"), "k"),
+           ("Tokens out", ("tok_out",), "k"),
+           ("Cost (USD)", ("cost_usd",), "%.2f"),
+           ("Score", ("score",), "%d")]
+
+
+def show_compare(reg, s3_id=None):
+    """Stage 1 (no skill) vs stage 3 (with the skill), plus what writing the skill cost."""
+    s3s = [r for r in reg.data["rows"].values() if r["stage"] == "3" and (not s3_id or r["run_id"] == s3_id)]
+    for r3 in sorted(s3s, key=lambda r: float(r["start"] or 0)):
+        parent = reg.data["runs"].get(r3["run_id"], {}).get("parent", "")
+        r1, r2 = reg.row(parent, "1"), reg.row(parent, "2")
+        if not r1:
+            continue
+        banner("YOUR RESULT: no skill (stage 1) vs WITH the skill (stage 3)")
+        if r1["task"] != r3["task"]:
+            print("\n  Note: different tasks (%s vs %s)." % (r1["task"], r3["task"]))
+        print("\n  %-15s %12s %12s %10s" % ("", "no skill", "with skill", "change"))
+        print("  %-15s %12s %12s %10s" % ("", r1["run_id"], r3["run_id"], ""))
+        print("  " + "-" * 52)
+        for name, keys, f in COMPARE:
+            a, b = _val(r1, *keys), _val(r3, *keys)
+            fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
+            ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" else ""
+            print("  %-15s %12s %12s %10s" % (name, fmt(a), fmt(b), ch))
+        c1, c2, c3 = _val(r1, "cost_usd"), _val(r2, "cost_usd"), _val(r3, "cost_usd")
+        if c2 is not None:
+            print("\n  Writing the skill (stage 2): %s min, $%.2f." % (r2.get("elapsed_min", "?"), c2))
+            if c1 is not None and c3 is not None:
+                if c1 > c3:
+                    print("  The skill pays for itself after %d tasks like this one (stage-2 cost / saving per task)."
+                          % max(1, math.ceil(c2 / (c1 - c3))))
+                else:
+                    print("  The skill did not save money on this task.")
+        if _val(r1, "score") is None or _val(r3, "score") is None:
+            print("\n  Score not graded yet:  python workshop.py unlock 4 <password>  then  python workshop.py grade")
+
+
 def finish_stage(reg, rid, stage, a, grade=True):
     run = reg.data["runs"][rid]
     act = reg.data.get("active")
@@ -711,6 +761,8 @@ def cmd_done(a):
     submit(row, a)
     if stage == "1":
         next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
+    else:
+        show_compare(reg, rid)
     return 0
 
 
@@ -731,6 +783,7 @@ def cmd_grade(a):
         reg.write_csv()
         print("%s stage %s: score %s" % (r["run_id"], r["stage"], score))
         submit(reg.row(r["run_id"], r["stage"]), a)
+    show_compare(reg)
     return 0
 
 
@@ -939,6 +992,7 @@ def cmd_show(a):
         print("No results yet.")
     else:
         show_rows(rows)
+        show_compare(reg)
     act = reg.data.get("active")
     if act:
         print("\nActive: stage %s of %s. Next:  %s" % (act["stage"], act["run_id"], next_cmd(act)))
