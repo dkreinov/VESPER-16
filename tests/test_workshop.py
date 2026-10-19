@@ -176,9 +176,10 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(int(r2["revision"]), 2)
 
     def test_full_flow(self):
-        t = time.time()
+        t0 = self.w.Registry.load().data["active"]["start"]      # events must be inside the stage window
+        time.sleep(0.05)
         fakes.codex_log("0c0d0e0f-0000-1111-2222-333344445555", self.f,
-                        [(t - 1, 10, 0, 1, "Workshop run: %s" % self.rid), (t, 2000, 1000, 50, "")])
+                        [(t0 + 0.01, 10, 0, 1, "Workshop run: %s" % self.rid), (t0 + 0.02, 2000, 1000, 50, "")])
         self._solve(self.f)
         run(self.w, "done", "--no-form")
         r1 = self.w.Registry.load().row(self.rid, "1")

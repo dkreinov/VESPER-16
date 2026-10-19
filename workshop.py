@@ -757,10 +757,6 @@ def detect_solution(skill_dir, snapshot):
     return found, (len(seen) / len(sol) if sol else 0.0)
 
 
-SOLUTION_WORDS = {"no": "no", "part": "part (helper code only, kept)",
-                  "yes": "yes (most of the game, kept)", "removed": "removed (moved aside)"}
-
-
 def cmd_skill(a):
     reg = Registry.load()
     act = reg.data.get("active")
@@ -816,25 +812,11 @@ def cmd_harvest(a):
         rmtree(dst)
     shutil.copytree(src, dst)
     found, share = detect_solution(dst, snap_path(rid, "1"))
-    status = "no"
+    # Record only: line overlap cannot tell a helper from a cached answer, so the learner is not asked.
+    # The percentage goes to the form for the debrief; --move-aside is for the instructor.
+    status = "%d%%" % round(share * 100)
     if found:
-        big = share >= GAME_SHARE
-        banner("CHECK - is your finished game inside the skill?")
-        print("\n  Files with code:\n")
-        for rel, why in found:
-            print("    %s\n        %s" % (rel, why))
-        print("\n  Together these files hold %d%% of your stage-1 game." % round(share * 100))
-        if big:
-            print("  That is most of the game. Stage 3 would only copy it.")
-            print("  Answer y, to move these files aside.")
-        else:
-            print("  That is a small part: probably helper code (for example a pixel routine),")
-            print("  not the game. A skill may keep helpers. Answer n, to keep them.")
-        print()
-        move = a.move_aside or ask("  Move these files aside, so stage 3 does not get the answer? [y/N] ",
-                                   "n").lower() == "y"
-        status = "yes" if big else "part"
-        if move:
+        if a.move_aside:
             rem = os.path.join(base, "removed")
             for rel, _ in found:
                 p = os.path.join(dst, rel)
@@ -859,7 +841,7 @@ def cmd_harvest(a):
     print()
     show_rows([row])
     print("\n  Skill:                    %s" % dst)
-    print("  Finished game in skill:   %s" % SOLUTION_WORDS.get(status, status))
+    print("  Stage-1 game code in skill: %s  (recorded for the debrief, nothing to do)" % status)
     submit(row, a)
     next_box("python workshop.py new s3 --skill own", "stage 3 (a NEW agent, NEW project), run:")
     return 0
