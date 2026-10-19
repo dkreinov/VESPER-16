@@ -90,6 +90,8 @@ class NewTest(unittest.TestCase):
         for n in ["locked", "unlocked", "measure.py", "workshop.py", "prompts", "guides"]:
             self.assertNotIn(n, names)
         self.assertEqual(os.listdir(os.path.join(f, "tasks")), ["T3.md"])
+        # only this system's binary (Git Bash treats bin/vesper and bin/vesper.exe as one file)
+        self.assertEqual(os.listdir(os.path.join(f, "bin")), ["vesper.exe" if os.name == "nt" else "vesper"])
         with open(os.path.join(f, "AGENTS.md")) as fh:
             self.assertIn(rid, fh.read())
         self.assertEqual(reg.data["runs"][rid]["method"], "plain")

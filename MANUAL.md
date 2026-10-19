@@ -8,14 +8,15 @@ Work in a local folder, not on OneDrive. Replace `<name>` with your name and `<n
 1. Make the run folder (PowerShell):
    ```powershell
    $R = "$env:LOCALAPPDATA\vesper-manual\s1-<name><n>"
-   mkdir $R\tasks, $R\solutions | Out-Null
-   copy -Recurse bin, examples $R
+   mkdir $R\tasks, $R\solutions, $R\bin | Out-Null
+   copy bin\vesper.exe $R\bin      # only the Windows binary: then bin/vesper works in every shell
+   copy -Recurse examples $R
    copy player.html $R
    copy tasks\T3.md $R\tasks
    New-Item $R\.vesper-runs.log -ItemType File | Out-Null
    cd $R; git init -q; git add -A; git -c user.name=v -c user.email=v@local commit -qm start; cd -
    ```
-   Linux: the same with `R=~/vesper-manual/s1-<name><n>`, `mkdir -p`, `cp -r`, `touch`.
+   Linux: the same with `R=~/vesper-manual/s1-<name><n>`, `mkdir -p`, `cp -r`, `touch`, and only `bin/vesper`.
 2. Write down the start time.
 3. Open the run folder as a new project in your agent. Start a new thread.
 4. Paste the text of `prompts/stage1.md`. Replace `{run_id}` with `s1-<name><n>` and `{task}` with `T3`.

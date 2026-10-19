@@ -241,8 +241,11 @@ def make_run_folder(reg, run_id, task, skill_dir=None):
         if os.path.isdir(f):
             rmtree(f)
         os.makedirs(os.path.join(f, "tasks"))
-        for n in ("bin", "examples"):
-            shutil.copytree(os.path.join(KIT, n), os.path.join(f, n))
+        shutil.copytree(os.path.join(KIT, "examples"), os.path.join(f, "examples"))
+        # Only this system's binary: on Windows, Git Bash treats bin/vesper and bin/vesper.exe as one file,
+        # so with vesper.exe alone `bin/vesper` works in Git Bash, PowerShell and cmd.
+        os.makedirs(os.path.join(f, "bin"))
+        shutil.copy2(vesper_bin(), os.path.join(f, "bin"))
         shutil.copy2(os.path.join(KIT, "player.html"), f)
         shutil.copy2(os.path.join(KIT, "tasks", task + ".md"), os.path.join(f, "tasks"))
         os.makedirs(os.path.join(f, "solutions"))
