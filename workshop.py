@@ -190,7 +190,7 @@ def cmd_doctor(a):
     except (OSError, subprocess.CalledProcessError):
         note(2, "FAIL", "git is missing (install Git for Windows / your distribution's git)")
     try:
-        r = subprocess.run([vesper_bin(), "--version"], capture_output=True, text=True, timeout=20,
+        r = subprocess.run([vesper_bin(), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
                            env=dict(os.environ, VESPER_NO_LOG="1"))
         if r.returncode == 0:
             note(0, "OK", "emulator: " + r.stdout.strip())
@@ -470,7 +470,7 @@ def grade_snapshot(task, path):
         return "0", "graded"
     try:
         r = subprocess.run([sys.executable, grader_path(), task, path, "--bin", vesper_bin()],
-                           capture_output=True, text=True, timeout=300, env=dict(os.environ, VESPER_NO_LOG="1"))
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, env=dict(os.environ, VESPER_NO_LOG="1"))
         return str(json.loads(r.stdout)["score"]), "graded"
     except Exception as e:  # noqa: BLE001
         print("grading failed: %s" % e)
