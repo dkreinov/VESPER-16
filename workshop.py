@@ -151,7 +151,7 @@ def vesper_bin():
 def global_skill_dirs():
     h = user_home()
     return [os.path.join(h, ".codex", "skills"), os.path.join(h, ".agents", "skills"),
-            os.path.join(h, ".claude", "skills")]
+            os.path.join(h, ".claude", "skills"), os.path.join(h, ".cursor", "skills")]
 
 
 def find_global_vesper_skills():

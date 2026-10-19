@@ -110,7 +110,7 @@ def main():
             ws("grade", "--no-form")
         put(step="finished", ok=True, rows=list(reg()["rows"].values()))
         log.write(ws("show"))
-    except Exception as e:  # noqa: BLE001
+    except BaseException as e:  # noqa: BLE001  (SystemExit too)
         put(ok=False, error=str(e))
         raise
     finally:
