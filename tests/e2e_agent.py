@@ -67,6 +67,8 @@ def main():
         log.write("[agent %s] %.0fs rc=%d\n%s\n%s\n" % (label, time.time() - t, r.returncode, r.stdout[-1500:],
                                                           r.stderr[-800:]))
         log.flush()
+        if r.returncode:
+            raise SystemExit("agent %s failed (rc=%d), see e2e.log" % (label, r.returncode))
         if a.agent == "claude":
             j = json.loads(r.stdout)
             status["claude_cost"][label] = j.get("total_cost_usd")
