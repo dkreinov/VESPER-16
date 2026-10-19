@@ -861,7 +861,7 @@ def cmd_shadow(a):
     reg.data["runs"][rid]["folder"] = f
     prompt = render_prompt("stage3" if skill else "stage1", task=a.task, run_id=rid)
     if agent == "codex":
-        cmd = ["codex", "exec", "--model", a.model, "--json", "-s", "workspace-write", "--approve-for-me", "--skip-git-repo-check", "-C", f, prompt]
+        cmd = ["codex", "exec", "--model", a.model, "--json", "--approve-for-me", "--skip-git-repo-check", "-C", f, prompt]
     else:
         cmd = ["claude", "-p", "--model", a.model, "--output-format", "json", "--permission-mode",
                "acceptEdits", "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep", prompt]

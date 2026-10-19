@@ -57,9 +57,9 @@ def main():
         else:
             m = ["-m", a.model] if a.model else []
             if resume:
-                cmd = ["codex", "exec", "resume", resume, "--json", "-s", "workspace-write", "--approve-for-me", "--skip-git-repo-check"] + m + [prompt]
+                cmd = ["codex", "exec", "resume", resume, "--json", "--approve-for-me", "--skip-git-repo-check"] + m + [prompt]
             else:
-                cmd = ["codex", "exec", "--json", "-s", "workspace-write", "--approve-for-me", "--skip-git-repo-check", "-C", folder] + m + [prompt]
+                cmd = ["codex", "exec", "--json", "--approve-for-me", "--skip-git-repo-check", "-C", folder] + m + [prompt]
         put(step="agent " + label)
         t = time.time()
         r = subprocess.run(cmd, cwd=folder, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=a.timeout * 60,
