@@ -447,14 +447,22 @@ def form_link(row, cfg=None):
 
 
 def submit(row, a):
-    link = form_link(row)
-    if link and not getattr(a, "no_form", False):
-        print("\nOpening the results form in your browser. The values are filled in: check them and click Submit.")
-        if webbrowser.open(link):
-            return
-        print("The browser did not open. Open this link:\n" + link)
-    # backup when there is no form (or no browser): a row to paste into a shared sheet
-    print("\nRow for the shared sheet (tab-separated):\n" + "\t".join(str(row.get(k, "")) for k in ROW_FIELDS))
+    cfg = load_config()
+    fields = list(cfg.get("fields", {}))
+    if not cfg.get("form_url"):
+        print("\nRow for the shared sheet (tab-separated):\n" + "\t".join(str(row.get(k, "")) for k in ROW_FIELDS))
+        return
+    short = cfg.get("short_url") or cfg["form_url"]
+    print("\nResults form: %s" % short)
+    print("Type these answers (question number. name: value):")
+    for i, k in enumerate(fields, 1):
+        print("  %2d. %-19s %s" % (i, k + ":", row.get(k, "")))
+    if getattr(a, "no_form", False):
+        return
+    if webbrowser.open(form_link(row, cfg)):
+        print("The form is opening in your browser with these values filled in. Check them and click Submit.")
+    else:
+        print("The browser did not open. Open the link above and type the values, then click Submit.")
 
 
 def sha256_file(p):

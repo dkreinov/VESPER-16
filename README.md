@@ -91,6 +91,9 @@ outside its own folder unless you confirm.
 - The prompts are plain files in `prompts/`; read them before you paste them.
 - Cost is an estimate at API list prices (table at the top of `measure.py`); subscription users do not pay
   per token. For Cursor, type the numbers from Cursor's usage screen when `done` asks.
+- **Results form:** https://forms.cloud.microsoft/r/xdtPcwF24a (Mobileye sign-in). `done`, `harvest` and
+  `grade` open it with your values filled in and also print the values with their question numbers; if the
+  browser does not open, open the link and type them.
 - If `doctor` shows RED, follow [MANUAL.md](MANUAL.md). More exercises: [HOMEWORK.md](HOMEWORK.md).
 
 ## Rules for the exercise

@@ -65,5 +65,8 @@ folder in an agent again.
 
 ## Results and cleanup
 
-- Type your numbers into the results form (the presenter shows the link).
+- Type your numbers into the results form: https://forms.cloud.microsoft/r/xdtPcwF24a
+  (alias, run_id such as `s1-<name><n>`, stage 1/2/3, revision 1, task T3, agent, model, method,
+  skill_has_solution yes/no, elapsed_min, emulator_runs, the token numbers, cost_usd if you know it, score,
+  grading = graded, measurement = manual).
 - When you finish, delete `%LOCALAPPDATA%\vesper-manual` (Linux: `~/vesper-manual`) and the `unlocked` folder.
