@@ -281,11 +281,33 @@ def make_run_folder(reg, run_id, task, skill_dir=None):
     return f
 
 
+WIDE = "=" * 72
+
+
+def banner(title):
+    print("\n" + WIDE + "\n  " + title + "\n" + WIDE)
+
+
+def prompt_block(prompt):
+    print("\n" + "-" * 30 + " PROMPT " + "-" * 34)
+    print(prompt.rstrip("\n"))
+    print("-" * 27 + " END OF PROMPT " + "-" * 30)
+
+
+def next_box(cmd, when):
+    print("\n+" + "-" * 70 + "+")
+    print("|  NEXT: " + when.ljust(62) + "|")
+    print("|        " + cmd.ljust(62) + "|")
+    print("+" + "-" * 70 + "+\n")
+
+
 def print_prompt(folder, prompt, then):
-    print("\nRun folder:  %s" % folder)
-    print("Open THIS folder in your agent (a new project / new thread), then paste this prompt:\n")
-    print(LINE + "\n" + prompt + LINE)
-    print(then)
+    print("\n  1. Open this folder as a NEW project in your agent (nothing else):")
+    print("\n       %s" % folder)
+    print("\n  2. Start a NEW thread. Copy everything between the PROMPT lines and send it.")
+    prompt_block(prompt)
+    print("\n  3. Wait until the agent says it is done. Do not ask it anything else in this thread.")
+    next_box("python workshop.py done", then)
 
 
 def cmd_new(a):
@@ -308,7 +330,8 @@ def cmd_new(a):
                                      skill_source="none", skill_hash="", skill_has_solution="", session=None)
         f = make_run_folder(reg, rid, task)
         prompt = render_prompt("stage1", task=task, run_id=rid)
-        print("Your skill-writing method for stage 2: %s" % method)
+        banner("STAGE 1 - the agent with NO skill        run %s" % rid)
+        print("\n  Your skill-writing method for stage 2 (random): %s" % method.upper())
     else:
         g = find_global_vesper_skills()
         if g:
@@ -322,10 +345,11 @@ def cmd_new(a):
                                      skill_hash=sh, skill_has_solution=shs, session=None)
         f = make_run_folder(reg, rid, task, skill_dir=src)
         prompt = render_prompt("stage3", task=task, run_id=rid)
+        banner("STAGE 3 - a NEW agent WITH the skill (%s)        run %s" % (a.skill, rid))
     reg.data["runs"][rid]["folder"] = f
     reg.data["active"] = {"run_id": rid, "stage": "1" if a.stage == "s1" else "3", "start": time.time()}
     reg.save()
-    print_prompt(f, prompt, "When the agent says it is done:  python workshop.py done")
+    print_prompt(f, prompt, "when the agent says it is done, run:")
     return 0
 
 
@@ -453,8 +477,8 @@ def submit(row, a):
         print("\nRow for the shared sheet (tab-separated):\n" + "\t".join(str(row.get(k, "")) for k in ROW_FIELDS))
         return
     short = cfg.get("short_url") or cfg["form_url"]
-    print("\nResults form: %s" % short)
-    print("Type these answers (question number. name: value):")
+    print("\n  RESULTS FORM:  %s" % short)
+    print("  Answers (question number. name: value):\n")
     for i, k in enumerate(fields, 1):
         print("  %2d. %-19s %s" % (i, k + ":", row.get(k, "")))
     if getattr(a, "no_form", False):
@@ -607,6 +631,8 @@ def cmd_done(a):
         rid, stage = last["run_id"], last["stage"]
         print("Updating the finished stage %s of %s (same cutoff, same frozen solution)." % (stage, rid))
     row = finish_stage(reg, rid, stage, a)
+    banner("STAGE %s FINISHED        run %s" % (stage, rid))
+    print()
     show_rows([row])
     print(ascii_frame(snap_path(rid, stage)))
     if row["grading"] == "ungraded":
@@ -614,7 +640,7 @@ def cmd_done(a):
               "then  python workshop.py grade")
     submit(row, a)
     if stage == "1":
-        print("\nNext (stage 2, in the SAME agent thread):  python workshop.py skill")
+        next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
     return 0
 
 
@@ -697,11 +723,14 @@ def cmd_skill(a):
     run = reg.data["runs"][rid]
     reg.data["active"] = {"run_id": rid, "stage": "2", "start": time.time()}
     reg.save()
-    prompt = render_prompt("stage2-" + run["method"], run_id=rid, guide=guides_dir())
-    print("Stage 2 (skill-writing method: %s)." % run["method"])
-    print("Paste this into the SAME agent thread as stage 1 (folder %s):\n" % run["folder"])
-    print(LINE + "\n" + prompt + LINE)
-    print("When the agent says the skill is written:  python workshop.py harvest")
+    prompt = render_prompt("stage2-" + run["method"], run_id=rid, guide=guides_dir().replace("\\", "/"))
+    banner("STAGE 2 - the SAME agent writes a skill        run %s" % rid)
+    print("\n  Skill-writing method: %s" % run["method"].upper())
+    print("\n  1. Go back to the SAME thread as stage 1 (project %s)." % os.path.basename(run["folder"]))
+    print("\n  2. Copy everything between the PROMPT lines and send it.")
+    prompt_block(prompt)
+    print("\n  3. Wait until the agent says the skill is written.")
+    next_box("python workshop.py harvest", "when the skill is written, run:")
     return 0
 
 
@@ -753,10 +782,13 @@ def cmd_harvest(a):
             for p in g:
                 if not os.path.islink(p):
                     rmtree(p)
+    banner("STAGE 2 FINISHED - skill harvested        run %s" % rid)
+    print()
     show_rows([row])
-    print("skill: %s  (hash %s, finished game in skill: %s)" % (dst, run["skill_hash"], status))
+    print("\n  Skill:                    %s" % dst)
+    print("  Finished game in skill:   %s" % status)
     submit(row, a)
-    print("\nNext (stage 3, a NEW thread):  python workshop.py new s3 --skill own")
+    next_box("python workshop.py new s3 --skill own", "stage 3 (a NEW agent, NEW project), run:")
     return 0
 
 
