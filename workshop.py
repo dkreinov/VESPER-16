@@ -435,11 +435,14 @@ def form_link(row, cfg=None):
 
 
 def submit(row, a):
-    print("\nRow for the shared sheet (tab-separated):\n" + "\t".join(str(row.get(k, "")) for k in ROW_FIELDS))
     link = form_link(row)
     if link and not getattr(a, "no_form", False):
-        print("Opening the results form - check the values and click Submit:\n" + link)
-        webbrowser.open(link)
+        print("\nOpening the results form in your browser. The values are filled in: check them and click Submit.")
+        if webbrowser.open(link):
+            return
+        print("The browser did not open. Open this link:\n" + link)
+    # backup when there is no form (or no browser): a row to paste into a shared sheet
+    print("\nRow for the shared sheet (tab-separated):\n" + "\t".join(str(row.get(k, "")) for k in ROW_FIELDS))
 
 
 def sha256_file(p):
