@@ -718,8 +718,12 @@ def _norm_lines(text):
     return {re.sub(r"\s+", " ", ln.strip()) for ln in text.splitlines() if ln.strip()}
 
 
+GAME_SHARE = 0.5   # the skill holds at least this part of the stage-1 game -> "the finished game"
+
+
 def detect_solution(skill_dir, snapshot):
-    found, sol = [], set()
+    """Return (found, share). found: [(rel, reason)]. share: part of the stage-1 game lines in the skill."""
+    found, sol, seen = [], set(), set()
     if snapshot and os.path.exists(snapshot):
         with open(snapshot, encoding="utf-8", errors="replace") as f:
             sol = _norm_lines(f.read())
@@ -727,23 +731,34 @@ def detect_solution(skill_dir, snapshot):
         for n in sorted(fs):
             p = os.path.join(dp, n)
             rel = os.path.relpath(p, skill_dir)
-            if n.lower().endswith(".vsa"):
-                found.append((rel, "assembly program (.vsa)"))
-                continue
             try:
                 with open(p, encoding="utf-8", errors="replace") as f:
                     text = f.read()
             except OSError:
                 continue
-            for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):
-                k = len(block.strip().splitlines())
-                if k > 15:
-                    found.append((rel, "code block of %d lines" % k))
-                    break
             lines = _norm_lines(text)
-            if sol and lines and len(lines & sol) / len(lines | sol) >= 0.25:
-                found.append((rel, "overlaps the stage-1 solution"))
-    return found
+            common = lines & sol
+            seen |= common
+            why = []
+            if n.lower().endswith(".vsa"):
+                why.append("assembly program (.vsa)")
+            else:
+                for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):
+                    k = len(block.strip().splitlines())
+                    if k > 15:
+                        why.append("code block of %d lines" % k)
+                        break
+            if sol and lines and len(common) / len(lines | sol) >= 0.25:
+                why.append("overlaps the stage-1 solution")
+            if why:
+                if sol:
+                    why.append("%d of its %d lines are in your game" % (len(common), len(lines)))
+                found.append((rel, ", ".join(why)))
+    return found, (len(seen) / len(sol) if sol else 0.0)
+
+
+SOLUTION_WORDS = {"no": "no", "part": "part (helper code only, kept)",
+                  "yes": "yes (most of the game, kept)", "removed": "removed (moved aside)"}
 
 
 def cmd_skill(a):
@@ -800,15 +815,25 @@ def cmd_harvest(a):
     if os.path.exists(dst):
         rmtree(dst)
     shutil.copytree(src, dst)
-    found = detect_solution(dst, snap_path(rid, "1"))
+    found, share = detect_solution(dst, snap_path(rid, "1"))
     status = "no"
     if found:
-        print("Your skill contains the finished game (or a large part of it):")
+        big = share >= GAME_SHARE
+        banner("CHECK - is your finished game inside the skill?")
+        print("\n  Files with code:\n")
         for rel, why in found:
-            print("  %s  -  %s" % (rel, why))
-        move = a.move_aside or ask("Move these files aside, so stage 3 does not get the answer? [y/N] ",
+            print("    %s\n        %s" % (rel, why))
+        print("\n  Together these files hold %d%% of your stage-1 game." % round(share * 100))
+        if big:
+            print("  That is most of the game. Stage 3 would only copy it.")
+            print("  Answer y, to move these files aside.")
+        else:
+            print("  That is a small part: probably helper code (for example a pixel routine),")
+            print("  not the game. A skill may keep helpers. Answer n, to keep them.")
+        print()
+        move = a.move_aside or ask("  Move these files aside, so stage 3 does not get the answer? [y/N] ",
                                    "n").lower() == "y"
-        status = "yes"
+        status = "yes" if big else "part"
         if move:
             rem = os.path.join(base, "removed")
             for rel, _ in found:
@@ -817,15 +842,16 @@ def cmd_harvest(a):
                     os.makedirs(os.path.dirname(os.path.join(rem, rel)), exist_ok=True)
                     shutil.move(p, os.path.join(rem, rel))
             status = "removed"
+            print("\n  Moved aside to: %s" % rem)
     run["skill_hash"] = skill_hash(dst)
     run["skill_has_solution"] = status
     reg.mark_done(base)
     row = finish_stage(reg, rid, "2", a, grade=False)
     g = find_global_vesper_skills()
     if g:
-        print("\nThe agent also put a VESPER skill in a global folder (it would leak into stage 3):\n  "
-              + "\n  ".join(g))
-        if a.remove_global or ask("Remove these global copies? [y/N] ", "n").lower() == "y":
+        banner("CHECK - a VESPER skill is in a global folder")
+        print("\n  It would leak into stage 3:\n\n    " + "\n    ".join(g) + "\n")
+        if a.remove_global or ask("  Remove these global copies? [y/N] ", "n").lower() == "y":
             for p in g:
                 if not os.path.islink(p):
                     rmtree(p)
@@ -833,7 +859,7 @@ def cmd_harvest(a):
     print()
     show_rows([row])
     print("\n  Skill:                    %s" % dst)
-    print("  Finished game in skill:   %s" % status)
+    print("  Finished game in skill:   %s" % SOLUTION_WORDS.get(status, status))
     submit(row, a)
     next_box("python workshop.py new s3 --skill own", "stage 3 (a NEW agent, NEW project), run:")
     return 0

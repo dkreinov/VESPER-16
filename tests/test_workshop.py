@@ -220,6 +220,22 @@ class FlowTest(unittest.TestCase):
         run(self.w, "done", "--no-form")
         self.assertEqual(len(self.w.Registry.load().data["rows"]), 3)
 
+    def test_detector_share_helper_vs_game(self):
+        snap = os.path.join(self.tmp, "sol.vsa")
+        with open(snap, "w") as f:
+            f.write(SOL)
+        sk = os.path.join(self.tmp, "sk")
+        os.makedirs(sk)
+        with open(os.path.join(sk, "probe.vsa"), "w") as f:
+            f.write("\n".join(SOL.splitlines()[:5]))
+        found, share = self.w.detect_solution(sk, snap)
+        self.assertEqual(len(found), 1)
+        self.assertLess(share, self.w.GAME_SHARE)        # a helper, not the game
+        with open(os.path.join(sk, "game.md"), "w") as f:
+            f.write("```\n" + SOL + "\n```\n")
+        found, share = self.w.detect_solution(sk, snap)
+        self.assertEqual(share, 1.0)
+
     def test_cleanup_removes_only_own_items(self):
         mine = os.path.join(self.tmp, "keep.txt")
         with open(mine, "w") as f:
