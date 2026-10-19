@@ -520,10 +520,13 @@ def submit(row, a):
         print("  %2d. %-19s %s" % (i, k + ":", row.get(k, "")))
     if getattr(a, "no_form", False):
         return
+    again = "python workshop.py form %s %s" % (row.get("run_id", ""), row.get("stage", ""))
     if webbrowser.open(form_link(row, cfg)):
-        print("The form is opening in your browser with these values filled in. Check them and click Submit.")
+        print("\n  The form opens in a NEW browser window, with these values filled in.")
+        print("  Check them and click Submit.")
     else:
-        print("The browser did not open. Open the link above and type the values, then click Submit.")
+        print("\n  The browser did not open. Open the link above, type the values, and click Submit.")
+    print("  Window closed by mistake? Open it again:  %s" % again)
 
 
 def sha256_file(p):
@@ -907,6 +910,19 @@ def cmd_show(a):
     return 0
 
 
+def cmd_form(a):
+    reg = Registry.load()
+    rows = [r for r in reg.data["rows"].values()
+            if (not a.run_id or r["run_id"] == a.run_id) and (not a.stage or r["stage"] == a.stage)]
+    if not rows:
+        sys.exit("No finished stage%s. See:  python workshop.py show"
+                 % (" for %s %s" % (a.run_id, a.stage or "") if a.run_id else ""))
+    row = max(rows, key=lambda r: float(r["cutoff"] or 0))
+    print("\n  Form for run %s, stage %s:" % (row["run_id"], row["stage"]))
+    submit(row, a)
+    return 0
+
+
 def _remove(p):
     if os.path.isdir(p):
         rmtree(p)
@@ -1024,6 +1040,11 @@ def parse(argv):
     s.set_defaults(func=cmd_unlock)
     s = sub.add_parser("show")
     s.set_defaults(func=cmd_show)
+    s = sub.add_parser("form", help="open the results form again for a finished stage")
+    s.add_argument("run_id", nargs="?", help="default: the last finished stage")
+    s.add_argument("stage", nargs="?", choices=["1", "2", "3"])
+    s.add_argument("--no-form", action="store_true")
+    s.set_defaults(func=cmd_form)
     s = sub.add_parser("cleanup")
     s.add_argument("--yes", action="store_true")
     s.add_argument("--no-copy", action="store_true")

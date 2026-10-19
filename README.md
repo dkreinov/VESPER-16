@@ -74,6 +74,7 @@ python workshop.py done
 python workshop.py unlock 4 <password>    # the grader - only after your agent is done
 python workshop.py grade                  # scores the stages that are not graded yet
 python workshop.py show                   # your table
+python workshop.py form                   # open the results form again (last stage; or: form s1-xxxx 2)
 python workshop.py cleanup                # removes everything workshop.py made
 ```
 

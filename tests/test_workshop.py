@@ -184,6 +184,9 @@ class FlowTest(unittest.TestCase):
         run(self.w, "done", "--no-form")
         r1 = self.w.Registry.load().row(self.rid, "1")
         self.assertEqual(r1["measurement"], "log")
+        self.assertEqual(run(self.w, "form", "--no-form"), 0)          # reopen the form for the last stage
+        with self.assertRaises(SystemExit):
+            run(self.w, "form", self.rid, "3", "--no-form")
         with self.assertRaises(SystemExit):             # harvest before skill
             run(self.w, "harvest", "--no-form")
         with self.assertRaises(SystemExit):             # stage 3 before harvest
