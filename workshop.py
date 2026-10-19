@@ -45,6 +45,18 @@ def user_home():
     return os.environ.get("VESPER_WS_USERHOME") or os.path.expanduser("~")
 
 
+def replace_file(src, dst, tries=20):
+    """os.replace with retries: on Windows, antivirus or the indexer can hold a new file for a moment."""
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.1 * (i + 1))
+
+
 def new_code():
     return "%04x" % random.randrange(0x10000)
 
@@ -71,7 +83,7 @@ class Registry:
         tmp = self.path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=1)
-        os.replace(tmp, self.path())
+        replace_file(tmp, self.path())
 
     def add_item(self, path, kind):
         if not any(i["path"] == path for i in self.data["items"]):
@@ -97,7 +109,7 @@ class Registry:
             w.writeheader()
             for k in sorted(self.data["rows"]):
                 w.writerow(self.data["rows"][k])
-        os.replace(p + ".tmp", p)
+        replace_file(p + ".tmp", p)
 
 
 def ask(prompt, default=""):
