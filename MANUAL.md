@@ -37,8 +37,8 @@ Work in a local folder, not on OneDrive. Replace `<name>` with your name and `<n
 2. In the same thread, paste `prompts/stage2-plain.md` (or `stage2-builtin.md` / `stage2-superpowers.md`).
    Replace `{run_id}`. Replace `{guide}` with the full path of the `guides` folder of this kit.
 3. When the agent is done, write down the end time and the tokens (as in stage 1).
-4. Look in `$R\skill-out\vesper16`. If you see a `.vsa` file or long blocks of assembly, the agent put the
-   finished game in the skill. Write this down ("yes"). Move those files out if you want a clean stage 3.
+4. Look in `$R\skill-out\vesper16`. If you see a `.vsa` file or long blocks of assembly, estimate how much
+   of your stage-1 game is in the skill and write it down (for example 30%). Keep the files: this is only recorded.
 
 ## Stage 3 — a new agent with the skill
 
