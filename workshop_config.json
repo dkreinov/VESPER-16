@@ -1,1 +1,23 @@
-{"form_url": "", "fields": {}}
+{
+ "form_url": "https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=E7qFT1NppkacW3WZ_YDpqsWPtJxzKCVKrich5_Cu9VNURTZBT002NkxBOFpCSUQzUDNLTzJWRkNZSC4u",
+ "fields": {
+  "alias": "r0710e989fdc84e60b7d2e1a31177cd2e",
+  "run_id": "rf84ba60adaf64abda02889edc6ce786e",
+  "stage": "r0f349393852d4622ac17975c89c5eba2",
+  "revision": "rb5edb42fd4f24735939bdd63644903f2",
+  "task": "rb05a9fb4b50441e389523c78412e9b83",
+  "agent": "r92da2c7a2ae847feb287a3b0e05e09c9",
+  "model": "re0310f6eebca4ef6a53bfc4b6c600d5f",
+  "method": "r2be8b27ee3d14a7c89da0bcf4dfae700",
+  "skill_has_solution": "r7c00210447514074a4b21f527435091b",
+  "elapsed_min": "rd98796a0e2fe453c907e8ff24b556155",
+  "emulator_runs": "ra1eaec33703e48d080cd976cef075012",
+  "tok_uncached": "re2bb6f1af6644ce08ba85187692542fe",
+  "tok_cache_read": "rec6e67e2804145248bfab12d30519a14",
+  "tok_out": "ra63d318556b549a8a226acc0d1b04249",
+  "cost_usd": "r453fc5bb120e4ba88f5df07b63790d5e",
+  "score": "re3f26e3ad1584845b6212236fb48e931",
+  "grading": "raceb4ad9d5e34493b3b97000ce3aba8b",
+  "measurement": "r3e9bfbbade6040bea4af93ef6a9f31b9"
+ }
+}
