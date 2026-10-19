@@ -168,6 +168,21 @@ BUILTIN_STEP = {
 }
 
 
+METHOD_DESC = {
+    "builtin": "your agent's own built-in skill creator",
+    "superpowers": "the superpowers 'writing-skills' guide",
+    "plain": "a plain prompt, no guide",
+}
+
+
+def method_notice(method, when):
+    """Tell the participant which skill-writing method they got, and that the room is split three ways."""
+    print("\n  The room is split into 3 ways to write the skill in stage 2, chosen at random:")
+    for m in METHODS:
+        print("     %s %-12s %s" % ("->" if m == method else "  ", m.upper(), METHOD_DESC[m]))
+    print("  You were selected for %s%s. At the end we compare the three methods." % (method.upper(), when))
+
+
 def builtin_how(agent, guide):
     return BUILTIN_HOW.get(agent, BUILTIN_HOW["claude"]).replace("{guide}", guide)
 
@@ -353,7 +368,7 @@ def cmd_new(a):
         f = make_run_folder(reg, rid, task)
         prompt = render_prompt("stage1", task=task, run_id=rid)
         banner("STAGE 1 - the agent with NO skill        run %s" % rid)
-        print("\n  Your skill-writing method for stage 2 (random): %s" % method.upper())
+        method_notice(method, " (used in stage 2)")
     else:
         g = find_global_vesper_skills()
         if g:
@@ -749,7 +764,7 @@ def cmd_skill(a):
     prompt = render_prompt("stage2-" + run["method"], run_id=rid, guide=guide,
                            builtin_how=builtin_how(reg.data.get("agent", ""), guide))
     banner("STAGE 2 - the SAME agent writes a skill        run %s" % rid)
-    print("\n  Skill-writing method: %s" % run["method"].upper())
+    method_notice(run["method"], "")
     print("\n  1. Go back to the SAME thread as stage 1 (project %s)." % os.path.basename(run["folder"]))
     if run["method"] == "builtin":
         print("\n  2. " + BUILTIN_STEP.get(reg.data.get("agent", ""), BUILTIN_STEP["claude"]))
