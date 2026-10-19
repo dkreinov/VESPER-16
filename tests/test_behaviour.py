@@ -42,6 +42,14 @@ class Behaviour(unittest.TestCase):
         self.assertEqual(len(s), 2)
         self.assertEqual(self.w.pick_session("s1-cafe"), s[0])   # no TTY: first one
 
+    def test_session_in_run_folder_wins(self):
+        t = time.time()
+        fakes.claude_log("chat-pasted", "/elsewhere", [(t - 5, 5, 10, 0, 1, "Workshop run: s1-feed")])
+        fakes.codex_log("0c0c0c0c-1111-2222-3333-444455556666", "/runs/s1-feed",
+                        [(t - 5, 10, 0, 1, "Workshop run: s1-feed")])
+        self.assertEqual(len(self.w.find_sessions("s1-feed")), 2)
+        self.assertEqual(self.w.pick_session("s1-feed", "/runs/s1-feed")["agent"], "codex")
+
     def test_global_skill_blocks_stage3(self):
         run(self.w, "doctor", "--agent", "codex", "--alias", "")
         d = os.path.join(os.environ["VESPER_WS_USERHOME"], ".codex", "skills", "vesper16")

@@ -377,7 +377,8 @@ def cmd_new(a):
         src, parent, sh, shs = resolve_skill(reg, a.skill)
         code = new_code()
         rid = "s3-" + code
-        reg.data["runs"][rid] = dict(folder="", task=task, method="", code=code, stage="3", parent=parent,
+        reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""), code=code, stage="3",
+                                     parent=parent,
                                      skill_source=a.skill if a.skill in ("own", "wiki") else "path",
                                      skill_hash=sh, skill_has_solution=shs, session=None)
         f = make_run_folder(reg, rid, task, skill_dir=src)
@@ -474,8 +475,37 @@ def measure_stage(run, t0, t1):
     return res
 
 
-def pick_session(run_id):
+def session_cwd(path):
+    """The working folder recorded in an agent log (Codex session_meta / Claude message lines)."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > 400:
+                    break
+                if '"cwd"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                c = d.get("cwd") or (d.get("payload") or {}).get("cwd")
+                if c:
+                    return c
+    except OSError:
+        pass
+    return ""
+
+
+def _same_dir(a, b):
+    return bool(a and b) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def pick_session(run_id, folder=None):
     s = find_sessions(run_id)
+    if len(s) > 1 and folder:                     # a pasted run code elsewhere must not count
+        own = [x for x in s if _same_dir(session_cwd(x["path"]), folder)]
+        if own:
+            s = own
     if len(s) == 1:
         return s[0]
     if len(s) > 1:
@@ -611,7 +641,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
     else:
         t0, t1 = float(row["start"]), float(row["cutoff"])
     if not run.get("session"):
-        run["session"] = pick_session(rid)
+        run["session"] = pick_session(rid, run["folder"])
     m = measure_stage(run, t0, t1)
     if not m["measurement"]:
         prev = row or {}
