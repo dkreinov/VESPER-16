@@ -188,6 +188,9 @@ class FlowTest(unittest.TestCase):
         with self.assertRaises(SystemExit):             # stage 3 before harvest
             run(self.w, "new", "s3", "--skill", "own")
         run(self.w, "skill")
+        start = self.w.Registry.load().data["active"]["start"]
+        run(self.w, "skill")                            # again: prints the prompt, keeps the clock
+        self.assertEqual(self.w.Registry.load().data["active"]["start"], start)
         with self.assertRaises(SystemExit):             # SKILL.md missing -> no state change
             run(self.w, "harvest", "--no-form")
         self.assertEqual(self.w.Registry.load().data["active"]["stage"], "2")

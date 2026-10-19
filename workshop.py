@@ -749,17 +749,21 @@ def detect_solution(skill_dir, snapshot):
 def cmd_skill(a):
     reg = Registry.load()
     act = reg.data.get("active")
-    if act:
+    again = bool(act and act["stage"] == "2")      # run again during stage 2: show the prompt again
+    if act and not again:
         sys.exit("Stage %s of %s is still active. Next:  %s" % (act["stage"], act["run_id"], next_cmd(act)))
     s1 = [r for r in reg.data["rows"].values() if r["stage"] == "1"]
     if not s1:
         sys.exit("Do stage 1 first:  python workshop.py new s1")
-    rid = max(s1, key=lambda r: float(r["cutoff"] or 0))["run_id"]
+    rid = act["run_id"] if again else max(s1, key=lambda r: float(r["cutoff"] or 0))["run_id"]
     if reg.row(rid, "2"):
         sys.exit("Stage 2 of %s is already done. Next:  python workshop.py new s3 --skill own" % rid)
     run = reg.data["runs"][rid]
-    reg.data["active"] = {"run_id": rid, "stage": "2", "start": time.time()}
-    reg.save()
+    if again:
+        print("\n  Stage 2 is already running (the clock started at the first 'skill'). Here is the prompt again.")
+    else:
+        reg.data["active"] = {"run_id": rid, "stage": "2", "start": time.time()}
+        reg.save()
     guide = guides_dir().replace("\\", "/")
     prompt = render_prompt("stage2-" + run["method"], run_id=rid, guide=guide,
                            builtin_how=builtin_how(reg.data.get("agent", ""), guide))
