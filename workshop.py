@@ -71,7 +71,7 @@ PART_DEST = {"2": ".wiki", "3": ".prebuilt", "4": ".grader"}
 ROW_FIELDS = ["alias", "run_id", "stage", "revision", "parent_run_id", "task", "agent", "model", "method",
               "skill_source", "skill_hash", "skill_has_solution", "elapsed_min", "wall_min", "emulator_runs",
               "tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd", "price_table",
-              "measurement", "score", "grading", "solution_sha", "cutoff", "start"]
+              "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used"]
 LINE = "-" * 72
 
 
@@ -724,6 +724,45 @@ def _runlog_times(folder, t0, t1, only_run):
     return out
 
 
+def _agent_side(d):
+    """False for lines that only carry text the user (or the harness) sent: the prompt, skill lists."""
+    t = d.get("type")
+    if t in ("attachment", "system", "summary", "session_meta", "turn_context"):
+        return False
+    if t == "user":
+        c = (d.get("message") or {}).get("content")
+        return isinstance(c, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
+    p = d.get("payload")
+    if t == "response_item" and isinstance(p, dict) and p.get("type") == "message":
+        c = p.get("content")
+        if p.get("role") in ("user", "developer", "system"):
+            return False
+        return not (isinstance(c, list) and c and all(isinstance(b, dict) and b.get("type") == "input_text"
+                                                      for b in c))
+    return True
+
+
+def detect_method_used(path, t0, t1):
+    """Which skill-writing help the agent really used: 'skill-creator', 'writing-skills', 'none', or '' (no log)."""
+    if not path or not os.path.exists(path):
+        return ""
+    lines = []
+    try:
+        for d in M.jsonl(path):
+            if isinstance(d, dict) and _agent_side(d):
+                lines.append((M.parse_ts(d.get("timestamp")), json.dumps(d)))
+    except Exception:
+        return ""
+    if any(ts is not None for ts, _ in lines):
+        lines = [x for x in lines if x[0] is not None and t0 - 1 <= x[0] <= t1 + 1]
+    text = "\n".join(x[1] for x in lines)
+    if "skill-creator" in text:
+        return "skill-creator"
+    if "writing-skills" in text:
+        return "writing-skills"
+    return "none"
+
+
 def count_runs(folder, t0, t1):
     t = _runlog_times(folder, t0, t1, True)
     return None if t is None else len(t)
@@ -1255,6 +1294,11 @@ def cmd_harvest(a):
     run["skill_has_solution"] = status
     reg.mark_done(base)
     row = finish_stage(reg, rid, "2", a, grade=False)
+    used = detect_method_used((run.get("session") or {}).get("path"), float(row["start"]), float(row["cutoff"]))
+    reg.set_row(rid, "2", {"method_used": used})
+    reg.save()
+    reg.write_csv()
+    row = reg.row(rid, "2")
     g = find_global_vesper_skills()
     if g:
         banner("CHECK - a VESPER skill is in a global folder")
@@ -1268,6 +1312,7 @@ def cmd_harvest(a):
     show_rows([row])
     print("\n  Skill:                    %s" % dst)
     print("  Stage-1 game code in skill: %s  (recorded for the debrief, nothing to do)" % status)
+    print("  Skill help the agent used: %s (drawn method: %s)" % (used or "unknown", run["method"]))
     submit(row, a)
     next_box(["python workshop.py new s3 --task T6", "python workshop.py new s3 --task T3"],
              "stage 3: TWO new agent threads. Run both commands:")
