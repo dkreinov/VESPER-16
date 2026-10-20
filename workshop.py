@@ -301,6 +301,96 @@ def find_global_vesper_skills():
     return out
 
 
+HELP_PROMPT = "Read doctor-report.txt and help me fix the setup. Do not change files outside this folder."
+AGENT_CLIS = ["codex", "claude", "cursor-agent", "cursor"]
+SP_SKILLS = ("using-superpowers", "brainstorming", "writing-plans", "subagent-driven-development")
+CODEX_SP = re.compile(r'^\[plugins\."(superpowers@[^"]+)"\][^\n]*\n((?:(?!\[)[^\n]*(?:\n|$))*)', re.M)
+
+
+def doctor_report_path():
+    return os.environ.get("VESPER_DOCTOR_REPORT") or os.path.join(KIT, "doctor-report.txt")
+
+
+def cli_version(name):
+    p = shutil.which(name)
+    if not p:
+        return "not found"
+    if os.environ.get("VESPER_DOCTOR_SKIP_CLI"):
+        return "skipped"
+    try:
+        r = subprocess.run([p, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=15)
+        text = (r.stdout or r.stderr).strip()
+        return text.splitlines()[0] if text else "exit code %d" % r.returncode
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return "error: %s" % e
+
+
+def write_doctor_report(path, lines, agent):
+    import platform
+    out = ["VESPER-16 workshop - doctor report (%s)" % time.strftime("%Y-%m-%d %H:%M:%S"), "",
+           "Faults:"] + [ln for ln in lines if ln.strip().startswith("FAIL")] + ["", "All checks:"] + lines
+    out += ["", "OS: %s %s (%s)" % (platform.system(), platform.release(), platform.version()),
+            "Python: %s at %s" % (sys.version.split()[0], sys.executable),
+            "Agent chosen: %s" % (agent or "-"), "Agent CLI versions:"]
+    out += ["  %s: %s" % (n, cli_version(n)) for n in AGENT_CLIS]
+    out += ["", "Paths:", "  kit folder: " + KIT, "  workshop home: " + ws_home(), "  emulator: " + vesper_bin(),
+            "  git: " + (shutil.which("git") or "not found"), "  current folder: " + os.getcwd(),
+            "  VESPER_WS_HOME: " + os.environ.get("VESPER_WS_HOME", "(not set)"),
+            "  kit folder files: " + ", ".join(sorted(os.listdir(KIT))), "",
+            "Help: README.md (Requirements) and MANUAL.md (the workshop by hand) are in the kit folder."]
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def _read_json(p):
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _sp_skill_dirs(dirs):
+    return [os.path.join(d, n) for d in dirs for n in SP_SKILLS if os.path.isfile(os.path.join(d, n, "SKILL.md"))]
+
+
+def superpowers_evidence(agent):
+    """Where the superpowers plugin/skills are active for this agent (empty list = not found)."""
+    h, ev = user_home(), []
+    if agent == "claude":
+        ch = M.claude_home()
+        en = _read_json(os.path.join(ch, "settings.json")).get("enabledPlugins") or {}
+        ev += ["settings.json enables " + k for k, v in sorted(en.items()) if k.startswith("superpowers@") and v is True]
+        inst = _read_json(os.path.join(ch, "plugins", "installed_plugins.json")).get("plugins") or {}
+        ev += ["installed plugin " + k for k in sorted(inst) if k.startswith("superpowers@") and k not in en]
+        ev += _sp_skill_dirs([os.path.join(ch, "skills")])
+    elif agent == "codex":
+        xh = M.codex_home()
+        try:
+            with open(os.path.join(xh, "config.toml"), encoding="utf-8", errors="replace") as f:
+                toml = f.read()
+        except OSError:
+            toml = ""
+        ev += ["config.toml enables " + m.group(1) for m in CODEX_SP.finditer(toml)
+               if re.search(r"^\s*enabled\s*=\s*true\b", m.group(2), re.M)]
+        if os.path.isdir(os.path.join(xh, "superpowers")):
+            ev.append(os.path.join(xh, "superpowers"))
+        ev += _sp_skill_dirs([os.path.join(xh, "skills"), os.path.join(h, ".agents", "skills")])
+    elif agent == "cursor":
+        root = os.path.join(h, ".cursor", "plugins")
+        for dp, dns, _ in os.walk(root):
+            rel = os.path.relpath(dp, root)
+            depth = 0 if rel == "." else rel.count(os.sep) + 1
+            if "superpowers" in dns:
+                ev.append(os.path.join(dp, "superpowers"))
+            if depth >= 2:
+                dns[:] = []
+        ev += _sp_skill_dirs([os.path.join(h, ".cursor", "skills"), os.path.join(h, ".agents", "skills")])
+    return ev
+
+
 def cmd_doctor(a):
     reg = Registry.load()
     level, lines = 0, []
@@ -339,16 +429,29 @@ def cmd_doctor(a):
         note(1, "WARN", "a VESPER skill is in a global folder (stage 3 would not be clean): " + ", ".join(g))
     else:
         note(0, "OK", "no VESPER skill in global skill folders")
-    agent = a.agent or reg.data.get("agent") or ask("Which agent do you use (codex/claude/cursor)? [codex] ", "codex")
+    agent = (a.agent or reg.data.get("agent") or ask("Which agent do you use (codex/claude/cursor)? [codex] ", "codex")).lower()
     alias = a.alias if a.alias is not None else (
         reg.data.get("alias") or ask("Alias for the shared chart (Enter = anonymous): ", ""))
-    reg.data.update(agent=agent.lower(), alias=alias, doctor={"level": level, "time": time.time()})
+    sp = superpowers_evidence(agent)
+    if sp:
+        note(1, "WARN", "superpowers is active for %s (%s). Your agent may stop to ask for approval; "
+                        "answer 'go on'." % (agent, "; ".join(sp)))
+    reg.data.update(agent=agent, alias=alias, doctor={"level": level, "time": time.time()})
     reg.add_item(h, "dir")
     reg.mark_done(h)
     reg.save()
     print("\n".join(lines))
     print(["GREEN: all good.", "YELLOW: it works - read the warnings.",
            "RED: follow MANUAL.md or work with a neighbour."][level])
+    rp = doctor_report_path()
+    if level == 2:
+        write_doctor_report(rp, lines, agent)
+        print("\n  The setup has a fault. A report for help is in:\n    %s" % rp)
+        print("  Paste this prompt into any LLM (an agent opened in this kit folder reads the file;")
+        print("  in a chat window, attach doctor-report.txt):")
+        prompt_block(HELP_PROMPT)
+    elif os.path.exists(rp):
+        os.remove(rp)
     return level if level == 2 else 0
 
 
@@ -444,10 +547,12 @@ def print_prompt(folder, prompt, then, cmd="python workshop.py done"):
 def cmd_new(a):
     ws_home(check=True)
     reg = Registry.load()
-    if not reg.data.get("doctor"):
-        print("doctor was not run - running it now.\n")
+    d = reg.data.get("doctor")
+    if not d or (a.stage == "s1" and d.get("level") == 2):
+        print("Checking this computer first (doctor).\n")
         if cmd_doctor(argparse.Namespace(agent=None, alias=None)):
-            sys.exit("Fix the FAIL lines first, or follow MANUAL.md.")
+            sys.exit("\nFix the FAIL lines first (see doctor-report.txt and the help prompt above), "
+                     "then run this command again.")
         reg = Registry.load()
     task = a.task
     acts = reg.actives()

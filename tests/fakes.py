@@ -9,6 +9,8 @@ def fresh_ws():
     os.environ["VESPER_WS_USERHOME"] = os.path.join(home, "user")
     os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(home, "claude")
     os.environ["CODEX_HOME"] = os.path.join(home, "codex")
+    os.environ["VESPER_DOCTOR_REPORT"] = os.path.join(home, "doctor-report.txt")   # never in the kit folder
+    os.environ["VESPER_DOCTOR_SKIP_CLI"] = "1"                                   # no slow agent --version calls
     if ROOT not in sys.path:
         sys.path.insert(0, ROOT)
     import workshop
