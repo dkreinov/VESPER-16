@@ -305,13 +305,48 @@ def memories_card(reg):
         print(c_next("  " + l))
 
 
-def stage3_card(agent):
-    print("\n  Stage 3 rules:")
-    print("     - Use the SMALL model in this thread:")
-    for k in ("claude", "codex", "cursor"):
-        print("         %s %s" % ("->" if k == agent else "  ", SMALL_MODEL[k]))
-    print("     - Time box: %d minutes. The tool records the time; it does not stop the agent." % TIME_BOX_MIN)
-    print("     - Run budget: %d emulator runs (the prompt says so)." % S3_RUN_BUDGET)
+SMALL_SHORT = {"claude": 'Haiku (type "/model haiku")', "codex": "gpt-6-luna",
+               "cursor": "its cheapest model"}
+
+
+def s3_header(reg, a, both):
+    """Compact stage-3 header: title (+ T6 name), one steps paragraph, one wait line."""
+    agent = reg.data.get("agent") or ""
+    title = "STAGE 3 - %s WITH your skill" % ("two NEW agents" if both else "a NEW agent")
+    first = reg.data["runs"][a.s3_first]
+    right = ("name on T6: " + first["name"]) if first.get("task") == "T6" and first.get("name") else ""
+    print("\n" + c_banner(WIDE))
+    print(c_banner(("  " + title).ljust(70 - len(right)) + right))
+    print(c_banner(WIDE))
+    model = SMALL_SHORT.get(agent) or "; ".join("%s %s" % (k, v) for k, v in SMALL_SHORT.items())
+    mem = codex_memories_on(reg) and agent in ("codex", "")
+    chunks = ["new project from the folder", "-> new thread"] + (["-> /memories off"] if mem else []) \
+        + ["-> model " + model, "-> paste its prompt.   Time box %d min, %d runs." % (TIME_BOX_MIN, S3_RUN_BUDGET)]
+    lines, cur = [], ("For EACH run:" if both else "For this run:")
+    for c in chunks:
+        if len(cur) + 1 + len(c) > 70:
+            lines.append(cur)
+            cur = c
+        else:
+            cur += " " + c
+    lines.append(cur)
+    print("\n".join("  " + l for l in lines))
+    if mem:
+        print("  (Codex Memories are on: turn them off per thread with /memories)")
+    if right and getattr(a, "name_from_alias", False):
+        print("  (change: --name OTHER)")
+    print("  Wait until the agent is done; do not ask it anything else.")
+
+
+def s3_run_block(n, total, task, folder, prompt):
+    """One run: its title line with the full folder path, then the prompt between magenta lines."""
+    desc = {"T6": "T6 (new task)", "T3": "T3 (same task as stage 1)"}.get(task, task)
+    of = " %d of %d" % (n, total) if total > 1 else ""
+    num = " %d" % n if total > 1 else ""
+    print("\n" + c_bold("  RUN%s  %s   folder: %s" % (of, desc, folder)))
+    print(c_prompt((" PROMPT%s " % num).center(72, "-")))
+    print(prompt.rstrip("\n"))
+    print(c_prompt((" END OF PROMPT%s " % num).center(72, "-")))
 
 
 def method_notice(method, when):
@@ -680,8 +715,13 @@ def create_s3_run(reg, a, task, name=None):
     On failure the registry row and active entry are removed, so no half state stays."""
     src, parent, sh, shs = resolve_skill(reg, a.skill)
     if task == "T6" and name is None:
-        raw = a.name if a.name is not None else ask(
-            "Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
+        if a.name is not None:
+            raw = a.name
+        elif reg.data.get("alias"):
+            raw = reg.data["alias"]
+            a.name_from_alias = True
+        else:
+            raw = ask("Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
         name = T6F.normalise(raw)
     name = name or ""
     rid = s3_run_id(reg, parent, task)
@@ -704,17 +744,10 @@ def create_s3_run(reg, a, task, name=None):
 
 def new_s3_both(reg, a):
     """new s3 --task both: the T6 run, then the T3 run, in one process and one terminal."""
-    first = create_s3_run(reg, a, "T6")
-    r1, f1, p1 = first
-    name = reg.data["runs"][r1]["name"]
-    print(c_bold("\nSTAGE 3 RUN 1 of 2: T6 (new task, your name)"))
-    banner("STAGE 3 - a NEW agent WITH the skill (%s, T6)        run %s" % (a.skill, r1))
-    if name:
-        print("\n  Name on the T6 screen: %s" % name)
-    stage3_card(reg.data.get("agent", ""))
-    memories_card(reg)
-    print_prompt(f1, p1, "", None)
-    print(c_bold("\nSTAGE 3 RUN 2 of 2: T3 again (same task as stage 1)"))
+    r1, f1, p1 = create_s3_run(reg, a, "T6")
+    a.s3_first = r1
+    s3_header(reg, a, True)
+    s3_run_block(1, 2, "T6", f1, p1)
     try:
         r2, f2, p2 = create_s3_run(reg, a, "T3")
     except Exception as e:
@@ -722,10 +755,9 @@ def new_s3_both(reg, a):
         print("  The T6 run %s is valid. Start the T3 run later with:  python workshop.py new s3 --task T3" % r1)
         next_box("python workshop.py done " + r1, "when the T6 agent says it is done, run:")
         return 1
-    banner("STAGE 3 - a NEW agent WITH the skill (%s, T3)        run %s" % (a.skill, r2))
-    print_prompt(f2, p2, "", None)
+    s3_run_block(2, 2, "T3", f2, p2)
     next_box(["python workshop.py done %s   (T6)" % r1, "python workshop.py done %s   (T3)" % r2],
-             "when an agent says it is done, run its command:")
+             "when an agent is done, run its line:")
     return 0
 
 
@@ -773,22 +805,19 @@ def cmd_new(a):
         if task == "both":
             return new_s3_both(reg, a)
         rid, f, prompt = create_s3_run(reg, a, task)
-        banner("STAGE 3 - a NEW agent WITH the skill (%s, %s)        run %s" % (a.skill, task, rid))
-        name = reg.data["runs"][rid]["name"]
-        if name:
-            print("\n  Name on the T6 screen: %s" % name)
-        stage3_card(reg.data.get("agent", ""))
-        memories_card(reg)
-        done_cmd = "python workshop.py done " + rid
-    reg.data["runs"][rid]["folder"] = f
-    reg.start_active(rid, "1" if a.stage == "s1" else "3")
-    reg.save()
-    print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd)
-    if a.stage == "s3":
+        a.s3_first = rid
+        s3_header(reg, a, False)
+        s3_run_block(1, 1, task, f, prompt)
+        next_box("python workshop.py done " + rid, "when the agent is done, run:")
         hint = second_s3_hint(reg, rid)
         if hint:
             print("  Now start the second stage-3 run (here), and open it in a SECOND new agent thread:")
             print("      %s\n" % hint)
+        return 0
+    reg.data["runs"][rid]["folder"] = f
+    reg.start_active(rid, "1" if a.stage == "s1" else "3")
+    reg.save()
+    print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd)
     return 0
 
 
@@ -1494,7 +1523,8 @@ def cmd_harvest(a):
     print(memory_line(row))
     memories_card(reg)
     submit(row, a)
-    next_box("python workshop.py new s3 --task both",
+    next_box(["python workshop.py new s3 --task both",
+              "(cmd/PowerShell: one command; it starts both runs)"],
              "stage 3: TWO new agent threads (T6, then T3). Run:")
     return 0
 

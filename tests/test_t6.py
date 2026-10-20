@@ -68,6 +68,9 @@ class T6RunTest(unittest.TestCase):
         self.assertNotIn("{NAME", md)
 
     def test_no_name_without_tty_is_vesper(self):
+        reg = self.w.Registry.load()
+        reg.data["alias"] = ""
+        reg.save()
         run(self.w, "new", "s3", "--task", "T6")
         self.assertEqual(self._active()[1]["name"], "VESPER")
 

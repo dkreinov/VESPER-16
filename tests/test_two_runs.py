@@ -84,12 +84,34 @@ class TwoRunsTest(unittest.TestCase):
         self.assertEqual({r["parent"] for r in runs}, {self.s1})
         t6 = [x["run_id"] for x in acts if reg.data["runs"][x["run_id"]]["task"] == "T6"][0]
         self.assertEqual(reg.data["runs"][t6]["name"], "MIRA")
-        self.assertIn("STAGE 3 RUN 1 of 2: T6 (new task, your name)", out)
-        self.assertIn("STAGE 3 RUN 2 of 2: T3 again (same task as stage 1)", out)
+        self.assertIn("RUN 1 of 2  T6 (new task)", out)
+        self.assertIn("RUN 2 of 2  T3 (same task as stage 1)", out)
+        self.assertIn("name on T6: MIRA", out)
         for x in acts:
             self.assertIn("python workshop.py done " + x["run_id"], out)
         with self.assertRaises(SystemExit):
             run(self.w, "new", "s3", "--task", "both")
+
+    def test_name_from_alias_without_question(self):
+        reg = self.w.Registry.load()
+        reg.data["alias"] = "muad'dib"
+        reg.save()
+        self.w.ask = lambda *a, **k: self.fail("must not ask")
+        out = capture(run, self.w, "new", "s3", "--task", "both")
+        self.assertIn("name on T6: MUADDIB", out)
+        self.assertIn("(change: --name OTHER)", out)
+        reg = self.w.Registry.load()
+        t6 = [x["run_id"] for x in reg.actives() if reg.data["runs"][x["run_id"]]["task"] == "T6"][0]
+        self.assertEqual(reg.data["runs"][t6]["name"], "MUADDIB")
+
+    def test_compact_output_codex_and_next_box(self):
+        out = capture(run, self.w, "new", "s3", "--task", "both", "--name", "MIRA")
+        self.assertIn("model gpt-6-luna", out)
+        self.assertNotIn("Haiku", out)
+        self.assertNotIn("Cursor", out)
+        self.assertEqual(out.count("new thread"), 1)
+        self.assertIn("NEXT:", out)
+        self.assertNotIn("(change: --name OTHER)", out)
 
     def test_both_keeps_t6_when_t3_fails(self):
         orig = self.w.make_run_folder
