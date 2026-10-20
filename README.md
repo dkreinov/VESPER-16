@@ -64,22 +64,33 @@ Save your program as `solutions/T3.vsa` (bonus: `solutions/T4.vsa`).
 tokens, estimated API cost and score.
 
 ```sh
-python workshop.py doctor                 # check this computer (start of the workshop)
-python workshop.py new s1                 # stage 1: a clean folder + the prompt to paste
+python workshop.py new s1                 # stage 1: checks this computer (doctor), then a clean folder + the prompt
 python workshop.py done                   # the agent is done: measure, (grade), results form
 python workshop.py skill                  # stage 2: the prompt that asks the SAME agent to write a skill
 python workshop.py harvest                # stage 2 is done: take the skill out and check it
-python workshop.py new s3 --skill own     # stage 3: a clean folder with your skill, a NEW agent thread
-python workshop.py done
-python workshop.py unlock 4 <password>    # the grader - only after your agent is done
+python workshop.py new s3 --task T6       # stage 3, run 1: T6 with YOUR name (it asks), a NEW agent thread
+python workshop.py new s3 --task T3       # stage 3, run 2: T3 again, a SECOND new agent thread (same time)
+python workshop.py done <run_id>          # end one stage-3 run (plain `done` asks which one)
+python workshop.py unlock 4 <password>    # the grader - only after your agents are done
 python workshop.py grade                  # scores the stages that are not graded yet
-python workshop.py show                   # your table
-python workshop.py form                   # open the results form again (last stage; or: form s1-xxxx 2)
+python workshop.py show                   # your table and the active runs
+python workshop.py form                   # open the results form again (last stage; or: form <run_id> <stage>)
 python workshop.py cleanup                # removes everything workshop.py made
+python workshop.py doctor                 # the setup check alone (new s1 runs it for you)
 ```
 
 Open each run folder that `new` prints as its own project in your agent (Codex, Claude Code or Cursor),
 in a new thread, and paste the prompt. Stage 2 uses the same thread as stage 1.
+
+**Stage 3 runs two agents at the same time.** `new s3 --task T6` asks for your name (up to 8 letters A-Z) and
+writes it into `tasks/T6.md`; T6 is a new task that your skill has never seen. `new s3 --task T3` repeats the
+stage-1 game. Open each folder in its own new thread and choose the small model there (Claude Code: Haiku;
+Codex: gpt-6-luna; Cursor: its cheapest model). The prompt gives a budget of 6 emulator runs; the time box is
+10 minutes (the tool records the time; it does not stop the agent). End each run with the `done <run_id>`
+command that `new` printed.
+
+**When `doctor` finds a fault** it writes `doctor-report.txt` into this folder and prints a short prompt.
+Paste that prompt into any LLM (an agent opened in this folder can read the file; in a chat, attach the file).
 
 **What workshop.py does:** copies the kit into run folders under `%LOCALAPPDATA%esper-runs`
 (Windows) or `~/vesper-runs`, runs `git init` there, runs the emulator and the grader, reads your agent's
@@ -100,8 +111,7 @@ outside its own folder unless you confirm.
 ## Rules for the exercise
 
 - Leave `bin/`, `examples/` and `tasks/` unchanged.
-- This kit imposes no limit on emulator runs. If your presenter announces a run budget for a stage,
-  count your `vesper run` calls yourself (`vesper asm` is free).
+- Stage 1 allows 20 emulator runs and stage 3 allows 6 (the prompts say so). `vesper asm` is free.
 - Some later parts of the workshop are in `locked/`. Your presenter gives the password for each part
   when it starts; then run `python unlock.py <part> <password>` (it extracts into `unlocked/part-<n>/`).
   Don't try to open them earlier.
@@ -115,12 +125,15 @@ examples/fill.vsa   small sample program
 examples/pixel.vsa  small sample program
 tasks/T3.md         the game task
 tasks/T4.md         bonus game (Breakout)
+tasks/T6.md         stage-3 task template (your name is filled in by workshop.py)
 player.html         offline viewer for --out folders and --gif files
 media/              the demo GIFs and design concept images above
 solutions/          save your game here
 locked/             later workshop parts (password-protected)
 unlock.py           opens a locked part into unlocked/part-<n>/
 workshop.py         runs and measures the workshop stages (uses measure.py)
+t6font.py           the T6 name font (python t6font.py <name> prints your nameplate)
+charts.py           presenter: debrief charts from the results form export
 prompts/            the prompts you paste into your agent
 guides/             skill-writing guides used in stage 2 (with their licenses)
 MANUAL.md           the same exercise by hand

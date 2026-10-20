@@ -40,18 +40,29 @@ Work in a local folder, not on OneDrive. Replace `<name>` with your name and `<n
 4. Look in `$R\skill-out\vesper16`. If you see a `.vsa` file or long blocks of assembly, estimate how much
    of your stage-1 game is in the skill and write it down (for example 30%). Keep the files: this is only recorded.
 
-## Stage 3 — a new agent with the skill
+## Stage 3 — two new agents with the skill, at the same time
 
-1. Make a second run folder as in stage 1, step 1, but with `$R3 = "$env:LOCALAPPDATA\vesper-manual\s3-<name><n>"`
-   and `$R3` instead of `$R` in all commands of that step.
-2. Copy the skill into it:
+Make two run folders: T6 (your name) and T3 again.
+
+1. Make the first run folder as in stage 1, step 1, but with `$R3 = "$env:LOCALAPPDATA\vesper-manual\s3-<name><n>-t6"`
+   and `$R3` instead of `$R` in all commands of that step. Do **not** copy `tasks\T3.md`. Instead write your T6 task:
    ```powershell
-   mkdir $R3\.agents\skills, $R3\.claude\skills | Out-Null
-   copy -Recurse $R\skill-out\vesper16 $R3\.agents\skills\vesper16
-   copy -Recurse $R\skill-out\vesper16 $R3\.claude\skills\vesper16
+   python t6font.py <your name> --task-md $R3\tasks\T6.md
    ```
-3. Open `s3-…` as a new project, in a new thread. Paste `prompts/stage3.md` (replace `{run_id}`, `{task}`).
-4. Measure as in stage 1.
+   (git add and commit after this command.)
+2. Make the second run folder the same way with `$R4 = "$env:LOCALAPPDATA\vesper-manual\s3-<name><n>-t3"`, and copy
+   `tasks\T3.md` as in stage 1.
+3. Copy the skill into both folders:
+   ```powershell
+   foreach ($d in $R3, $R4) {
+     mkdir $d\.agents\skills, $d\.claude\skills | Out-Null
+     copy -Recurse $R\skill-out\vesper16 $d\.agents\skills\vesper16
+     copy -Recurse $R\skill-out\vesper16 $d\.claude\skills\vesper16
+   }
+   ```
+4. Open each folder as a new project, each in a new thread, with the small model (Claude Code: Haiku; Codex:
+   gpt-6-luna; Cursor: its cheapest). Paste `prompts/stage3.md` into each (replace `{run_id}` and `{task}`: T6 and T3).
+5. Measure each run as in stage 1. Time box: 10 minutes. Budget: 6 emulator runs.
 
 ## Grade
 
@@ -59,6 +70,7 @@ Only after your agent is done:
 ```powershell
 python unlock.py 4 <password>
 python unlocked\part-4\grader\grade.py T3 $R\solutions\T3.vsa --bin bin\vesper.exe
+python unlocked\part-4\grader\grade.py T6 $R3\solutions\T6.vsa --name <your name> --bin bin\vesper.exe
 ```
 Linux: `bin/vesper` instead of `bin\vesper.exe`. Delete the `unlocked` folder before you open the kit
 folder in an agent again.
@@ -66,7 +78,7 @@ folder in an agent again.
 ## Results and cleanup
 
 - Type your numbers into the results form: https://forms.cloud.microsoft/r/xdtPcwF24a
-  (alias, run_id such as `s1-<name><n>`, stage 1/2/3, revision 1, task T3, agent, model, method,
+  (alias, run_id such as `s1-<name><n>`, stage 1/2/3, revision 1, task T3 or T6, agent, model, method,
   skill_has_solution (the part of your stage-1 game in the skill, for example 27%; write 0% if none), elapsed_min, emulator_runs, the token numbers, cost_usd if you know it, score,
   grading = graded, measurement = manual).
 - When you finish, delete `%LOCALAPPDATA%\vesper-manual` (Linux: `~/vesper-manual`) and the `unlocked` folder.
