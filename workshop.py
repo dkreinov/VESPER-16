@@ -531,9 +531,8 @@ def superpowers_evidence(agent):
     return ev
 
 
-MEMORY_WARN = ("Codex Memories hold VESPER notes from earlier sessions; they would leak into this workshop. "
-               "Turn off: Codex app Settings > Personalization > clear 'Enable Codex memories' "
-               "(or type /memories in each thread). Config: [features] memories = false in ~/.codex/config.toml.")
+MEMORY_WARN = ("Codex Memories hold VESPER notes from earlier sessions. In every new workshop thread type /memories "
+               "and turn memory off for that chat (or turn Memories off in Settings > Personalization).")
 
 
 def codex_memories_have_vesper():
@@ -700,12 +699,16 @@ def next_box(cmd, when):
     print(c_next("+" + "-" * 70 + "+") + "\n")
 
 
-def print_prompt(folder, prompt, then, cmd="python workshop.py done"):
+def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False):
     print("\n  1. Open this folder as a NEW project in your agent (nothing else):")
     print("\n       %s" % folder)
-    print("\n  2. Start a NEW thread. Copy everything between the PROMPT lines and send it.")
+    print("\n  2. Start a NEW thread.")
+    if mem:
+        print("\n  3. " + c_next("Type /memories first and turn off memory for this chat."))
+    print("\n  %d. Copy everything between the PROMPT lines and send it." % (4 if mem else 3))
     prompt_block(prompt)
-    print("\n  3. Wait until the agent says it is done. Do not ask it anything else in this thread.")
+    print("\n  %d. Wait until the agent says it is done. Do not ask it anything else in this thread."
+          % (5 if mem else 4))
     if cmd:
         next_box(cmd, then)
 
@@ -817,7 +820,8 @@ def cmd_new(a):
     reg.data["runs"][rid]["folder"] = f
     reg.start_active(rid, "1" if a.stage == "s1" else "3")
     reg.save()
-    print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd)
+    mem = (reg.data.get("agent") or "") in ("codex", "") and codex_memories_on(reg)
+    print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd, mem=mem)
     return 0
 
 

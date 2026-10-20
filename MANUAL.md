@@ -60,7 +60,8 @@ With the tool, `python workshop.py new s3 --task both` is the default way (separ
      copy -Recurse $R\skill-out\vesper16 $d\.claude\skills\vesper16
    }
    ```
-4. Open each folder as a new project, each in a new thread, with the small model (Claude Code: Haiku; Codex:
+4. Codex: if Memories are on, type /memories first in each new workshop thread and turn memory off for that chat.
+   Open each folder as a new project, each in a new thread, with the small model (Claude Code: Haiku; Codex:
    gpt-6-luna; Cursor: its cheapest). Paste `prompts/stage3.md` into each (replace `{run_id}` and `{task}`: T6 and T3).
 5. Measure each run as in stage 1. Time box: 10 minutes. Budget: 6 emulator runs.
 

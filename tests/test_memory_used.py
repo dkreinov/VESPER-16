@@ -91,7 +91,7 @@ class DoctorMemories(unittest.TestCase):
 
     def test_warns_with_vesper_notes(self):
         rc, out = self._doctor("Notes on VESPER-16 skills")
-        self.assertIn("Codex Memories hold VESPER notes from earlier sessions; they would leak", out)
+        self.assertIn("Codex Memories hold VESPER notes from earlier sessions. In every new workshop thread type /memories", out)
         self.assertNotIn("FAIL", out)
         self.assertEqual(rc, 0)
 
@@ -135,6 +135,36 @@ class MemoriesCard(unittest.TestCase):
     def test_not_shown_with_neither(self):
         self.assertEqual(self._card(), "")
         self.assertEqual(self._card(config="[features]\nmemories = false\n[other]\nmemories = true\n"), "")
+
+
+class Stage1MemoriesStep(unittest.TestCase):
+    STEP = "Type /memories first and turn off memory for this chat."
+
+    def _s1(self, agent, memfile="notes"):
+        w, home = fresh_ws()
+        if memfile is not None:
+            d = os.path.join(home, "user", ".codex", "memories")
+            os.makedirs(d)
+            with open(os.path.join(d, "MEMORY.md"), "w") as f:
+                f.write(memfile)
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(w, "doctor", "--agent", agent, "--alias", "t")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            run(w, "new", "s1")
+        return out.getvalue()
+
+    def test_codex_with_memories(self):
+        out = self._s1("codex")
+        self.assertIn(self.STEP, out)
+        self.assertLess(out.index("Start a NEW thread"), out.index(self.STEP))
+        self.assertLess(out.index(self.STEP), out.index("PROMPT ---"))
+
+    def test_not_for_claude(self):
+        self.assertNotIn("/memories", self._s1("claude"))
+
+    def test_not_when_memories_off(self):
+        self.assertNotIn("/memories", self._s1("codex", memfile=None))
 
 
 if __name__ == "__main__":

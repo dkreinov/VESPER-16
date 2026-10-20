@@ -82,6 +82,7 @@ python workshop.py doctor                 # the setup check alone (new s1 runs i
 
 Open each run folder that `new` prints as its own project in your agent (Codex, Claude Code or Cursor),
 in a new thread, and paste the prompt. Stage 2 uses the same thread as stage 1.
+Codex: if Memories are on, type /memories first in each new workshop thread and turn memory off for that chat.
 
 **Stage 3 runs two agents at the same time.** `new s3 --task both` (the default way; `--name` works with it)
 makes both runs in one command: first T6, then T3. You can start them one by one instead:
