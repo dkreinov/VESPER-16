@@ -22,6 +22,49 @@ sys.path.insert(0, KIT)
 import measure as M  # noqa: E402  (session readers and prices, same folder)
 import t6font as T6F  # noqa: E402  (T6 name font, same folder; locked part 4 has a copy)
 
+_VT = []
+
+
+def _vt_ok():
+    """Windows: switch on ANSI processing once. Any failure means colour off."""
+    if not _VT:
+        ok = True
+        if os.name == "nt":
+            try:
+                import ctypes
+                k = ctypes.windll.kernel32
+                h = k.GetStdHandle(-11)
+                mode = ctypes.c_uint32()
+                ok = bool(k.GetConsoleMode(h, ctypes.byref(mode))) and \
+                    bool(k.SetConsoleMode(h, mode.value | 0x0004))
+            except Exception:
+                ok = False
+        _VT.append(ok)
+    return _VT[0]
+
+
+def use_color():
+    if os.environ.get("FORCE_COLOR") == "1":
+        _vt_ok()  # best effort; forced on even when stdout is a pipe
+        return True
+    return (sys.stdout.isatty() and "NO_COLOR" not in os.environ
+            and os.environ.get("TERM") != "dumb" and _vt_ok())
+
+
+def _sgr(code, text):
+    return "\x1b[%sm%s\x1b[0m" % (code, text) if use_color() else text
+
+
+def c_banner(t): return _sgr("1;36", t)
+def c_next(t): return _sgr("1;33", t)
+def c_ok(t): return _sgr("32", t)
+def c_err(t): return _sgr("31", t)
+def c_prompt(t): return _sgr("35", t)
+def c_link(t): return _sgr("4", t)
+def c_bold(t): return _sgr("1", t)
+def c_good(t): return _sgr("1;32", t)
+
+
 PRICE_TABLE = "2026-10-14"
 METHODS = ["builtin", "superpowers", "plain"]
 PART_DEST = {"2": ".wiki", "3": ".prebuilt", "4": ".grader"}
@@ -229,8 +272,9 @@ def method_notice(method, when):
     """Tell the participant which skill-writing method they got, and that the room is split three ways."""
     print("\n  The room is split into 3 ways to write the skill in stage 2, chosen at random:")
     for m in METHODS:
-        print("     %s %-12s %s" % ("->" if m == method else "  ", m.upper(), METHOD_DESC[m]))
-    print("  You were selected for %s%s. At the end we compare the three methods." % (method.upper(), when))
+        ln = "     %s %-12s %s" % ("->" if m == method else "  ", m.upper(), METHOD_DESC[m])
+        print(c_bold(ln) if m == method else ln)
+    print(c_bold("  You were selected for %s%s." % (method.upper(), when)) + " At the end we compare the three methods.")
 
 
 def builtin_how(agent, guide):
@@ -455,9 +499,9 @@ def cmd_doctor(a):
     reg.add_item(h, "dir")
     reg.mark_done(h)
     reg.save()
-    print("\n".join(lines))
-    print(["GREEN: all good.", "YELLOW: it works - read the warnings.",
-           "RED: follow MANUAL.md or work with a neighbour."][level])
+    print("\n".join(c_ok(l) if l.startswith("  OK ") else c_err(l) if l.startswith("  FAIL") else l for l in lines))
+    print([c_good("GREEN: all good."), "YELLOW: it works - read the warnings.",
+           c_err("RED: follow MANUAL.md or work with a neighbour.")][level])
     rp = doctor_report_path()
     if level == 2:
         write_doctor_report(rp, lines, agent)
@@ -532,22 +576,22 @@ WIDE = "=" * 72
 
 
 def banner(title):
-    print("\n" + WIDE + "\n  " + title + "\n" + WIDE)
+    print("\n" + c_banner(WIDE) + "\n" + c_banner("  " + title) + "\n" + c_banner(WIDE))
 
 
 def prompt_block(prompt):
-    print("\n" + "-" * 30 + " PROMPT " + "-" * 34)
+    print("\n" + c_prompt("-" * 30 + " PROMPT " + "-" * 34))
     print(prompt.rstrip("\n"))
-    print("-" * 27 + " END OF PROMPT " + "-" * 30)
+    print(c_prompt("-" * 27 + " END OF PROMPT " + "-" * 30))
 
 
 def next_box(cmd, when):
     cmds = [cmd] if isinstance(cmd, str) else list(cmd)
-    print("\n+" + "-" * 70 + "+")
-    print("|  NEXT: " + when.ljust(62) + "|")
+    print("\n" + c_next("+" + "-" * 70 + "+"))
+    print(c_next("|  NEXT: " + when.ljust(62) + "|"))
     for c in cmds:
-        print("|        " + c.ljust(62) + "|")
-    print("+" + "-" * 70 + "+\n")
+        print(c_next("|        " + c.ljust(62) + "|"))
+    print(c_next("+" + "-" * 70 + "+") + "\n")
 
 
 def print_prompt(folder, prompt, then, cmd="python workshop.py done"):
@@ -780,7 +824,7 @@ def submit(row, a):
         print("\nRow for the shared sheet (tab-separated):\n" + "\t".join(str(row.get(k, "")) for k in ROW_FIELDS))
         return
     short = cfg.get("short_url") or cfg["form_url"]
-    print("\n  RESULTS FORM:  %s" % short)
+    print("\n  RESULTS FORM:  %s" % c_link(short))
     print("  Answers (question number. name: value):\n")
     for i, k in enumerate(fields, 1):
         print("  %2d. %-19s %s" % (i, k + ":", row.get(k, "")))
@@ -907,7 +951,7 @@ def show_compare(reg, s3_id=None):
             print("  T6 baseline: %s." % T6_BASELINE)
         elif r1["task"] != r3["task"]:
             print("\n  Note: different tasks (%s vs %s)." % (r1["task"], r3["task"]))
-        print("\n  %-15s %16s %16s %10s" % ("", "no skill", "with skill", "change"))
+        print("\n" + c_bold("  %-15s %16s %16s %10s" % ("", "no skill", "with skill", "change")))
         print("  %-15s %16s %16s %10s" % ("", r1["run_id"], r3["run_id"], ""))
         print("  " + "-" * 60)
         for name, keys, f in COMPARE:
@@ -915,7 +959,12 @@ def show_compare(reg, s3_id=None):
             fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
             ch = ("%+d%%" % round((b - a) / a * 100)
                   if a and b is not None and name != "Score" and not t6 else "")
-            print("  %-15s %16s %16s %10s" % (name, fmt(a), fmt(b), ch))
+            chc = ch.rjust(10)
+            if ch.startswith("-"):
+                chc = c_ok(chc)
+            elif ch.startswith("+"):
+                chc = c_err(chc)
+            print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), chc))
         c1, c2, c3 = _val(r1, "cost_usd"), _val(r2, "cost_usd"), _val(r3, "cost_usd")
         if c2 is not None:
             print("\n  Writing the skill (stage 2): %s min, $%.2f." % (r2.get("elapsed_min", "?"), c2))
