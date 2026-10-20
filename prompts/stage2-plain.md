@@ -8,4 +8,6 @@ Do not use a skill-creator or skill-writing skill or guide. Write the skill from
 
 Make it general, not only for this game.
 
+Do not read memory files or notes from earlier sessions.
+
 Work on your own until the task is done. Do not stop to ask for approval or a design review.

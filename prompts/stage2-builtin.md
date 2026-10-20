@@ -8,4 +8,6 @@ How to write it: {builtin_how} Where the skill creator asks for things you canno
 
 Make it general, not only for this game.
 
+Do not read memory files or notes from earlier sessions.
+
 Work on your own until the task is done. Do not stop to ask for approval or a design review.

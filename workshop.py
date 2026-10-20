@@ -71,7 +71,7 @@ PART_DEST = {"2": ".wiki", "3": ".prebuilt", "4": ".grader"}
 ROW_FIELDS = ["alias", "run_id", "stage", "revision", "parent_run_id", "task", "agent", "model", "method",
               "skill_source", "skill_hash", "skill_has_solution", "elapsed_min", "wall_min", "emulator_runs",
               "tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd", "price_table",
-              "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used"]
+              "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used", "memory_used"]
 LINE = "-" * 72
 
 
@@ -257,6 +257,51 @@ SMALL_MODEL = {"claude": "Claude Code: Haiku (type /model haiku in the new threa
                "cursor": "Cursor: its cheapest model (model menu of the new chat)"}
 TIME_BOX_MIN = 10
 S3_RUN_BUDGET = 6      # also written in prompts/stage3.md
+
+
+def _codex_roots():
+    roots = [os.path.join(user_home(), ".codex")]
+    if os.environ.get("CODEX_HOME") and os.environ["CODEX_HOME"] not in roots:
+        roots.append(os.environ["CODEX_HOME"])
+    return roots
+
+
+def codex_memories_on(reg=None):
+    """True if Codex Memories look ON: config.toml [features] memories = true, a non-empty memories folder,
+    or a stage-1/2 row of this learner with memory_used == yes. Read only."""
+    for root in _codex_roots():
+        try:
+            sect = ""
+            with open(os.path.join(root, "config.toml"), encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.split("#", 1)[0].strip()
+                    if line.startswith("["):
+                        sect = line.strip("[] ").lower()
+                    elif sect == "features":
+                        m = re.match(r"memories\s*=\s*(\w+)\s*$", line, re.I)
+                        if m and m.group(1).lower() == "true":
+                            return True
+        except OSError:
+            pass
+        for dp, _, fns in os.walk(os.path.join(root, "memories")):
+            if fns:
+                return True
+    if reg is not None:
+        return any(r.get("stage") in ("1", "2") and r.get("memory_used") == "yes"
+                   for r in reg.data["rows"].values())
+    return False
+
+
+def memories_card(reg):
+    """Yellow card before stage 3 when Codex Memories are on. Prints nothing otherwise."""
+    if (reg.data.get("agent") or "codex") != "codex" or not codex_memories_on(reg):
+        return
+    for l in ("Codex Memories are ON on this computer. Stage 3 must be a fresh agent with only the skill:",
+              "   1. In EACH new stage-3 thread, type /memories first.",
+              "   2. Turn off memories for this chat (do not use existing memories, do not save new ones).",
+              "   3. Then paste the prompt.",
+              "Your global setting does not change. (Claude Code: nothing to do; its memory is per project.)"):
+        print(c_next("  " + l))
 
 
 def stage3_card(agent):
@@ -450,6 +495,28 @@ def superpowers_evidence(agent):
     return ev
 
 
+MEMORY_WARN = ("Codex Memories hold VESPER notes from earlier sessions; they would leak into this workshop. "
+               "Turn off: Codex app Settings > Personalization > clear 'Enable Codex memories' "
+               "(or type /memories in each thread). Config: [features] memories = false in ~/.codex/config.toml.")
+
+
+def codex_memories_have_vesper():
+    """True if a file under ~/.codex/memories mentions vesper. Read only."""
+    roots = {os.path.join(user_home(), ".codex", "memories")}
+    if os.environ.get("CODEX_HOME"):
+        roots.add(os.path.join(os.environ["CODEX_HOME"], "memories"))
+    for root in roots:
+        for dp, _, fns in os.walk(root):
+            for fn in fns:
+                try:
+                    with open(os.path.join(dp, fn), encoding="utf-8", errors="replace") as f:
+                        if "vesper" in f.read(2000000).lower():
+                            return True
+                except OSError:
+                    pass
+    return False
+
+
 def cmd_doctor(a):
     reg = Registry.load()
     level, lines = 0, []
@@ -495,11 +562,14 @@ def cmd_doctor(a):
     if sp:
         note(1, "WARN", "superpowers is active for %s (%s). Your agent may stop to ask for approval; "
                         "answer 'go on'." % (agent, "; ".join(sp)))
+    if agent == "codex" and codex_memories_have_vesper():
+        note(1, "WARN", MEMORY_WARN)
     reg.data.update(agent=agent, alias=alias, doctor={"level": level, "time": time.time()})
     reg.add_item(h, "dir")
     reg.mark_done(h)
     reg.save()
-    print("\n".join(c_ok(l) if l.startswith("  OK ") else c_err(l) if l.startswith("  FAIL") else l for l in lines))
+    print("\n".join(c_ok(l) if l.startswith("  OK ") else c_err(l) if l.startswith("  FAIL")
+                     else c_next(l) if l.startswith("  WARN") else l for l in lines))
     print([c_good("GREEN: all good."), "YELLOW: it works - read the warnings.",
            c_err("RED: follow MANUAL.md or work with a neighbour.")][level])
     rp = doctor_report_path()
@@ -658,6 +728,7 @@ def cmd_new(a):
         if name:
             print("\n  Name on the T6 screen: %s" % name)
         stage3_card(reg.data.get("agent", ""))
+        memories_card(reg)
         done_cmd = "python workshop.py done " + rid
     reg.data["runs"][rid]["folder"] = f
     reg.start_active(rid, "1" if a.stage == "s1" else "3")
@@ -765,6 +836,57 @@ def detect_method_used(path, t0, t1):
         if name in found:
             return name
     return "none"
+
+
+_MEM_PATH_RE = re.compile(r"\.codex(?:/|\\+)memories", re.I)
+
+
+def _message_text(d):
+    """Text of a developer/system message of one log line, else ''."""
+    p = d.get("payload")
+    if d.get("type") == "response_item" and isinstance(p, dict) and p.get("type") == "message"             and p.get("role") in ("developer", "system"):
+        c = p.get("content")
+    elif d.get("type") == "system":
+        c = d.get("content") if "content" in d else (d.get("message") or {}).get("content")
+    else:
+        return ""
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in c)
+    return ""
+
+
+def detect_memory_used(path, t0, t1):
+    """Did Codex Memories reach the agent? 'yes', 'no', or '' (no log).
+    yes = a developer/system message has a '## Memory' section that names VESPER (the session start
+    may lie before t0, so these are not time-filtered), or a tool call/result in the window reads .codex/memories."""
+    if not path or not os.path.exists(path):
+        return ""
+    try:
+        for d in M.jsonl(path):
+            if not isinstance(d, dict):
+                continue
+            txt = _message_text(d)
+            i = txt.find("## Memory")
+            if i >= 0 and "vesper" in txt[i:].lower():
+                return "yes"
+    except Exception:
+        return ""
+    lines = []
+    try:
+        for d in M.jsonl(path):
+            if isinstance(d, dict):
+                lines.append((M.parse_ts(d.get("timestamp")), _tool_evidence(d)))
+    except Exception:
+        return ""
+    if any(ts is not None for ts, _ in lines):
+        lines = [x for x in lines if x[0] is not None and t0 - 1 <= x[0] <= t1 + 1]
+    return "yes" if any(_MEM_PATH_RE.search(t) for _, t in lines) else "no"
+
+
+def memory_line(row):
+    return "  Agent memory in context: %s (Codex Memories; see the debrief)" % (row.get("memory_used") or "unknown")
 
 
 def count_runs(folder, t0, t1):
@@ -1084,6 +1206,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
         reg.end_active(rid)
     else:
         fields["revision"] = int(row.get("revision") or 1) + 1
+    fields["memory_used"] = detect_memory_used((run.get("session") or {}).get("path"), t0, t1)
     reg.set_row(rid, stage, fields)
     reg.save()
     reg.write_csv()
@@ -1125,6 +1248,7 @@ def cmd_done(a):
     print()
     show_rows([row])
     print(ascii_frame(snap_path(rid, stage)))
+    print(memory_line(row))
     if row["grading"] == "ungraded":
         who = "After BOTH agents are done" if stage == "3" and reg.actives("3") else "After the agent is done"
         print("\nNot graded yet. %s:  python workshop.py unlock 4 <password>  "
@@ -1317,6 +1441,8 @@ def cmd_harvest(a):
     print("\n  Skill:                    %s" % dst)
     print("  Stage-1 game code in skill: %s  (recorded for the debrief, nothing to do)" % status)
     print("  Skill help the agent used: %s (drawn method: %s)" % (used or "unknown", run["method"]))
+    print(memory_line(row))
+    memories_card(reg)
     submit(row, a)
     next_box(["python workshop.py new s3 --task T6", "python workshop.py new s3 --task T3"],
              "stage 3: TWO new agent threads. Run both commands:")
