@@ -61,3 +61,37 @@ def claude_log(sid, cwd, events, model="claude-haiku-5-5"):
                 "usage": {"input_tokens": i, "cache_read_input_tokens": cr,
                           "cache_creation_input_tokens": cw, "output_tokens": o}}}) + "\n")
     return p
+
+
+FAKE_GRADER = ('import json, sys\n'
+               'a = sys.argv\n'
+               'name = a[a.index("--name") + 1] if "--name" in a else ""\n'
+               'print(json.dumps({"score": 100 if name == "MIRA" else 1}))\n')
+
+
+def install_fake_grader(w):
+    """A grader that scores 100 only when it gets --name MIRA (checks that T6 passes the name)."""
+    p = w.grader_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w") as f:
+        f.write(FAKE_GRADER)
+
+
+def ready_for_s3(w, method="plain"):
+    """doctor -> new s1 -> done -> skill -> harvest, with no agent. Returns (s1 run id, harvest stdout)."""
+    import contextlib, io
+    run(w, "doctor", "--agent", "codex", "--alias", "t")
+    run(w, "new", "s1", "--method", method)
+    reg = w.Registry.load()
+    rid = reg.data["active"]["run_id"]
+    f = reg.data["runs"][rid]["folder"]
+    run(w, "done", "--no-form")
+    run(w, "skill")
+    sk = os.path.join(f, "skill-out", "vesper16")
+    os.makedirs(sk)
+    with open(os.path.join(sk, "SKILL.md"), "w") as fh:
+        fh.write("---\nname: vesper16\ndescription: VESPER-16 games\n---\nUse bin/vesper.\n")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        run(w, "harvest", "--no-form")
+    return rid, out.getvalue()

@@ -19,6 +19,7 @@ from urllib.parse import urlencode
 KIT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, KIT)
 import measure as M  # noqa: E402  (session readers and prices, same folder)
+import t6font as T6F  # noqa: E402  (T6 name font, same folder; locked part 4 has a copy)
 
 PRICE_TABLE = "2026-10-14"
 METHODS = ["builtin", "superpowers", "plain"]
@@ -283,7 +284,19 @@ def git(folder, *args):
                    + list(args), cwd=folder, capture_output=True, check=True)
 
 
-def make_run_folder(reg, run_id, task, skill_dir=None):
+def write_task(dst_dir, task, name=""):
+    """Copy tasks/<task>.md into a run folder; T6 is a template filled with the learner's name."""
+    src = os.path.join(KIT, "tasks", task + ".md")
+    if task != "T6":
+        shutil.copy2(src, dst_dir)
+        return
+    with open(src, encoding="utf-8") as fh:
+        tpl = fh.read()
+    with open(os.path.join(dst_dir, "T6.md"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(T6F.task_md(tpl, name))
+
+
+def make_run_folder(reg, run_id, task, skill_dir=None, name=""):
     f = os.path.join(ws_home(), run_id)
     reg.add_item(f, "dir")
     reg.save()
@@ -297,7 +310,7 @@ def make_run_folder(reg, run_id, task, skill_dir=None):
         os.makedirs(os.path.join(f, "bin"))
         shutil.copy2(vesper_bin(), os.path.join(f, "bin"))
         shutil.copy2(os.path.join(KIT, "player.html"), f)
-        shutil.copy2(os.path.join(KIT, "tasks", task + ".md"), os.path.join(f, "tasks"))
+        write_task(os.path.join(f, "tasks"), task, name)
         os.makedirs(os.path.join(f, "solutions"))
         open(os.path.join(f, "solutions", ".gitkeep"), "w").close()
         open(os.path.join(f, ".vesper-runs.log"), "w").close()
@@ -360,11 +373,13 @@ def cmd_new(a):
         sys.exit("Stage %s of %s is still active. Next:  %s" % (act["stage"], act["run_id"], next_cmd(act)))
     task = a.task
     if a.stage == "s1":
+        if task == "T6":
+            sys.exit("T6 is a stage-3 task. Stage 1 uses T3:  python workshop.py new s1")
         method = a.method if a.method != "random" else random.choice(METHODS)
         code = new_code()
         rid = "s1-" + code
         reg.data["runs"][rid] = dict(folder="", task=task, method=method, code=code, stage="1", parent="",
-                                     skill_source="none", skill_hash="", skill_has_solution="", session=None)
+                                     skill_source="none", skill_hash="", skill_has_solution="", session=None, name="")
         f = make_run_folder(reg, rid, task)
         prompt = render_prompt("stage1", task=task, run_id=rid)
         banner("STAGE 1 - the agent with NO skill        run %s" % rid)
@@ -375,15 +390,22 @@ def cmd_new(a):
             sys.exit("A VESPER skill is in a global folder, so stage 3 would not be clean:\n  " + "\n  ".join(g)
                      + "\nMove it away (or run harvest / cleanup), then run this command again.")
         src, parent, sh, shs = resolve_skill(reg, a.skill)
+        name = ""
+        if task == "T6":
+            raw = a.name if a.name is not None else ask(
+                "Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
+            name = T6F.normalise(raw)
         code = new_code()
         rid = "s3-" + code
         reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""), code=code, stage="3",
                                      parent=parent,
                                      skill_source=a.skill if a.skill in ("own", "wiki") else "path",
-                                     skill_hash=sh, skill_has_solution=shs, session=None)
-        f = make_run_folder(reg, rid, task, skill_dir=src)
+                                     skill_hash=sh, skill_has_solution=shs, session=None, name=name)
+        f = make_run_folder(reg, rid, task, skill_dir=src, name=name)
         prompt = render_prompt("stage3", task=task, run_id=rid)
         banner("STAGE 3 - a NEW agent WITH the skill (%s)        run %s" % (a.skill, rid))
+        if name:
+            print("\n  Name on the T6 screen: %s" % name)
     reg.data["runs"][rid]["folder"] = f
     reg.data["active"] = {"run_id": rid, "stage": "1" if a.stage == "s1" else "3", "start": time.time()}
     reg.save()
@@ -584,14 +606,17 @@ def grader_path():
     return os.path.join(ws_home(), ".grader", "grader", "grade.py")
 
 
-def grade_snapshot(task, path):
+def grade_snapshot(task, path, name=""):
     if not os.path.exists(grader_path()):
         return "", "ungraded"
     if not path:
         return "0", "graded"
+    cmd = [sys.executable, grader_path(), task, path, "--bin", vesper_bin()]
+    if task == "T6":
+        cmd += ["--name", T6F.normalise(name)]
     try:
-        r = subprocess.run([sys.executable, grader_path(), task, path, "--bin", vesper_bin()],
-                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, env=dict(os.environ, VESPER_NO_LOG="1"))
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+                           env=dict(os.environ, VESPER_NO_LOG="1"))
         return str(json.loads(r.stdout)["score"]), "graded"
     except Exception as e:  # noqa: BLE001
         print("grading failed: %s" % e)
@@ -723,7 +748,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
         if grade:
             snap, sha = snapshot_solution(rid, run, stage)
             fields["solution_sha"] = sha
-            score, status = grade_snapshot(run["task"], snap)
+            score, status = grade_snapshot(run["task"], snap, run.get("name", ""))
             fields.update(score=score, grading="partial" if getattr(a, "partial", False) else status)
         else:
             fields.update(score="", grading="none")
@@ -776,7 +801,8 @@ def cmd_grade(a):
         sys.exit("The grader is locked:  python workshop.py unlock 4 <password>")
     for r in todo:
         snap = snap_path(r["run_id"], r["stage"])
-        score, status = grade_snapshot(r["task"], snap if os.path.exists(snap) else None)
+        name = reg.data["runs"].get(r["run_id"], {}).get("name", "")
+        score, status = grade_snapshot(r["task"], snap if os.path.exists(snap) else None, name)
         reg.set_row(r["run_id"], r["stage"], {"score": score, "grading": status,
                                               "revision": int(r["revision"] or 1) + 1})
         reg.save()
@@ -1106,7 +1132,8 @@ def parse(argv):
     s.set_defaults(func=cmd_doctor)
     s = sub.add_parser("new")
     s.add_argument("stage", choices=["s1", "s3"])
-    s.add_argument("--task", default="T3", choices=["T3", "T4"])
+    s.add_argument("--task", default="T3", choices=["T3", "T4", "T6"])
+    s.add_argument("--name", help="T6 only: your name on the screen (up to 8 letters A-Z; default: asked)")
     s.add_argument("--method", default="random", choices=["random"] + METHODS)
     s.add_argument("--skill", default="own", help="own | wiki | <folder with SKILL.md>")
     s.set_defaults(func=cmd_new)
