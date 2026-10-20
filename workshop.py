@@ -3,10 +3,11 @@
 
   python workshop.py doctor                 check this computer (run it first)
   python workshop.py new s1                 stage 1: clean folder, prints the prompt
-  python workshop.py done                   end stage 1 or 3: measure, grade, form
+  python workshop.py done [run_id]          end stage 1 or 3: measure, grade, form
   python workshop.py skill                  stage 2: prints the skill-writing prompt (same thread)
   python workshop.py harvest                end stage 2: take the skill out, check it
-  python workshop.py new s3 --skill own     stage 3: clean folder with your skill
+  python workshop.py new s3 --task T6       stage 3, run 1: T6 with your name, a NEW agent thread
+  python workshop.py new s3 --task T3       stage 3, run 2: T3 again, a SECOND new agent thread
   python workshop.py unlock 4 <password>    grader (only after the agent is done)
   python workshop.py grade | show | cleanup
 
@@ -74,12 +75,45 @@ class Registry:
     def load(cls):
         try:
             with open(cls.path(), encoding="utf-8") as f:
-                return cls(json.load(f))
+                reg = cls(json.load(f))
         except (OSError, ValueError):
-            return cls({"version": 1, "agent": "", "alias": "", "items": [], "runs": {}, "rows": {},
-                        "active": None})
+            reg = cls({"version": 2, "agent": "", "alias": "", "items": [], "runs": {}, "rows": {},
+                       "active": None, "active_runs": {}})
+        reg._migrate()
+        return reg
+
+    def _migrate(self):
+        """v1 registries have one 'active' object (or null); v2 keeps all active runs in 'active_runs'."""
+        if not isinstance(self.data.get("active_runs"), dict):
+            old = self.data.get("active")
+            ok = isinstance(old, dict) and isinstance(old.get("run_id"), str)
+            self.data["active_runs"] = {old["run_id"]: old} if ok else {}
+        self._mirror()
+
+    def _mirror(self):
+        """'active' = the latest-started active run, for v1 readers (e2e_agent.py, old tests)."""
+        acts = self.actives()
+        self.data["active"] = acts[-1] if acts else None
+
+    def actives(self, stage=None):
+        acts = sorted(self.data["active_runs"].values(), key=lambda x: float(x["start"]))
+        return [x for x in acts if stage is None or x["stage"] == stage]
+
+    def get_active(self, run_id):
+        return self.data["active_runs"].get(run_id)
+
+    def start_active(self, run_id, stage, start=None):
+        self.data["active_runs"][run_id] = {"run_id": run_id, "stage": stage,
+                                            "start": time.time() if start is None else start}
+        self._mirror()
+
+    def end_active(self, run_id):
+        self.data["active_runs"].pop(run_id, None)
+        self._mirror()
 
     def save(self):
+        self._mirror()
+        self.data["version"] = 2
         os.makedirs(ws_home(), exist_ok=True)
         tmp = self.path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -189,8 +223,53 @@ def builtin_how(agent, guide):
 
 
 def next_cmd(act):
-    return {"1": "python workshop.py done", "2": "python workshop.py harvest",
-            "3": "python workshop.py done"}[act["stage"]]
+    if act["stage"] == "2":
+        return "python workshop.py harvest"
+    if act["stage"] == "3":
+        return "python workshop.py done " + act["run_id"]
+    return "python workshop.py done"
+
+
+def active_lines(reg):
+    return ["Stage %s of %s (%s) is still active. Next:  %s"
+            % (x["stage"], x["run_id"], reg.data["runs"].get(x["run_id"], {}).get("task", ""), next_cmd(x))
+            for x in reg.actives()]
+
+
+def choose_active(reg, acts):
+    """Several stage-3 runs are active: ask which agent is done (no TTY: name the run)."""
+    print("%d stage-3 runs are active:" % len(acts))
+    for i, x in enumerate(acts, 1):
+        print("  %d) %s  %s" % (i, x["run_id"], reg.data["runs"].get(x["run_id"], {}).get("task", "")))
+    n = ask("Which agent is done? Type its number (Enter = cancel): ", "")
+    if n.isdigit() and 1 <= int(n) <= len(acts):
+        x = acts[int(n) - 1]
+        return x["run_id"], x["stage"]
+    sys.exit("Nothing finished. Name the run that is done:\n  " + "\n  ".join(next_cmd(x) for x in acts))
+
+
+def s3_run_id(reg, parent, task):
+    """s3-<stage-1 code>-<task>-<new code>: the form's run_id names the stage-1 parent (charts.py links them)."""
+    pcode = parent.split("-", 1)[1] if parent.startswith("s1-") else "none"
+    while True:
+        rid = "s3-%s-%s-%s" % (pcode, task.lower(), new_code())
+        if rid not in reg.data["runs"]:
+            return rid
+
+
+PAIR = {"T6": "T3", "T3": "T6"}
+
+
+def second_s3_hint(reg, rid):
+    """The command for the paired stage-3 task of the same parent, when it was not started yet."""
+    run = reg.data["runs"][rid]
+    other = PAIR.get(run["task"])
+    if not other or not run["parent"]:
+        return ""
+    for r in reg.data["runs"].values():
+        if r.get("stage") == "3" and r.get("parent") == run["parent"] and r.get("task") == other:
+            return ""
+    return "python workshop.py new s3 --task " + other
 
 
 # ------------------------------------------------------------------ doctor
@@ -345,19 +424,21 @@ def prompt_block(prompt):
 
 
 def next_box(cmd, when):
+    cmds = [cmd] if isinstance(cmd, str) else list(cmd)
     print("\n+" + "-" * 70 + "+")
     print("|  NEXT: " + when.ljust(62) + "|")
-    print("|        " + cmd.ljust(62) + "|")
+    for c in cmds:
+        print("|        " + c.ljust(62) + "|")
     print("+" + "-" * 70 + "+\n")
 
 
-def print_prompt(folder, prompt, then):
+def print_prompt(folder, prompt, then, cmd="python workshop.py done"):
     print("\n  1. Open this folder as a NEW project in your agent (nothing else):")
     print("\n       %s" % folder)
     print("\n  2. Start a NEW thread. Copy everything between the PROMPT lines and send it.")
     prompt_block(prompt)
     print("\n  3. Wait until the agent says it is done. Do not ask it anything else in this thread.")
-    next_box("python workshop.py done", then)
+    next_box(cmd, then)
 
 
 def cmd_new(a):
@@ -368,10 +449,16 @@ def cmd_new(a):
         if cmd_doctor(argparse.Namespace(agent=None, alias=None)):
             sys.exit("Fix the FAIL lines first, or follow MANUAL.md.")
         reg = Registry.load()
-    act = reg.data.get("active")
-    if act:
-        sys.exit("Stage %s of %s is still active. Next:  %s" % (act["stage"], act["run_id"], next_cmd(act)))
     task = a.task
+    acts = reg.actives()
+    blocking = acts if a.stage == "s1" else [x for x in acts if x["stage"] != "3"]
+    if blocking:
+        sys.exit("\n".join(active_lines(reg)))
+    if a.stage == "s3":
+        same = [x for x in acts if reg.data["runs"].get(x["run_id"], {}).get("task") == task]
+        if same:
+            sys.exit("Stage 3 with %s is already active: %s\n  When that agent is done:  %s"
+                     % (task, same[0]["run_id"], next_cmd(same[0])))
     if a.stage == "s1":
         if task == "T6":
             sys.exit("T6 is a stage-3 task. Stage 1 uses T3:  python workshop.py new s1")
@@ -384,6 +471,7 @@ def cmd_new(a):
         prompt = render_prompt("stage1", task=task, run_id=rid)
         banner("STAGE 1 - the agent with NO skill        run %s" % rid)
         method_notice(method, " (used in stage 2)")
+        done_cmd = "python workshop.py done"
     else:
         g = find_global_vesper_skills()
         if g:
@@ -395,21 +483,26 @@ def cmd_new(a):
             raw = a.name if a.name is not None else ask(
                 "Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
             name = T6F.normalise(raw)
-        code = new_code()
-        rid = "s3-" + code
-        reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""), code=code, stage="3",
-                                     parent=parent,
+        rid = s3_run_id(reg, parent, task)
+        reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""),
+                                     code=rid.rsplit("-", 1)[1], stage="3", parent=parent,
                                      skill_source=a.skill if a.skill in ("own", "wiki") else "path",
                                      skill_hash=sh, skill_has_solution=shs, session=None, name=name)
         f = make_run_folder(reg, rid, task, skill_dir=src, name=name)
         prompt = render_prompt("stage3", task=task, run_id=rid)
-        banner("STAGE 3 - a NEW agent WITH the skill (%s)        run %s" % (a.skill, rid))
+        banner("STAGE 3 - a NEW agent WITH the skill (%s, %s)        run %s" % (a.skill, task, rid))
         if name:
             print("\n  Name on the T6 screen: %s" % name)
+        done_cmd = "python workshop.py done " + rid
     reg.data["runs"][rid]["folder"] = f
-    reg.data["active"] = {"run_id": rid, "stage": "1" if a.stage == "s1" else "3", "start": time.time()}
+    reg.start_active(rid, "1" if a.stage == "s1" else "3")
     reg.save()
-    print_prompt(f, prompt, "when the agent says it is done, run:")
+    print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd)
+    if a.stage == "s3":
+        hint = second_s3_hint(reg, rid)
+        if hint:
+            print("  Now start the second stage-3 run (here), and open it in a SECOND new agent thread:")
+            print("      %s\n" % hint)
     return 0
 
 
@@ -646,7 +739,7 @@ def ascii_frame(path, frame=300):
 
 
 def show_rows(rows):
-    cols = [("run_id", 9), ("stage", 5), ("task", 4), ("model", 18), ("elapsed_min", 7), ("emulator_runs", 6),
+    cols = [("run_id", 16), ("stage", 5), ("task", 4), ("model", 18), ("elapsed_min", 7), ("emulator_runs", 6),
             ("tok_in", 9), ("tok_out", 8), ("cost_usd", 7), ("score", 6), ("grading", 9)]
     print("  ".join(n.ljust(w) for n, w in cols))
     for r in rows:
@@ -674,29 +767,38 @@ COMPARE = [("Time (min)", ("elapsed_min",), "%.1f"),
            ("Score", ("score",), "%d")]
 
 
+# Lab detail, not printed: Haiku 0/6, gpt-6-luna 0/6.
+T6_BASELINE = "small model, no skill: 0/12 pass in 5 min"
+
+
 def show_compare(reg, s3_id=None):
-    """Stage 1 (no skill) vs stage 3 (with the skill), plus what writing the skill cost."""
+    """Each stage-3 row vs its stage-1 parent (no skill), plus what writing the skill cost."""
     s3s = [r for r in reg.data["rows"].values() if r["stage"] == "3" and (not s3_id or r["run_id"] == s3_id)]
     for r3 in sorted(s3s, key=lambda r: float(r["start"] or 0)):
         parent = reg.data["runs"].get(r3["run_id"], {}).get("parent", "")
         r1, r2 = reg.row(parent, "1"), reg.row(parent, "2")
         if not r1:
             continue
-        banner("YOUR RESULT: no skill (stage 1) vs WITH the skill (stage 3)")
-        if r1["task"] != r3["task"]:
+        t6 = r3["task"] == "T6"
+        banner("YOUR RESULT: no skill (stage 1, %s) vs WITH the skill (stage 3, %s)" % (r1["task"], r3["task"]))
+        if t6:
+            print("\n  Note: different task: compare with the measured baseline.")
+            print("  T6 baseline: %s." % T6_BASELINE)
+        elif r1["task"] != r3["task"]:
             print("\n  Note: different tasks (%s vs %s)." % (r1["task"], r3["task"]))
-        print("\n  %-15s %12s %12s %10s" % ("", "no skill", "with skill", "change"))
-        print("  %-15s %12s %12s %10s" % ("", r1["run_id"], r3["run_id"], ""))
-        print("  " + "-" * 52)
+        print("\n  %-15s %16s %16s %10s" % ("", "no skill", "with skill", "change"))
+        print("  %-15s %16s %16s %10s" % ("", r1["run_id"], r3["run_id"], ""))
+        print("  " + "-" * 60)
         for name, keys, f in COMPARE:
             a, b = _val(r1, *keys), _val(r3, *keys)
             fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
-            ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" else ""
-            print("  %-15s %12s %12s %10s" % (name, fmt(a), fmt(b), ch))
+            ch = ("%+d%%" % round((b - a) / a * 100)
+                  if a and b is not None and name != "Score" and not t6 else "")
+            print("  %-15s %16s %16s %10s" % (name, fmt(a), fmt(b), ch))
         c1, c2, c3 = _val(r1, "cost_usd"), _val(r2, "cost_usd"), _val(r3, "cost_usd")
         if c2 is not None:
             print("\n  Writing the skill (stage 2): %s min, $%.2f." % (r2.get("elapsed_min", "?"), c2))
-            if c1 is not None and c3 is not None:
+            if c1 is not None and c3 is not None and not t6:
                 if c1 > c3:
                     print("  The skill pays for itself after %d tasks like this one (stage-2 cost / saving per task)."
                           % max(1, math.ceil(c2 / (c1 - c3))))
@@ -708,8 +810,8 @@ def show_compare(reg, s3_id=None):
 
 def finish_stage(reg, rid, stage, a, grade=True):
     run = reg.data["runs"][rid]
-    act = reg.data.get("active")
-    first = bool(act and act["run_id"] == rid and act["stage"] == stage)
+    act = reg.get_active(rid)
+    first = bool(act and act["stage"] == stage)
     row = reg.row(rid, stage)
     if first:
         t0, t1 = act["start"], time.time()
@@ -752,7 +854,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
             fields.update(score=score, grading="partial" if getattr(a, "partial", False) else status)
         else:
             fields.update(score="", grading="none")
-        reg.data["active"] = None
+        reg.end_active(rid)
     else:
         fields["revision"] = int(row.get("revision") or 1) + 1
     reg.set_row(rid, stage, fields)
@@ -763,18 +865,34 @@ def finish_stage(reg, rid, stage, a, grade=True):
 
 def cmd_done(a):
     reg = Registry.load()
-    act = reg.data.get("active")
-    if act and act["stage"] == "2":
-        sys.exit("Stage 2 ends with:  python workshop.py harvest")
-    if act:
-        rid, stage = act["run_id"], act["stage"]
+    want = getattr(a, "run_id", None)
+    if want:
+        act = reg.get_active(want)
+        if act and act["stage"] == "2":
+            sys.exit("Stage 2 ends with:  python workshop.py harvest")
+        if act:
+            rid, stage = want, act["stage"]
+        else:
+            done = [r for r in reg.data["rows"].values() if r["run_id"] == want and r["stage"] in ("1", "3")]
+            if not done:
+                sys.exit("No active or finished stage 1 or 3 is called %s. See:  python workshop.py show" % want)
+            rid, stage = want, done[0]["stage"]
+            print("Updating the finished stage %s of %s (same cutoff, same frozen solution)." % (stage, rid))
     else:
-        rows = [r for r in reg.data["rows"].values() if r["stage"] in ("1", "3")]
-        if not rows:
-            sys.exit("No stage is active. Start with:  python workshop.py new s1")
-        last = max(rows, key=lambda r: float(r["cutoff"] or 0))
-        rid, stage = last["run_id"], last["stage"]
-        print("Updating the finished stage %s of %s (same cutoff, same frozen solution)." % (stage, rid))
+        acts = [x for x in reg.actives() if x["stage"] in ("1", "3")]
+        if not acts and reg.actives("2"):
+            sys.exit("Stage 2 ends with:  python workshop.py harvest")
+        if len(acts) == 1:
+            rid, stage = acts[0]["run_id"], acts[0]["stage"]
+        elif acts:
+            rid, stage = choose_active(reg, acts)
+        else:
+            rows = [r for r in reg.data["rows"].values() if r["stage"] in ("1", "3")]
+            if not rows:
+                sys.exit("No stage is active. Start with:  python workshop.py new s1")
+            last = max(rows, key=lambda r: float(r["cutoff"] or 0))
+            rid, stage = last["run_id"], last["stage"]
+            print("Updating the finished stage %s of %s (same cutoff, same frozen solution)." % (stage, rid))
     row = finish_stage(reg, rid, stage, a)
     banner("STAGE %s FINISHED        run %s" % (stage, rid))
     print()
@@ -788,6 +906,10 @@ def cmd_done(a):
         next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
     else:
         show_compare(reg, rid)
+        left = reg.actives("3")
+        if left:
+            task = reg.data["runs"].get(left[0]["run_id"], {}).get("task", "")
+            next_box(next_cmd(left[0]), "the other agent (%s) is still working. When it is done:" % task)
     return 0
 
 
@@ -871,21 +993,21 @@ def detect_solution(skill_dir, snapshot):
 
 def cmd_skill(a):
     reg = Registry.load()
-    act = reg.data.get("active")
-    again = bool(act and act["stage"] == "2")      # run again during stage 2: show the prompt again
-    if act and not again:
-        sys.exit("Stage %s of %s is still active. Next:  %s" % (act["stage"], act["run_id"], next_cmd(act)))
+    acts2 = reg.actives("2")
+    again = bool(acts2)                # run again during stage 2: show the prompt again
+    if reg.actives() and not again:
+        sys.exit("\n".join(active_lines(reg)))
     s1 = [r for r in reg.data["rows"].values() if r["stage"] == "1"]
     if not s1:
         sys.exit("Do stage 1 first:  python workshop.py new s1")
-    rid = act["run_id"] if again else max(s1, key=lambda r: float(r["cutoff"] or 0))["run_id"]
+    rid = acts2[0]["run_id"] if again else max(s1, key=lambda r: float(r["cutoff"] or 0))["run_id"]
     if reg.row(rid, "2"):
-        sys.exit("Stage 2 of %s is already done. Next:  python workshop.py new s3 --skill own" % rid)
+        sys.exit("Stage 2 of %s is already done. Next:  python workshop.py new s3 --task T6" % rid)
     run = reg.data["runs"][rid]
     if again:
         print("\n  Stage 2 is already running (the clock started at the first 'skill'). Here is the prompt again.")
     else:
-        reg.data["active"] = {"run_id": rid, "stage": "2", "start": time.time()}
+        reg.start_active(rid, "2")
         reg.save()
     guide = guides_dir().replace("\\", "/")
     prompt = render_prompt("stage2-" + run["method"], run_id=rid, guide=guide,
@@ -906,16 +1028,17 @@ def cmd_skill(a):
 
 def cmd_harvest(a):
     reg = Registry.load()
-    act = reg.data.get("active")
-    if not act or act["stage"] != "2":
+    acts2 = reg.actives("2")
+    if not acts2:
         done2 = [r for r in reg.data["rows"].values() if r["stage"] == "2"]
         if done2:
             rid = max(done2, key=lambda r: float(r["cutoff"] or 0))["run_id"]
+            acts = reg.actives()
             sys.exit("Stage 2 of %s is already harvested.\n"
                      "  Form again:  python workshop.py form %s 2\n"
-                     "  Next:        %s" % (rid, rid, next_cmd(act) if act else "python workshop.py new s3 --skill own"))
+                     "  Next:        %s" % (rid, rid, next_cmd(acts[-1]) if acts else "python workshop.py new s3 --task T6"))
         sys.exit("harvest ends stage 2. Start stage 2 with:  python workshop.py skill")
-    rid = act["run_id"]
+    rid = acts2[0]["run_id"]
     run = reg.data["runs"][rid]
     src = os.path.join(run["folder"], "skill-out", "vesper16")
     if not os.path.exists(os.path.join(src, "SKILL.md")):
@@ -961,7 +1084,8 @@ def cmd_harvest(a):
     print("\n  Skill:                    %s" % dst)
     print("  Stage-1 game code in skill: %s  (recorded for the debrief, nothing to do)" % status)
     submit(row, a)
-    next_box("python workshop.py new s3 --skill own", "stage 3 (a NEW agent, NEW project), run:")
+    next_box(["python workshop.py new s3 --task T6", "python workshop.py new s3 --task T3"],
+             "stage 3: TWO new agent threads. Run both commands:")
     return 0
 
 
@@ -995,9 +1119,10 @@ def cmd_unlock(a):
         print("Wrong password.")
         sys.exit(2)
     reg = Registry.load()
-    act = reg.data.get("active")
-    if act and a.part == "4":
-        print("Warning: stage %s is still active. Unlock the grader only after the agent is done." % act["stage"])
+    acts = reg.actives()
+    if acts and a.part == "4":
+        print("Warning: %s still active. Unlock the grader only after the agents are done."
+              % ", ".join("stage %s of %s" % (x["stage"], x["run_id"]) for x in acts))
         if ask("Unlock anyway? [y/N] ", "n").lower() != "y":
             return 1
     dst = os.path.join(ws_home(), PART_DEST[a.part])
@@ -1019,9 +1144,9 @@ def cmd_show(a):
     else:
         show_rows(rows)
         show_compare(reg)
-    act = reg.data.get("active")
-    if act:
-        print("\nActive: stage %s of %s. Next:  %s" % (act["stage"], act["run_id"], next_cmd(act)))
+    for x in reg.actives():
+        print("\nActive: stage %s of %s (%s). Next:  %s"
+              % (x["stage"], x["run_id"], reg.data["runs"].get(x["run_id"], {}).get("task", ""), next_cmd(x)))
     print("\nWorkshop home: %s   results: %s" % (ws_home(), os.path.join(ws_home(), "results.csv")))
     return 0
 
@@ -1098,7 +1223,7 @@ def cmd_shadow(a):
     skill = resolve_skill(reg, "own")[0] if a.stage == "s3" else None
     reg.data["runs"][rid] = dict(folder="", task=a.task, method="", code=code, stage=a.stage[1], parent="",
                                  skill_source="own" if skill else "none", skill_hash="", skill_has_solution="",
-                                 session=None)
+                                 session=None, name="")
     f = make_run_folder(reg, rid, a.task, skill_dir=skill)
     reg.data["runs"][rid]["folder"] = f
     prompt = render_prompt("stage3" if skill else "stage1", task=a.task, run_id=rid)
@@ -1115,7 +1240,7 @@ def cmd_shadow(a):
             print("time limit reached")
         except OSError as e:
             sys.exit("cannot start %s: %s" % (cmd[0], e))
-    reg.data["active"] = {"run_id": rid, "stage": a.stage[1] + "s", "start": t0}
+    reg.start_active(rid, a.stage[1] + "s", t0)
     row = finish_stage(reg, rid, a.stage[1] + "s", a)
     show_rows([row])
     return 0
@@ -1138,6 +1263,7 @@ def parse(argv):
     s.add_argument("--skill", default="own", help="own | wiki | <folder with SKILL.md>")
     s.set_defaults(func=cmd_new)
     s = sub.add_parser("done")
+    s.add_argument("run_id", nargs="?", help="the run to end (needed when two stage-3 runs are active)")
     s.add_argument("--partial", action="store_true", help="the agent did not finish; grade what exists")
     s.add_argument("--no-form", action="store_true")
     s.set_defaults(func=cmd_done)
