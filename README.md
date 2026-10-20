@@ -92,7 +92,7 @@ command that `new` printed.
 **When `doctor` finds a fault** it writes `doctor-report.txt` into this folder and prints a short prompt.
 Paste that prompt into any LLM (an agent opened in this folder can read the file; in a chat, attach the file).
 
-**What workshop.py does:** copies the kit into run folders under `%LOCALAPPDATA%esper-runs`
+**What workshop.py does:** copies the kit into run folders under `%LOCALAPPDATA%\vesper-runs`
 (Windows) or `~/vesper-runs`, runs `git init` there, runs the emulator and the grader, reads your agent's
 local session logs to count tokens (it finds them by the `Workshop run:` line in the prompt), and opens the
 results form in your browser.
