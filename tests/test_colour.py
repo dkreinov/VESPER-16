@@ -44,6 +44,19 @@ class Colour(unittest.TestCase):
         for body in ("copy me", "line two"):
             self.assertIn(body, lines)  # whole line equals the text: no codes
 
+    def test_change_colour_rules(self):
+        os.environ["FORCE_COLOR"] = "1"
+        self.w._VT[:] = [True]
+        for zero in ("+0%", "-0%"):
+            self.assertEqual(self.w.color_change(zero), zero.rjust(10))
+        self.assertIn("\x1b[32m", self.w.color_change("-20%"))
+        self.assertIn("\x1b[31m", self.w.color_change("+5%"))
+        self.assertEqual(self.w.color_change(""), " " * 10)
+
+    def test_tasks_plural(self):
+        self.assertEqual(self.w.tasks_word(1), "task")
+        self.assertEqual(self.w.tasks_word(2), "tasks")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -936,6 +936,22 @@ COMPARE = [("Time (min)", ("elapsed_min",), "%.1f"),
 T6_BASELINE = "small model, no skill: 0/12 pass in 5 min"
 
 
+def color_change(ch):
+    """Pad to 10, then colour: real savings green, real increases red, zero plain."""
+    chc = ch.rjust(10)
+    if ch in ("+0%", "-0%"):
+        return chc
+    if ch.startswith("-"):
+        return c_ok(chc)
+    if ch.startswith("+"):
+        return c_err(chc)
+    return chc
+
+
+def tasks_word(n):
+    return "task" if n == 1 else "tasks"
+
+
 def show_compare(reg, s3_id=None):
     """Each stage-3 row vs its stage-1 parent (no skill), plus what writing the skill cost."""
     s3s = [r for r in reg.data["rows"].values() if r["stage"] == "3" and (not s3_id or r["run_id"] == s3_id)]
@@ -959,19 +975,16 @@ def show_compare(reg, s3_id=None):
             fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
             ch = ("%+d%%" % round((b - a) / a * 100)
                   if a and b is not None and name != "Score" and not t6 else "")
-            chc = ch.rjust(10)
-            if ch.startswith("-"):
-                chc = c_ok(chc)
-            elif ch.startswith("+"):
-                chc = c_err(chc)
+            chc = color_change(ch)
             print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), chc))
         c1, c2, c3 = _val(r1, "cost_usd"), _val(r2, "cost_usd"), _val(r3, "cost_usd")
         if c2 is not None:
             print("\n  Writing the skill (stage 2): %s min, $%.2f." % (r2.get("elapsed_min", "?"), c2))
             if c1 is not None and c3 is not None and not t6:
                 if c1 > c3:
-                    print("  The skill pays for itself after %d tasks like this one (stage-2 cost / saving per task)."
-                          % max(1, math.ceil(c2 / (c1 - c3))))
+                    n = max(1, math.ceil(c2 / (c1 - c3)))
+                    print("  The skill pays for itself after %d %s like this one (stage-2 cost / saving per task)."
+                          % (n, tasks_word(n)))
                 else:
                     print("  The skill did not save money on this task.")
         if _val(r1, "score") is None or _val(r3, "score") is None:
