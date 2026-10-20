@@ -1,5 +1,5 @@
 """Stage-2 prompt sentences, and harvest records which skill-writing help the agent really used."""
-import contextlib, io, json, os, sys, time, unittest
+import contextlib, io, json, os, sys, tempfile, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
 from fakes import fresh_ws, run  # noqa: E402
@@ -73,6 +73,33 @@ class HarvestMethodUsed(unittest.TestCase):
         rid, out = self._harvest(False)
         self.assertEqual(self.w.Registry.load().row(rid, "2")["method_used"], "none")
         self.assertIn("Skill help the agent used: none (drawn method: plain)", out)
+
+    def _detect(self, *blocks):
+        """blocks: (role, content-block) pairs written as Claude-style log lines inside the window."""
+        fd, p = tempfile.mkstemp(suffix=".jsonl")
+        t = time.time()
+        with os.fdopen(fd, "w") as f:
+            for role, b in blocks:
+                f.write(json.dumps({"type": role, "timestamp": fakes.iso(t), "message": {"content": [b]}}) + "\n")
+        self.addCleanup(os.remove, p)
+        return self.w.detect_method_used(p, t - 5, t + 5)
+
+    def test_prose_is_not_use(self):
+        prose = ("assistant", {"type": "text", "text": "I did not use a skill-creator or writing-skills"})
+        self.assertEqual(self._detect(prose), "none")
+
+    def test_tool_call_reading_skill_md_is_use(self):
+        for path, want in (("C:\\Users\\me\\.codex\\skills\\.system\\skill-creator\\SKILL.md", "skill-creator"),
+                           ("/home/me/guides/anthropic-skill-creator/SKILL.md", "skill-creator"),
+                           ("/g/superpowers-writing-skills/SKILL.md", "writing-skills")):
+            call = ("assistant", {"type": "tool_use", "name": "Read", "input": {"file_path": path}})
+            self.assertEqual(self._detect(call), want, path)
+        res = ("user", {"type": "tool_result", "content": "cat /x/skill-creator/SKILL.md"})
+        self.assertEqual(self._detect(res), "skill-creator")
+
+    def test_skill_tool_invocation_is_use(self):
+        call = ("assistant", {"type": "tool_use", "name": "Skill", "input": {"skill": "superpowers:writing-skills"}})
+        self.assertEqual(self._detect(call), "writing-skills")
 
     def test_no_log_is_empty(self):
         self.assertEqual(self.w.detect_method_used(None, 0, 1), "")

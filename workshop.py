@@ -724,22 +724,24 @@ def _runlog_times(folder, t0, t1, only_run):
     return out
 
 
-def _agent_side(d):
-    """False for lines that only carry text the user (or the harness) sent: the prompt, skill lists."""
+def _tool_evidence(d):
+    """The tool calls and tool results of one log line, as text. Prose, prompts and skill lists give ''."""
     t = d.get("type")
-    if t in ("attachment", "system", "summary", "session_meta", "turn_context"):
-        return False
-    if t == "user":
+    if t in ("user", "assistant"):
         c = (d.get("message") or {}).get("content")
-        return isinstance(c, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
+        if not isinstance(c, list):
+            return ""
+        return " ".join(json.dumps(b) for b in c
+                        if isinstance(b, dict) and b.get("type") in ("tool_use", "tool_result"))
     p = d.get("payload")
-    if t == "response_item" and isinstance(p, dict) and p.get("type") == "message":
-        c = p.get("content")
-        if p.get("role") in ("user", "developer", "system"):
-            return False
-        return not (isinstance(c, list) and c and all(isinstance(b, dict) and b.get("type") == "input_text"
-                                                      for b in c))
-    return True
+    if t == "response_item" and isinstance(p, dict) and p.get("type") not in (
+            "message", "reasoning", None):
+        return json.dumps(p)
+    return ""
+
+
+_USE_RE = re.compile(r"(skill-creator|writing-skills)(?:/|\\\\|\\)SKILL\.md|\$(skill-creator|writing-skills)\b"
+                     r"|\"name\": \"Skill\".{0,80}?\"skill\": \"(?:[\w.-]+:)?(skill-creator|writing-skills)\"")
 
 
 def detect_method_used(path, t0, t1):
@@ -749,17 +751,19 @@ def detect_method_used(path, t0, t1):
     lines = []
     try:
         for d in M.jsonl(path):
-            if isinstance(d, dict) and _agent_side(d):
-                lines.append((M.parse_ts(d.get("timestamp")), json.dumps(d)))
+            if isinstance(d, dict):
+                lines.append((M.parse_ts(d.get("timestamp")), _tool_evidence(d)))
     except Exception:
         return ""
     if any(ts is not None for ts, _ in lines):
         lines = [x for x in lines if x[0] is not None and t0 - 1 <= x[0] <= t1 + 1]
-    text = "\n".join(x[1] for x in lines)
-    if "skill-creator" in text:
-        return "skill-creator"
-    if "writing-skills" in text:
-        return "writing-skills"
+    found = set()
+    for _, text in lines:
+        for m in _USE_RE.finditer(text):
+            found.add(next(g for g in m.groups() if g))
+    for name in ("skill-creator", "writing-skills"):
+        if name in found:
+            return name
     return "none"
 
 
