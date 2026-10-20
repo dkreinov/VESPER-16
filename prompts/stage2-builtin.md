@@ -5,3 +5,5 @@ Turn what you learned in this session into a reusable agent skill, so that next 
 How to write it: {builtin_how} Where the skill creator asks for things you cannot do here (spawning subagents, packaging, installing), skip them and say so.
 
 Make it general, not only for this game.
+
+Work on your own until the task is done. Do not stop to ask for approval or a design review.

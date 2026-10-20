@@ -5,3 +5,5 @@ Turn what you learned in this session into a reusable agent skill, so that next 
 How to write it: read and follow the guide at {guide}/superpowers-writing-skills/SKILL.md. Where the guide asks for things you cannot do here (spawning subagents, pressure tests), skip them and say so.
 
 Make it general, not only for this game.
+
+Work on your own until the task is done. Do not stop to ask for approval or a design review.

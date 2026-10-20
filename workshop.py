@@ -209,6 +209,21 @@ METHOD_DESC = {
     "plain": "a plain prompt, no guide",
 }
 
+SMALL_MODEL = {"claude": "Claude Code: Haiku (type /model haiku in the new thread)",
+               "codex": "Codex: gpt-6-luna (choose it in the model menu of the new thread)",
+               "cursor": "Cursor: its cheapest model (model menu of the new chat)"}
+TIME_BOX_MIN = 10
+S3_RUN_BUDGET = 6      # also written in prompts/stage3.md
+
+
+def stage3_card(agent):
+    print("\n  Stage 3 rules:")
+    print("     - Use the SMALL model in this thread:")
+    for k in ("claude", "codex", "cursor"):
+        print("         %s %s" % ("->" if k == agent else "  ", SMALL_MODEL[k]))
+    print("     - Time box: %d minutes. The tool records the time; it does not stop the agent." % TIME_BOX_MIN)
+    print("     - Run budget: %d emulator runs (the prompt says so)." % S3_RUN_BUDGET)
+
 
 def method_notice(method, when):
     """Tell the participant which skill-writing method they got, and that the room is split three ways."""
@@ -598,6 +613,7 @@ def cmd_new(a):
         banner("STAGE 3 - a NEW agent WITH the skill (%s, %s)        run %s" % (a.skill, task, rid))
         if name:
             print("\n  Name on the T6 screen: %s" % name)
+        stage3_card(reg.data.get("agent", ""))
         done_cmd = "python workshop.py done " + rid
     reg.data["runs"][rid]["folder"] = f
     reg.start_active(rid, "1" if a.stage == "s1" else "3")
