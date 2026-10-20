@@ -926,7 +926,8 @@ def show_compare(reg, s3_id=None):
                 else:
                     print("  The skill did not save money on this task.")
         if _val(r1, "score") is None or _val(r3, "score") is None:
-            print("\n  Score not graded yet:  python workshop.py unlock 4 <password>  then  python workshop.py grade")
+            print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password>  then  python workshop.py grade"
+                  % ("After BOTH agents are done" if reg.actives("3") else "Now"))
 
 
 def finish_stage(reg, rid, stage, a, grade=True):
@@ -1020,8 +1021,9 @@ def cmd_done(a):
     show_rows([row])
     print(ascii_frame(snap_path(rid, stage)))
     if row["grading"] == "ungraded":
-        print("\nNot graded yet. After the agent is done:  python workshop.py unlock 4 <password>  "
-              "then  python workshop.py grade")
+        who = "After BOTH agents are done" if stage == "3" and reg.actives("3") else "After the agent is done"
+        print("\nNot graded yet. %s:  python workshop.py unlock 4 <password>  "
+              "then  python workshop.py grade" % who)
     submit(row, a)
     if stage == "1":
         next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")

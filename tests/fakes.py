@@ -1,9 +1,10 @@
-import datetime as dt, importlib, json, os, sys, tempfile
+import datetime as dt, importlib, io, json, os, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def fresh_ws():
+    sys.stdin = io.StringIO()      # never a TTY: the suite must not wait for the keyboard
     home = tempfile.mkdtemp(prefix="vws_")
     os.environ["VESPER_WS_HOME"] = os.path.join(home, "vesper-runs")
     os.environ["VESPER_WS_USERHOME"] = os.path.join(home, "user")

@@ -92,6 +92,19 @@ class T6RunTest(unittest.TestCase):
         run(self.w, "done", "--no-form")
         self.assertEqual(self.w.Registry.load().row(rid, "3")["score"], "100")
 
+    def test_room_path_grade_passes_the_stored_name(self):
+        """Room: done while part 4 is locked (ungraded), then the grader appears, then `grade`."""
+        run(self.w, "new", "s3", "--task", "T6", "--name", "Mira")
+        rid, r = self._active()
+        with open(os.path.join(r["folder"], "solutions", "T6.vsa"), "w") as fh:
+            fh.write("x")
+        run(self.w, "done", "--no-form")
+        self.assertEqual(self.w.Registry.load().row(rid, "3")["grading"], "ungraded")
+        fakes.install_fake_grader(self.w)
+        run(self.w, "grade", "--no-form")
+        row = self.w.Registry.load().row(rid, "3")
+        self.assertEqual((row["score"], row["grading"]), ("100", "graded"))
+
 
 if __name__ == "__main__":
     unittest.main()

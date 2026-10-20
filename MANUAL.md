@@ -1,13 +1,13 @@
 # The workshop by hand (when `workshop.py doctor` shows RED)
 
 Do the same three stages without the tool. Use PowerShell on Windows, a shell on Linux.
-Work in a local folder, not on OneDrive. Choose any 4 hex digits (0-9a-f) for <4hex>.
+Work in a local folder, not on OneDrive. Choose any 4 hex digits (0-9a-f) for <s1code>.
 
 ## Stage 1 — the agent with no skill
 
 1. Make the run folder (PowerShell):
    ```powershell
-   $R = "$env:LOCALAPPDATA\vesper-manual\s1-<4hex>"
+   $R = "$env:LOCALAPPDATA\vesper-manual\s1-<s1code>"
    mkdir $R\tasks, $R\solutions, $R\bin | Out-Null
    copy bin\vesper.exe $R\bin      # only the Windows binary: then bin/vesper works in every shell
    copy -Recurse examples $R
@@ -16,10 +16,10 @@ Work in a local folder, not on OneDrive. Choose any 4 hex digits (0-9a-f) for <4
    New-Item $R\.vesper-runs.log -ItemType File | Out-Null
    cd $R; git init -q; git add -A; git -c user.name=v -c user.email=v@local commit -qm start; cd -
    ```
-   Linux: the same with `R=~/vesper-manual/s1-<name><n>`, `mkdir -p`, `cp -r`, `touch`, and only `bin/vesper`.
+   Linux: the same with `R=~/vesper-manual/s1-<s1code>`, `mkdir -p`, `cp -r`, `touch`, and only `bin/vesper`.
 2. Write down the start time.
 3. Open the run folder as a new project in your agent. Start a new thread.
-4. Paste the text of `prompts/stage1.md`. Replace `{run_id}` with `s1-<4hex>` and `{task}` with `T3`.
+4. Paste the text of `prompts/stage1.md`. Replace `{run_id}` with `s1-<s1code>` and `{task}` with `T3`.
 5. When the agent is done, write down the end time.
 6. Read the tokens:
    - Codex: type `/status`.
@@ -42,7 +42,7 @@ Work in a local folder, not on OneDrive. Choose any 4 hex digits (0-9a-f) for <4
 
 ## Stage 3 — two new agents with the skill, at the same time
 
-Make two run folders: T6 (your name) and T3 again. Use the same <4hex> from your stage-1 run_id, and choose new 4 hex digits for <code>.
+Make two run folders: T6 (your name) and T3 again. Use the same <s1code> as in your stage-1 run_id (`s1-<s1code>`), and choose new 4 hex digits for <code>.
 
 1. Make the first run folder as in stage 1, step 1, but with `$R3 = "$env:LOCALAPPDATA\vesper-manual\s3-<s1code>-t6-<code>"`
    and `$R3` instead of `$R` in all commands of that step. Do **not** copy `tasks\T3.md`. Instead write your T6 task:
@@ -79,7 +79,7 @@ folder in an agent again.
 ## Results and cleanup
 
 - Type your numbers into the results form: https://forms.cloud.microsoft/r/xdtPcwF24a
-  (alias, run_id such as `s1-<4hex>` or `s3-<4hex>-t6-<4hex>`, stage 1/2/3, revision 1, task T3 or T6, agent, model, method,
+  (alias, run_id such as `s1-<s1code>` or `s3-<s1code>-t6-<code>`, stage 1/2/3, revision 1, task T3 or T6, agent, model, method,
   skill_has_solution (the part of your stage-1 game in the skill, for example 27%; write 0% if none), elapsed_min, emulator_runs, the token numbers, cost_usd if you know it, score,
   grading = graded, measurement = manual). Rows with another run-id format are not shown in the class charts.
 - When you finish, delete `%LOCALAPPDATA%\vesper-manual` (Linux: `~/vesper-manual`) and the `unlocked` folder.
