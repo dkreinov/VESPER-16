@@ -71,9 +71,40 @@ class TwoRunsTest(unittest.TestCase):
         rid = [x["run_id"] for x in reg.actives() if reg.data["runs"][x["run_id"]]["task"] == task][0]
         return rid, out
 
-    def test_harvest_box_shows_both_stage3_commands(self):
-        self.assertIn("python workshop.py new s3 --task T6", self.harvest_out)
-        self.assertIn("python workshop.py new s3 --task T3", self.harvest_out)
+    def test_harvest_box_recommends_task_both(self):
+        self.assertIn("python workshop.py new s3 --task both", self.harvest_out)
+
+    def test_new_s3_both_creates_two_runs(self):
+        out = capture(run, self.w, "new", "s3", "--task", "both", "--name", "MIRA")
+        reg = self.w.Registry.load()
+        acts = reg.actives()
+        self.assertEqual(sorted(reg.data["runs"][x["run_id"]]["task"] for x in acts), ["T3", "T6"])
+        runs = [reg.data["runs"][x["run_id"]] for x in acts]
+        self.assertEqual({r["stage"] for r in runs}, {"3"})
+        self.assertEqual({r["parent"] for r in runs}, {self.s1})
+        t6 = [x["run_id"] for x in acts if reg.data["runs"][x["run_id"]]["task"] == "T6"][0]
+        self.assertEqual(reg.data["runs"][t6]["name"], "MIRA")
+        self.assertIn("STAGE 3 RUN 1 of 2: T6 (new task, your name)", out)
+        self.assertIn("STAGE 3 RUN 2 of 2: T3 again (same task as stage 1)", out)
+        for x in acts:
+            self.assertIn("python workshop.py done " + x["run_id"], out)
+        with self.assertRaises(SystemExit):
+            run(self.w, "new", "s3", "--task", "both")
+
+    def test_both_keeps_t6_when_t3_fails(self):
+        orig = self.w.make_run_folder
+        def boom(reg, rid, task, *a, **k):
+            if task == "T3":
+                raise RuntimeError("disk full")
+            return orig(reg, rid, task, *a, **k)
+        self.w.make_run_folder = boom
+        try:
+            capture(run, self.w, "new", "s3", "--task", "both", "--name", "MIRA")
+        finally:
+            self.w.make_run_folder = orig
+        reg = self.w.Registry.load()
+        self.assertEqual([reg.data["runs"][x["run_id"]]["task"] for x in reg.actives()], ["T6"])
+        self.assertEqual(len([r for r in reg.data["runs"].values() if r["stage"] == "3"]), 1)
 
     def test_run_id_names_the_parent(self):
         rid, _ = self._new("T6", "--name", "mira")

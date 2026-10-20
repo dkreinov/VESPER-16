@@ -6,6 +6,7 @@
   python workshop.py done [run_id]          end stage 1 or 3: measure, grade, form
   python workshop.py skill                  stage 2: prints the skill-writing prompt (same thread)
   python workshop.py harvest                end stage 2: take the skill out, check it
+  python workshop.py new s3 --task both     stage 3, both runs (T6, then T3) in one command (recommended)
   python workshop.py new s3 --task T6       stage 3, run 1: T6 with your name, a NEW agent thread
   python workshop.py new s3 --task T3       stage 3, run 2: T3 again, a SECOND new agent thread
   python workshop.py unlock 4 <password>    grader (only after the agent is done)
@@ -670,7 +671,62 @@ def print_prompt(folder, prompt, then, cmd="python workshop.py done"):
     print("\n  2. Start a NEW thread. Copy everything between the PROMPT lines and send it.")
     prompt_block(prompt)
     print("\n  3. Wait until the agent says it is done. Do not ask it anything else in this thread.")
-    next_box(cmd, then)
+    if cmd:
+        next_box(cmd, then)
+
+
+def create_s3_run(reg, a, task, name=None):
+    """Create one stage-3 run (registry row, folder, active). Returns (run_id, folder, prompt).
+    On failure the registry row and active entry are removed, so no half state stays."""
+    src, parent, sh, shs = resolve_skill(reg, a.skill)
+    if task == "T6" and name is None:
+        raw = a.name if a.name is not None else ask(
+            "Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
+        name = T6F.normalise(raw)
+    name = name or ""
+    rid = s3_run_id(reg, parent, task)
+    reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""),
+                                 code=rid.rsplit("-", 1)[1], stage="3", parent=parent,
+                                 skill_source=a.skill if a.skill in ("own", "wiki") else "path",
+                                 skill_hash=sh, skill_has_solution=shs, session=None, name=name)
+    try:
+        f = make_run_folder(reg, rid, task, skill_dir=src, name=name)
+        prompt = render_prompt("stage3", task=task, run_id=rid)
+    except BaseException:
+        reg.data["runs"].pop(rid, None)
+        reg.save()
+        raise
+    reg.data["runs"][rid]["folder"] = f
+    reg.start_active(rid, "3")
+    reg.save()
+    return rid, f, prompt
+
+
+def new_s3_both(reg, a):
+    """new s3 --task both: the T6 run, then the T3 run, in one process and one terminal."""
+    first = create_s3_run(reg, a, "T6")
+    r1, f1, p1 = first
+    name = reg.data["runs"][r1]["name"]
+    print(c_bold("\nSTAGE 3 RUN 1 of 2: T6 (new task, your name)"))
+    banner("STAGE 3 - a NEW agent WITH the skill (%s, T6)        run %s" % (a.skill, r1))
+    if name:
+        print("\n  Name on the T6 screen: %s" % name)
+    stage3_card(reg.data.get("agent", ""))
+    memories_card(reg)
+    print_prompt(f1, p1, "", None)
+    print(c_bold("\nSTAGE 3 RUN 2 of 2: T3 again (same task as stage 1)"))
+    try:
+        r2, f2, p2 = create_s3_run(reg, a, "T3")
+    except Exception as e:
+        print(c_err("\n  The T3 run could not be created: %s" % e))
+        print("  The T6 run %s is valid. Start the T3 run later with:  python workshop.py new s3 --task T3" % r1)
+        next_box("python workshop.py done " + r1, "when the T6 agent says it is done, run:")
+        return 1
+    banner("STAGE 3 - a NEW agent WITH the skill (%s, T3)        run %s" % (a.skill, r2))
+    print_prompt(f2, p2, "", None)
+    next_box(["python workshop.py done %s   (T6)" % r1, "python workshop.py done %s   (T3)" % r2],
+             "when an agent says it is done, run its command:")
+    return 0
 
 
 def cmd_new(a):
@@ -684,12 +740,15 @@ def cmd_new(a):
                      "then run this command again.")
         reg = Registry.load()
     task = a.task
+    if task == "both" and a.stage != "s3":
+        sys.exit("--task both is for stage 3 only:  python workshop.py new s3 --task both")
     acts = reg.actives()
     blocking = acts if a.stage == "s1" else [x for x in acts if x["stage"] != "3"]
     if blocking:
         sys.exit("\n".join(active_lines(reg)))
     if a.stage == "s3":
-        same = [x for x in acts if reg.data["runs"].get(x["run_id"], {}).get("task") == task]
+        same = [x for x in acts if reg.data["runs"].get(x["run_id"], {}).get("task") in
+                (("T6", "T3") if task == "both" else (task,))]
         if same:
             sys.exit("Stage 3 with %s is already active: %s\n  When that agent is done:  %s"
                      % (task, same[0]["run_id"], next_cmd(same[0])))
@@ -711,20 +770,11 @@ def cmd_new(a):
         if g:
             sys.exit("A VESPER skill is in a global folder, so stage 3 would not be clean:\n  " + "\n  ".join(g)
                      + "\nMove it away (or run harvest / cleanup), then run this command again.")
-        src, parent, sh, shs = resolve_skill(reg, a.skill)
-        name = ""
-        if task == "T6":
-            raw = a.name if a.name is not None else ask(
-                "Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
-            name = T6F.normalise(raw)
-        rid = s3_run_id(reg, parent, task)
-        reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""),
-                                     code=rid.rsplit("-", 1)[1], stage="3", parent=parent,
-                                     skill_source=a.skill if a.skill in ("own", "wiki") else "path",
-                                     skill_hash=sh, skill_has_solution=shs, session=None, name=name)
-        f = make_run_folder(reg, rid, task, skill_dir=src, name=name)
-        prompt = render_prompt("stage3", task=task, run_id=rid)
+        if task == "both":
+            return new_s3_both(reg, a)
+        rid, f, prompt = create_s3_run(reg, a, task)
         banner("STAGE 3 - a NEW agent WITH the skill (%s, %s)        run %s" % (a.skill, task, rid))
+        name = reg.data["runs"][rid]["name"]
         if name:
             print("\n  Name on the T6 screen: %s" % name)
         stage3_card(reg.data.get("agent", ""))
@@ -1444,8 +1494,8 @@ def cmd_harvest(a):
     print(memory_line(row))
     memories_card(reg)
     submit(row, a)
-    next_box(["python workshop.py new s3 --task T6", "python workshop.py new s3 --task T3"],
-             "stage 3: TWO new agent threads. Run both commands:")
+    next_box("python workshop.py new s3 --task both",
+             "stage 3: TWO new agent threads (T6, then T3). Run:")
     return 0
 
 
@@ -1617,8 +1667,8 @@ def parse(argv):
     s.set_defaults(func=cmd_doctor)
     s = sub.add_parser("new")
     s.add_argument("stage", choices=["s1", "s3"])
-    s.add_argument("--task", default="T3", choices=["T3", "T4", "T6"])
-    s.add_argument("--name", help="T6 only: your name on the screen (up to 8 letters A-Z; default: asked)")
+    s.add_argument("--task", default="T3", choices=["T3", "T4", "T6", "both"])
+    s.add_argument("--name", help="T6 (or both) only: your name on the screen (up to 8 letters A-Z; default: asked)")
     s.add_argument("--method", default="random", choices=["random"] + METHODS)
     s.add_argument("--skill", default="own", help="own | wiki | <folder with SKILL.md>")
     s.set_defaults(func=cmd_new)
