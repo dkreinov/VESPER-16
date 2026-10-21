@@ -317,6 +317,47 @@ class DoneFieldsTest(unittest.TestCase):
         self.assertIn("  Isolation check: detected.", out)
         self.assertNotIn("time box: flagged", out)
 
+    def _s3(self, setup_s, prompt_before_cutoff, log=True):
+        """A stage-3 run whose folder was made setup_s before 'done'; the prompt was sent prompt_before_cutoff s before."""
+        w, _ = fresh_ws()
+        fakes.ready_for_s3(w)
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(w, "new", "s3", "--task", "T3")
+        reg = w.Registry.load()
+        rid = [x["run_id"] for x in reg.actives("3")][0]
+        folder = reg.data["runs"][rid]["folder"]
+        now = time.time()
+        if log:
+            p = now - prompt_before_cutoff
+            fakes.codex_log("0c0d0e0f-0000-1111-2222-3333444455%02d" % int(setup_s % 97), folder,
+                            [(p - 5, 5, 0, 1, "# Workshop run %s (AGENTS.md)" % rid),
+                             (p, 10, 0, 1, "Workshop run: %s\nBuild T3." % rid), (p + 30, 20, 0, 2, "")])
+        reg.data["active_runs"][rid]["start"] = now - setup_s
+        reg.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(w, "done", rid, "--no-form")
+        return w.Registry.load().row(rid, "3")
+
+    def test_overrun_counts_from_the_prompt_not_the_setup(self):     # review MAJOR-2, ruling R3
+        self.assertEqual(self._s3(14 * 60, 9 * 60)["overrun"], "no")     # 5 min of set-up, 9 min of agent
+        self.assertEqual(self._s3(14 * 60, 11 * 60)["overrun"], "yes")
+        self.assertEqual(self._s3(14 * 60, 0, log=False)["overrun"], "yes")   # no log time: folder-creation start
+        self.assertEqual(self._s3(5 * 60, 0, log=False)["overrun"], "no")
+
+    def test_prompt_time(self):
+        w, home = fresh_ws()
+        p = os.path.join(home, "c.jsonl")
+        with open(p, "w") as f:
+            for t, d in ((100, {"type": "user", "message": {"content": [{"type": "tool_result", "content": "x"}]}}),
+                         (110, {"type": "user", "message": {"content": "hello"}}),
+                         (120, {"type": "user", "message": {"content": [{"type": "text", "text": "Workshop run: s3-a"}]}})):
+                d["timestamp"] = iso(t)
+                f.write(json.dumps(d) + "\n")
+        self.assertAlmostEqual(w.prompt_time([p], "s3-a", 50, 200), 120, places=3)
+        self.assertAlmostEqual(w.prompt_time([p], "s3-b", 50, 200), 110, places=3)    # first user message in the window
+        self.assertIsNone(w.prompt_time([p], "s3-b", 150, 200))
+        self.assertIsNone(w.prompt_time([], "s3-b", 0, 200))
+
     def test_overrun_rule_stage3_only(self):
         w, _ = fresh_ws()
         self.assertEqual(w.overrun_flag("3", 0, 601), "yes")

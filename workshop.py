@@ -286,7 +286,8 @@ TIME_BOX_MIN = 10
 
 
 def overrun_flag(stage, t0, t1):
-    """'yes'/'no' for a stage-3 run over the time box; '' for stages 1 and 2 (the writer has 20 minutes)."""
+    """'yes'/'no' for a stage-3 run over the time box; '' for stages 1 and 2 (the writer has 20 minutes).
+    t0 is the time of the run's prompt in its log (prompt_time), or the folder-creation start when the log has none."""
     if str(stage) != "3":
         return ""
     return "yes" if t1 - t0 > TIME_BOX_MIN * 60 else "no"
@@ -1234,6 +1235,55 @@ def _memory_used_one(path, t0, t1):
     if any(ts is not None for ts, _ in lines):
         lines = [x for x in lines if x[0] is not None and t0 - 1 <= x[0] <= t1 + 1]
     return "yes" if any(_MEM_PATH_RE.search(t) for _, t in lines) else "no"
+
+
+def _user_text(d):
+    """Text of a user prompt in one log line (Codex user message / user_message event, Claude user text),
+    else None. Tool results are not prompts."""
+    t, p = d.get("type"), d.get("payload")
+    if t == "response_item" and isinstance(p, dict) and p.get("type") == "message" and p.get("role") in (None, "user"):
+        c = p.get("content")
+    elif t == "event_msg" and isinstance(p, dict) and p.get("type") == "user_message":
+        c = p.get("message")
+    elif t == "user":
+        c = (d.get("message") or {}).get("content")
+        if isinstance(c, list):
+            c = [b for b in c if isinstance(b, dict) and b.get("type") == "text"]
+            if not c:
+                return None
+    else:
+        return None
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join(str(b.get("text", "")) if isinstance(b, dict) else str(b) for b in c)
+    return None
+
+
+def prompt_time(paths, run_id, t0, t1):
+    """When the learner sent the run's prompt: the 'Workshop run: <id>' user message in [t0, t1], else the
+    first user message in [t0, t1]. None when the log has no such time."""
+    key = ("workshop run: %s" % run_id).lower()
+    first_key = first_user = None
+    for path in paths or []:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            for d in M.jsonl(path):
+                if not isinstance(d, dict):
+                    continue
+                ts = M.parse_ts(d.get("timestamp"))
+                if ts is None or not t0 - 1 <= ts <= t1 + 1:
+                    continue
+                txt = _user_text(d)
+                if txt is None:
+                    continue
+                first_user = ts if first_user is None else min(first_user, ts)
+                if key in txt.lower():
+                    first_key = ts if first_key is None else min(first_key, ts)
+        except Exception:
+            continue
+    return first_key if first_key is not None else first_user
 
 
 def memory_line(row):
@@ -2193,7 +2243,8 @@ def finish_stage(reg, rid, stage, a, grade=True):
     iso, iso_note = detect_outside_reads(session_paths(run.get("session")), t0, t1, run["folder"],
                                          writer=stage in ("1", "2"))
     fields["isolation"], fields["isolation_note"] = iso, iso_note
-    fields["overrun"] = overrun_flag(stage, t0, t1)
+    p0 = prompt_time(session_paths(run.get("session")), rid, t0, t1) if stage == "3" else None
+    fields["overrun"] = overrun_flag(stage, t0 if p0 is None else p0, t1)   # 10 min from the prompt, not the set-up
     fields["settings_confirmed"] = run.get("settings_confirmed", "")
     reg.set_row(rid, stage, fields)
     reg.save()
