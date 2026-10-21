@@ -343,5 +343,16 @@ class FlagStageTest(unittest.TestCase):
         self.assertTrue(charts.flagged(self.row("2", isolation="detected")))
 
 
+class PartialGradingTest(unittest.TestCase):
+    def test_partial_is_graded(self):
+        r = {f: "" for f in charts.FIELDS}
+        r.update(stage="3", task="T6", score="95", grading="partial")
+        self.assertEqual(charts.outcome(r), "pass")
+        r.update(score="40")
+        self.assertEqual(charts.outcome(r), "fail")
+        r.update(grading="ungraded")
+        self.assertEqual(charts.outcome(r), "ungraded")
+
+
 if __name__ == "__main__":
     unittest.main()

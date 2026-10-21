@@ -209,7 +209,8 @@ def passed(r):
 
 
 def is_graded(r):
-    return num(r.get("score")) is not None and (r.get("grading") or "graded") == "graded"
+    # "partial" = the grader ran on the solution frozen early (same rule as workshop.py): it counts as graded
+    return num(r.get("score")) is not None and (r.get("grading") or "graded") in ("graded", "partial")
 
 
 def outcome(r):
