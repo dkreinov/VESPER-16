@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""charts.py - the debrief charts from the results form export (4 topics, 5 SVGs).
+"""charts.py - the debrief charts from the results form export (5 SVGs).
 
   python charts.py EXPORT [EXPORT ...] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--out DIR] [--png]
                    [--date-format FMT] [--map "Header text=field" ...]
 
 EXPORT: the Microsoft Forms Excel export (.xlsx), a CSV of it, or the workshop's own results.csv.
 --from / --to: keep only rows whose completion date is in [from, to] (one event session each; inclusive).
-Writes DIR/charts.html (4 topics as 5 inline SVGs, each with a data table). --png also writes
+Writes DIR/charts.html (5 inline SVGs, each with a data table). --png also writes
 DIR/chart-<n>.png when matplotlib is installed; without matplotlib only the HTML page is written.
 Stdlib only (zipfile + ElementTree read the .xlsx).
 """
@@ -15,9 +15,8 @@ import xml.etree.ElementTree as ET
 
 FIELDS = ["alias", "run_id", "stage", "revision", "task", "agent", "model", "method", "skill_has_solution",
           "elapsed_min", "emulator_runs", "tok_uncached", "tok_cache_read", "tok_out", "cost_usd", "score",
-          "grading", "measurement"]
+          "grading", "measurement", "effort", "memory_used", "settings_confirmed", "isolation", "overrun"]
 DATE_HEADERS = ("completion time", "start time", "start")   # Forms columns first; results.csv has "start" (epoch)
-PASS = 90                    # score >= PASS = pass (as in the lab runs)
 # Own copy as numbers; the source of truth is workshop.py T6_BASELINE ("small model, no skill: 0/12 pass in 5 min").
 T6_BASELINE = (0, 12)        # small model, no skill: 0/12 pass in 5 min (Haiku 0/6, gpt-6-luna 0/6)
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]   # categorical slots 1-3 of the validated default palette
@@ -189,22 +188,87 @@ def parent_id(run_id):
     return "s1-" + m.group(1) if m else ""
 
 
+def arm(r):
+    """"control" (no skill) or "skill" for a stage-3 row: the run_id tag (n3/n6) or method "none". Never guess "skill" from the task."""
+    m = S3_ID.match(r.get("run_id", "") or "")
+    if (m and m.group(2).startswith("n")) or (r.get("method") or "").strip().lower() == "none":
+        return "control"
+    return "skill"
+
+
+def row_task(r):
+    """T3 or T6: from the run_id tag when it has one, else from the task field."""
+    m = S3_ID.match(r.get("run_id", "") or "")
+    return "T" + m.group(2)[-1] if m else (r.get("task") or "").upper()
+
+
+def passed(r):
+    """T6 pass = score >= 90; any other task = score 100. Same rule as passed() in workshop.py: keep both in sync."""
+    sc = num(r.get("score"))
+    return sc is not None and sc >= (90 if row_task(r) == "T6" else 100)
+
+
+def is_graded(r):
+    return num(r.get("score")) is not None and (r.get("grading") or "graded") == "graded"
+
+
+def outcome(r):
+    """"pass", "fail" or "ungraded"."""
+    return "ungraded" if not is_graded(r) else ("pass" if passed(r) else "fail")
+
+
+def flag_reasons(r):
+    out = []
+    if r.get("memory_used") == "yes":
+        out.append("memory used")
+    if r.get("isolation") == "detected":
+        out.append("isolation")
+    if r.get("settings_confirmed") != "yes":
+        out.append("settings not confirmed")
+    if r.get("overrun") == "yes":
+        out.append("over time box")
+    return out
+
+
+def flagged(r):
+    return bool(flag_reasons(r))
+
+
+def counts(rs):
+    """{"pass", "fail", "ungraded", "n"} over rows."""
+    c = {"pass": 0, "fail": 0, "ungraded": 0}
+    for r in rs:
+        c[outcome(r)] += 1
+    c["n"] = len(rs)
+    return c
+
+
 def learners(rows):
-    """One dict per stage-1 run: {"label", "s1", "s2", "T6", "T3"} (missing keys = no row)."""
+    """One dict per stage-1 run: {"label", "s1", "s2", "T6", "T3", "N6", "N3"} (missing keys = no row).
+    T3/T6 are with-skill rows only; N3/N6 are the no-skill controls."""
     by = {}
     for r in rows:
         rid, st = r.get("run_id", ""), r.get("stage", "")
         if st in ("1", "2") and rid.startswith("s1-"):
             by.setdefault(rid, {})["s%s" % st] = r
         elif st == "3" and parent_id(rid):
-            ctl = r.get("method") == "none" or S3_ID.match(rid).group(2).startswith("n")
-            by.setdefault(parent_id(rid), {})["N" + r.get("task", "T3")[-1] if ctl else r.get("task", "").upper()] = r   # N3 / N6 = control
+            t = row_task(r)
+            by.setdefault(parent_id(rid), {})[("N" + t[-1:]) if arm(r) == "control" else t] = r
     out = []
     for rid in sorted(by):
         g = by[rid]
         g["label"] = (g.get("s1") or {}).get("alias") or rid
         out.append(g)
     return out
+
+
+def skill_rows(rows, task="T6"):
+    """Stage-3 rows of one task that used the skill (never a control)."""
+    return [r for r in rows if r.get("stage") == "3" and row_task(r) == task and arm(r) == "skill"]
+
+
+def split_flagged(rs):
+    return [r for r in rs if not flagged(r)], [r for r in rs if flagged(r)]
 
 
 # ------------------------------------------------------------------ chart data (pure)
@@ -218,26 +282,38 @@ def money_time(groups):
             "time": [[num((g.get(k) or {}).get("elapsed_min")) for k in keys] for g in groups]}
 
 
-def leakage(groups):
-    """Points: x = stage-1 game % in the skill, y = stage-3 minutes; one point per stage-3 row."""
-    pts = []
-    for g in groups:
-        x = num((g.get("s2") or {}).get("skill_has_solution"))
-        if x is None:
-            x = num((g.get("T3") or g.get("T6") or {}).get("skill_has_solution"))
-        if x is None:
-            continue
-        for k in ("T6", "T3"):
-            r = g.get(k)
-            if r and num(r.get("elapsed_min")) is not None:
-                pts.append({"x": x, "y": num(r["elapsed_min"]), "series": k, "label": g["label"],
-                            "passed": (num(r.get("score")) or 0) >= PASS})
-    return pts
-
-
 def t6_pass(rows):
-    t6 = [r for r in rows if r.get("stage") == "3" and r.get("task", "").upper() == "T6" and num(r.get("score")) is not None]
-    return {"class": (sum(1 for r in t6 if num(r["score"]) >= PASS), len(t6)), "baseline": T6_BASELINE}
+    """Class T6 pass count, with-skill rows only, unflagged only, plus the other counts (nothing dropped silently)."""
+    t6 = skill_rows(rows, "T6")
+    clean, bad = split_flagged(t6)
+    c = counts(clean)
+    return {"class": (c["pass"], c["pass"] + c["fail"]), "baseline": T6_BASELINE, "counts": c, "flagged": len(bad),
+            "missing": sum(1 for g in learners(rows) if "s1" in g and "T6" not in g)}
+
+
+def paired(groups):
+    """T3/T6 with vs without the skill, per learner, only for pairs with the same model AND effort (empty effort = unknown).
+    Returns {"cells": {(model, effort, task, flagged): {"skill": counts, "control": counts, "pairs": n}},
+             "skipped": pairs with different or unknown settings, "missing": runs with no partner}."""
+    cells, skipped, missing = {}, 0, 0
+    for g in groups:
+        for t in ("3", "6"):
+            w, c = g.get("T" + t), g.get("N" + t)
+            if not w and not c:
+                continue
+            if not (w and c):
+                missing += 1
+                continue
+            same = w.get("model") == c.get("model") and w.get("effort") and w.get("effort") == c.get("effort")
+            if not same:
+                skipped += 1
+                continue
+            key = (w.get("model") or "?", w["effort"], "T" + t, flagged(w) or flagged(c))
+            cell = cells.setdefault(key, {"skill": [], "control": []})
+            cell["skill"].append(w)
+            cell["control"].append(c)
+    out = {k: {"skill": counts(v["skill"]), "control": counts(v["control"]), "pairs": len(v["skill"])} for k, v in cells.items()}
+    return {"cells": out, "skipped": skipped, "missing": missing}
 
 
 def methods(groups):
@@ -245,37 +321,56 @@ def methods(groups):
     for g in groups:
         r = g.get("T6")
         m = (g.get("s1") or {}).get("method") or (r or {}).get("method")
-        if not r or not m:
+        if not r or not m or flagged(r):
             continue
         d = acc.setdefault(m, {"times": [], "passed": 0, "n": 0})
         if num(r.get("elapsed_min")) is not None:
             d["times"].append(num(r["elapsed_min"]))
         d["n"] += 1
-        d["passed"] += (num(r.get("score")) or 0) >= PASS
+        d["passed"] += outcome(r) == "pass"
     return {m: {"median_min": statistics.median(d["times"]) if d["times"] else None, "passed": d["passed"], "n": d["n"]}
             for m, d in sorted(acc.items())}
 
 
+def pair_spec(groups):
+    p = paired(groups)
+    keys = sorted(p["cells"], key=lambda k: (k[3], k[2], k[0], k[1]))
+    labels, values, notes = [], [], []
+    for k in keys:
+        c = p["cells"][k]
+        labels.append("%s %s/%s%s" % (k[2], k[0], k[1], " [flagged]" if k[3] else ""))
+        values.append([c["skill"]["pass"], c["control"]["pass"]])
+        notes.append(["%dP %dF %dU of %d" % (c[a]["pass"], c[a]["fail"], c[a]["ungraded"], c["pairs"]) for a in ("skill", "control")])
+    nf = sum(c["pairs"] for k, c in p["cells"].items() if k[3])
+    hint = ("Pairs: %d (same model and effort). P = pass, F = fail, U = ungraded. Flagged pairs (memory used, isolation found, "
+            "settings not confirmed, or over the time box): %d, shown apart. Left out: %d pairs with different or unknown settings; "
+            "%d runs with no partner." % (sum(c["pairs"] for c in p["cells"].values()), nf, p["skipped"], p["missing"]))
+    return {"id": "pairs", "kind": "bars", "title": "2. With skill vs without skill: pass count per pair (T3 and T6)",
+            "groups": labels, "series": ["with skill", "without skill"], "values": values, "unit": "pass", "notes": notes, "hint": hint}
+
+
 def chart_specs(rows):
     g = learners(rows)
-    mt, pts, tp, me = money_time(g), leakage(g), t6_pass(rows), methods(g)
+    mt, tp, me = money_time(g), t6_pass(rows), methods(g)
     pc = lambda p, n: 100.0 * p / n if n else None
+    c = tp["counts"]
+    small_hint = ("With-skill T6 rows: %d pass, %d fail, %d ungraded; %d learners have no T6 row; %d flagged rows are not in the bar. "
+                  "The lab baseline used a 5-minute limit; the class used a 10-minute box."
+                  % (c["pass"], c["fail"], c["ungraded"], tp["missing"], tp["flagged"]))
     return [
-        {"id": "money", "kind": "bars", "title": "1a. Money per learner: stage 1 vs stage 3 (USD, API list price)",
+        {"id": "money", "kind": "bars", "title": "1a. Money per learner: stage 1 vs stage 3 (USD, API list price) (not a matched comparison)",
          "groups": mt["labels"], "series": SERIES3, "values": mt["cost"], "unit": "USD"},
-        {"id": "time", "kind": "bars", "title": "1b. Time per learner: stage 1 vs stage 3 (minutes)",
+        {"id": "time", "kind": "bars", "title": "1b. Time per learner: stage 1 vs stage 3 (minutes) (not a matched comparison)",
          "groups": mt["labels"], "series": SERIES3, "values": mt["time"], "unit": "min"},
-        {"id": "leak", "kind": "scatter", "title": "2. Leakage gap: T3 again vs T6, by the game share in the skill",
-         "points": pts, "series": ["T6", "T3"], "xlabel": "stage-1 game in the skill (%)", "ylabel": "stage-3 minutes",
-         "hint": "Hollow = score below %d. A skill that holds the T3 game makes T3-again fast; T6 shows what it teaches." % PASS},
-        {"id": "small", "kind": "bars", "title": "3. The small model can now do it: T6 pass rate (%)",
+        pair_spec(g),
+        {"id": "small", "kind": "bars", "title": "3. T6 pass rate with skill: class (10-minute box) vs lab baseline (5 minutes)",
          "groups": ["baseline: no skill (lab)", "this class: with skill"], "series": ["T6 pass rate (%)"],
          "values": [[pc(*tp["baseline"])], [pc(*tp["class"])]], "unit": "%",
-         "notes": [["%d/%d" % tp["baseline"]], ["%d/%d" % tp["class"]]]},
+         "notes": [["%d/%d" % tp["baseline"]], ["%d/%d" % tp["class"]]], "hint": small_hint},
         {"id": "methods", "kind": "bars", "title": "4. Side quest: T6 median minutes by skill-writing method",
          "groups": list(me), "series": ["median T6 minutes"], "values": [[me[m]["median_min"]] for m in me], "unit": "min",
          "notes": [["%d/%d pass" % (me[m]["passed"], me[m]["n"])] for m in me],
-         "hint": "Small groups: this is a hint, not proof."},
+         "hint": "Small groups: this is a hint, not proof. Flagged rows are left out."},
     ]
 
 
@@ -315,7 +410,7 @@ def svg_bars(spec, W=680, H=320):
                         esc(lab), esc(series[si]), fmt(v), esc(spec["unit"])))
             if notes and notes[gi][si]:
                 p.append('<text class="note" x="%.1f" y="%.1f" text-anchor="middle">%s</text>' % (x + bw / 2, y - 4, esc(notes[gi][si])))
-        p.append('<text class="tick" x="%.1f" y="%d" text-anchor="middle">%s</text>' % (L + gi * gw + gw / 2, T + ph + 16, esc(str(lab)[:22])))
+        p.append('<text class="tick" x="%.1f" y="%d" text-anchor="middle">%s</text>' % (L + gi * gw + gw / 2, T + ph + 16, esc(str(lab)[:30])))
     if ns > 1:
         for si, s in enumerate(series):
             x = L + si * 210
@@ -325,41 +420,10 @@ def svg_bars(spec, W=680, H=320):
     return "".join(p)
 
 
-def svg_scatter(spec, W=680, H=320):
-    L, R, T, B = 56, 16, 16, 64
-    pts = spec["points"]
-    pw, ph = W - L - R, H - T - B
-    ymax = max([q["y"] for q in pts] or [0]) or 1.0
-    sx = lambda x: L + pw * min(max(x, 0), 100) / 100
-    sy = lambda y: T + ph - ph * y / ymax
-    p = ['<svg viewBox="0 0 %d %d" width="100%%" role="img" aria-label="%s">' % (W, H, esc(spec["title"]))]
-    for k in range(5):
-        y = T + ph - ph * k / 4
-        p.append('<line class="grid" x1="%d" x2="%d" y1="%.1f" y2="%.1f"/>' % (L, W - R, y, y))
-        p.append('<text class="tick" x="%d" y="%.1f" text-anchor="end">%s</text>' % (L - 6, y + 4, fmt(ymax * k / 4)))
-        p.append('<text class="tick" x="%.1f" y="%d" text-anchor="middle">%d</text>' % (sx(25 * k), T + ph + 16, 25 * k))
-    p.append('<text class="tick" x="%.1f" y="%d" text-anchor="middle">%s</text>' % (L + pw / 2, T + ph + 34, esc(spec["xlabel"])))
-    for q in pts:
-        c = COLORS[spec["series"].index(q["series"]) % len(COLORS)]
-        p.append('<circle cx="%.1f" cy="%.1f" r="6" fill="%s" stroke="%s" stroke-width="2"><title>%s %s: %s%% game in skill, %s min%s</title></circle>'
-                 % (sx(q["x"]), sy(q["y"]), c if q["passed"] else "var(--surface)", c, esc(q["label"]), q["series"],
-                    fmt(q["x"]), fmt(q["y"]), "" if q["passed"] else ", score below %d" % PASS))
-    for si, s in enumerate(spec["series"]):
-        x = L + si * 160
-        p.append('<circle cx="%d" cy="%d" r="5" fill="%s"/><text class="tick" x="%d" y="%d">%s</text>'
-                 % (x + 5, H - 13, COLORS[si], x + 14, H - 9, "T6" if s == "T6" else "T3 again"))
-    p.append("</svg>")
-    return "".join(p)
-
-
 def html_table(spec):
-    if spec["kind"] == "scatter":
-        head = ["learner", "task", spec["xlabel"], spec["ylabel"], "pass"]
-        body = [[q["label"], q["series"], fmt(q["x"]), fmt(q["y"]), "yes" if q["passed"] else "no"] for q in spec["points"]]
-    else:
-        head = [""] + spec["series"] + (["note"] if spec.get("notes") else [])
-        body = [[g] + [fmt(v) for v in spec["values"][i]] + ([" ".join(n or "" for n in spec["notes"][i])] if spec.get("notes") else [])
-                for i, g in enumerate(spec["groups"])]
+    head = [""] + spec["series"] + (["note"] if spec.get("notes") else [])
+    body = [[g] + [fmt(v) for v in spec["values"][i]] + ([" | ".join(n or "" for n in spec["notes"][i])] if spec.get("notes") else [])
+            for i, g in enumerate(spec["groups"])]
     rows = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % esc(c) for c in r) for r in body)
     return "<table><tr>%s</tr>%s</table>" % ("".join("<th>%s</th>" % esc(h) for h in head), rows)
 
@@ -377,7 +441,7 @@ def render_html(specs, subtitle):
              "<h1>Workshop charts</h1><p class='hint'>%s</p>" % esc(subtitle)]
     for s in specs:
         parts.append("<h2>%s</h2>" % esc(s["title"]))
-        parts.append(svg_scatter(s) if s["kind"] == "scatter" else svg_bars(s))
+        parts.append(svg_bars(s))
         if s.get("hint"):
             parts.append("<p class='hint'>%s</p>" % esc(s["hint"]))
         parts.append(html_table(s))
@@ -395,21 +459,13 @@ def write_pngs(specs, out):
     files = []
     for n, s in enumerate(specs, 1):
         fig, ax = plt.subplots(figsize=(7, 3.4))
-        if s["kind"] == "scatter":
-            for si, name in enumerate(s["series"]):
-                q = [p for p in s["points"] if p["series"] == name]
-                ax.scatter([p["x"] for p in q], [p["y"] for p in q], s=50, edgecolors=COLORS[si], linewidths=2,
-                           facecolors=[COLORS[si] if p["passed"] else "none" for p in q], label=name)
-            ax.set_xlabel(s["xlabel"])
-            ax.set_ylabel(s["ylabel"])
-        else:
-            ns = len(s["series"])
-            for si, name in enumerate(s["series"]):
-                xs = [gi + (si - (ns - 1) / 2) * 0.8 / ns for gi in range(len(s["groups"]))]
-                ax.bar(xs, [s["values"][gi][si] or 0 for gi in range(len(s["groups"]))], width=0.8 / ns,
-                       color=COLORS[si], label=name)
-            ax.set_xticks(range(len(s["groups"])))
-            ax.set_xticklabels(s["groups"], fontsize=8)
+        ns = len(s["series"])
+        for si, name in enumerate(s["series"]):
+            xs = [gi + (si - (ns - 1) / 2) * 0.8 / ns for gi in range(len(s["groups"]))]
+            ax.bar(xs, [s["values"][gi][si] or 0 for gi in range(len(s["groups"]))], width=0.8 / ns,
+                   color=COLORS[si], label=name)
+        ax.set_xticks(range(len(s["groups"])))
+        ax.set_xticklabels(s["groups"], fontsize=8)
         if len(s["series"]) > 1:
             ax.legend(fontsize=8)
         ax.set_title(s["title"], fontsize=10)
