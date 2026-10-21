@@ -201,10 +201,36 @@ class TaskAllTest(unittest.TestCase):
         out = capture(self.w.show_compare, reg)
         self.assertEqual(out.count("(same model)"), 1)
         self.assertEqual(out.count("Settings differ"), 1)
-        reg.data["rows"]["%s|3" % ids["n3"]]["effort"] = ""         # empty effort = unknown = not the same
-        reg.data["rows"]["%s|3" % ids["t3"]]["effort"] = ""
+        reg.data["rows"]["%s|3" % ids["n3"]]["effort"] = ""         # only one effort known: not matched
         out = capture(self.w.show_compare, reg)
         self.assertEqual(out.count("Settings differ"), 1)
+        reg.data["rows"]["%s|3" % ids["t3"]]["effort"] = ""         # both empty, same model (Claude/Cursor): matched
+        out = capture(self.w.show_compare, reg)
+        self.assertNotIn("Settings differ", out)
+        self.assertIn("T3: WITH vs WITHOUT the skill (same model; effort not recorded)", out)
+        for r in reg.data["rows"].values():                          # empty model is never matched
+            r["model"], r["effort"] = "", ""
+        out = capture(self.w.show_compare, reg)
+        self.assertEqual(out.count("Settings differ"), 2)
+
+    def test_results_table_has_pass_fail_and_one_cost_note(self):   # review MINOR-1, MINOR-2
+        reg, ids = self._graded("100", "95", "90", "50")
+        reg.save()
+        out = capture(run, self.w, "show")
+        self.assertEqual(out.count("Estimated cost under the kit's price assumptions."), 1)
+        table = out.split("Observed results")[0]
+        self.assertIn("95 FAIL", table)
+        self.assertIn("100 PASS", table)
+
+    def test_repeat_attempt_earliest_is_paired(self):              # review MINOR-4
+        reg, ids = self._graded("100", "40", "90", "50")
+        reg.data["runs"]["s3-zzzz-t6-9999"] = dict(reg.data["runs"][ids["t6"]])
+        reg.set_row("s3-zzzz-t6-9999", "3", dict(task="T6", cost_usd="0.10", score="10", elapsed_min="1",
+                                                start="99999999999", method="plain"))
+        out = capture(self.w.show_compare, reg)
+        self.assertIn("90 PASS", out)
+        self.assertNotIn("10 FAIL", out)
+        self.assertIn("T6 +40", self.w.leakage_line(reg, reg.data["runs"][ids["t3"]]["parent"]))
 
     def test_passed_rule(self):
         p = self.w.passed

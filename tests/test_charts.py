@@ -234,6 +234,43 @@ class ArmsAndPairsTest(unittest.TestCase):
             p = charts.paired(charts.learners(self.rows_pair(**kw)))
             self.assertEqual((p["cells"], p["skipped"]), ({}, 2), kw)
 
+    def test_effort_not_recorded_pairs_by_model(self):          # ruling R4: Claude Code / Cursor log no effort
+        rows = self.rows_pair(eff_ctl="")
+        for r in rows:
+            if r["stage"] == "3":
+                r["effort"] = ""
+        p = charts.paired(charts.learners(rows))
+        self.assertEqual(p["skipped"], 0)
+        self.assertEqual(p["cells"][("m", "", "T6", False)]["pairs"], 1)
+        self.assertIn("T6 m (effort not recorded)", charts.pair_spec(charts.learners(rows))["groups"])
+
+    def test_empty_model_never_pairs(self):                       # review MINOR-3
+        rows = self.rows_pair(model_ctl="")
+        for r in rows:
+            r["model"] = ""
+        p = charts.paired(charts.learners(rows))
+        self.assertEqual((p["cells"], p["skipped"]), ({}, 2))
+
+    def test_repeat_attempts_earliest_kept_and_counted(self):     # review MINOR-4
+        rows = self.rows_pair()
+        for i, r in enumerate(rows):
+            r["start"] = str(100 + i)
+        rows.append(r3("s3-aaaa-t6-9999", "T6", score="10", start="999"))
+        g = charts.learners(rows)[0]
+        self.assertEqual((g["T6"]["run_id"], g["repeats"]), ("s3-aaaa-t6-1111", 1))
+        self.assertEqual(charts.t6_pass(rows)["class"], (1, 1))
+        self.assertIn("1 repeat attempt not shown", charts.pair_spec(charts.learners(rows))["hint"])
+        small = [s for s in charts.chart_specs(rows) if s["id"] == "small"][0]
+        self.assertIn("1 repeat attempt not shown", small["hint"])
+
+    def test_unconfirmed_counted_not_flagged(self):              # ruling R9
+        rows = self.rows_pair(settings_confirmed="not_asked")
+        spec = charts.pair_spec(charts.learners(rows))
+        self.assertNotIn("[flagged]", " ".join(spec["groups"]))
+        self.assertIn("2 runs: settings not confirmed by the gate", spec["hint"])
+        small = [s for s in charts.chart_specs(rows) if s["id"] == "small"][0]
+        self.assertIn("1 run: settings not confirmed by the gate", small["hint"])
+
     def test_missing_partner_counted(self):
         rows = [s1("aaaa"), r3("s3-aaaa-t6-1111", "T6", score="95")]
         p = charts.paired(charts.learners(rows))
@@ -248,9 +285,11 @@ class ArmsAndPairsTest(unittest.TestCase):
     def test_flag_reasons(self):
         base = r3("s3-aaaa-t6-1111", "T6", score="100")
         self.assertFalse(charts.flagged(base))
-        for kw in ({"memory_used": "yes"}, {"isolation": "detected"}, {"settings_confirmed": ""}, {"settings_confirmed": "no"},
+        for kw in ({"memory_used": "yes"}, {"isolation": "detected"}, {"settings_confirmed": "no"},
                    {"overrun": "yes"}):
             self.assertTrue(charts.flagged(dict(base, **kw)), kw)
+        for kw in ({"settings_confirmed": ""}, {"settings_confirmed": "not_asked"}):      # unconfirmed: not a flag
+            self.assertFalse(charts.flagged(dict(base, **kw)), kw)
         self.assertFalse(charts.flagged(dict(base, isolation="not_detected", overrun="no")))
 
     def test_t6_counts_flagged_ungraded_missing(self):
@@ -264,7 +303,7 @@ class ArmsAndPairsTest(unittest.TestCase):
         small = [s for s in charts.chart_specs(rows) if s["id"] == "small"][0]
         self.assertIn("1 ungraded", small["hint"])
         self.assertIn("1 flagged", small["hint"])
-        self.assertIn("1 learners have no T6 row", small["hint"])
+        self.assertIn("1 learner has no T6 row", small["hint"])
 
     def test_titles(self):
         specs = {s["id"]: s for s in charts.chart_specs([s1("aaaa")])}
@@ -294,7 +333,8 @@ class FlagStageTest(unittest.TestCase):
             self.assertFalse(charts.flagged(self.row(st, overrun="yes")), st)
 
     def test_stage3_flags(self):
-        self.assertTrue(charts.flagged(self.row("3", settings_confirmed="")))
+        self.assertFalse(charts.flagged(self.row("3", settings_confirmed="")))
+        self.assertTrue(charts.flagged(self.row("3", settings_confirmed="no")))
         self.assertTrue(charts.flagged(self.row("3", settings_confirmed="yes", overrun="yes")))
         self.assertFalse(charts.flagged(self.row("3", settings_confirmed="yes", overrun="no")))
 

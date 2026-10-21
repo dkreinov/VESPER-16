@@ -225,7 +225,8 @@ def flag_reasons(r):
         out.append("isolation")
     # The settings gate and the 10-minute box exist only in stage 3 (the stage-1 writer has 20 minutes, no gate).
     s3 = str(r.get("stage", "")) == "3"
-    if s3 and r.get("settings_confirmed") != "yes":
+    # Only an explicit "no" is flagged; "" or "not_asked" (no gate, e.g. no terminal) is unconfirmed: counted, not flagged.
+    if s3 and r.get("settings_confirmed") == "no":
         out.append("settings not confirmed")
     if s3 and r.get("overrun") == "yes":
         out.append("over time box")
@@ -234,6 +235,15 @@ def flag_reasons(r):
 
 def flagged(r):
     return bool(flag_reasons(r))
+
+
+def unconfirmed(r):
+    """A stage-3 row whose settings the gate did not confirm ("" or "not_asked"). Not a flag."""
+    return str(r.get("stage", "")) == "3" and r.get("settings_confirmed") not in ("yes", "no")
+
+
+def plural(n, one, many):
+    return "%d %s" % (n, one if n == 1 else many)
 
 
 def counts(rs):
@@ -248,18 +258,23 @@ def counts(rs):
 def learners(rows):
     """One dict per stage-1 run: {"label", "s1", "s2", "T6", "T3", "N6", "N3"} (missing keys = no row).
     T3/T6 are with-skill rows only; N3/N6 are the no-skill controls."""
-    by = {}
-    for r in rows:
+    by, repeats = {}, {}
+    for r in sorted(rows, key=lambda r: num(r.get("start")) or 0):       # repeat attempts: the earliest one is kept
         rid, st = r.get("run_id", ""), r.get("stage", "")
         if st in ("1", "2") and rid.startswith("s1-"):
             by.setdefault(rid, {})["s%s" % st] = r
         elif st == "3" and parent_id(rid):
             t = row_task(r)
-            by.setdefault(parent_id(rid), {})[("N" + t[-1:]) if arm(r) == "control" else t] = r
+            g, k = by.setdefault(parent_id(rid), {}), ("N" + t[-1:]) if arm(r) == "control" else t
+            if k in g and g[k].get("run_id") != rid:
+                repeats[parent_id(rid)] = repeats.get(parent_id(rid), 0) + 1
+            else:
+                g[k] = r
     out = []
     for rid in sorted(by):
         g = by[rid]
         g["label"] = (g.get("s1") or {}).get("alias") or rid
+        g["repeats"] = repeats.get(rid, 0)
         out.append(g)
     return out
 
@@ -286,15 +301,20 @@ def money_time(groups):
 
 def t6_pass(rows):
     """Class T6 pass count, with-skill rows only, unflagged only, plus the other counts (nothing dropped silently)."""
-    t6 = skill_rows(rows, "T6")
+    groups = learners(rows)
+    t6 = [g["T6"] for g in groups if "T6" in g]               # one with-skill T6 row per learner (repeats not counted)
     clean, bad = split_flagged(t6)
     c = counts(clean)
     return {"class": (c["pass"], c["pass"] + c["fail"]), "baseline": T6_BASELINE, "counts": c, "flagged": len(bad),
-            "missing": sum(1 for g in learners(rows) if "s1" in g and "T6" not in g)}
+            "missing": sum(1 for g in groups if "s1" in g and "T6" not in g),
+            "repeats": sum(g.get("repeats", 0) for g in groups),
+            "unconfirmed": sum(1 for r in t6 if unconfirmed(r))}
 
 
 def paired(groups):
-    """T3/T6 with vs without the skill, per learner, only for pairs with the same model AND effort (empty effort = unknown).
+    """T3/T6 with vs without the skill, per learner, only for matched pairs: the same non-empty model and the same
+    effort, or BOTH efforts empty (Claude Code and Cursor do not log effort; the cell's effort is then "").
+    Same rule as settings_match() in workshop.py: keep both in sync.
     Returns {"cells": {(model, effort, task, flagged): {"skill": counts, "control": counts, "pairs": n}},
              "skipped": pairs with different or unknown settings, "missing": runs with no partner}."""
     cells, skipped, missing = {}, 0, 0
@@ -306,11 +326,12 @@ def paired(groups):
             if not (w and c):
                 missing += 1
                 continue
-            same = w.get("model") == c.get("model") and w.get("effort") and w.get("effort") == c.get("effort")
+            ew, ec = (w.get("effort") or "").strip(), (c.get("effort") or "").strip()
+            same = bool(w.get("model")) and w.get("model") == c.get("model") and ew == ec
             if not same:
                 skipped += 1
                 continue
-            key = (w.get("model") or "?", w["effort"], "T" + t, flagged(w) or flagged(c))
+            key = (w["model"], ew, "T" + t, flagged(w) or flagged(c))
             cell = cells.setdefault(key, {"skill": [], "control": []})
             cell["skill"].append(w)
             cell["control"].append(c)
@@ -340,13 +361,18 @@ def pair_spec(groups):
     labels, values, notes = [], [], []
     for k in keys:
         c = p["cells"][k]
-        labels.append("%s %s/%s%s" % (k[2], k[0], k[1], " [flagged]" if k[3] else ""))
+        labels.append("%s %s%s%s" % (k[2], k[0], ("/" + k[1]) if k[1] else " (effort not recorded)", " [flagged]" if k[3] else ""))
         values.append([c["skill"]["pass"], c["control"]["pass"]])
         notes.append(["%dP %dF %dU of %d" % (c[a]["pass"], c[a]["fail"], c[a]["ungraded"], c["pairs"]) for a in ("skill", "control")])
     nf = sum(c["pairs"] for k, c in p["cells"].items() if k[3])
-    hint = ("Pairs: %d (same model and effort). P = pass, F = fail, U = ungraded. Flagged pairs (memory used, isolation found, "
-            "settings not confirmed, or over the time box): %d, shown apart. Left out: %d pairs with different or unknown settings; "
-            "%d runs with no partner." % (sum(c["pairs"] for c in p["cells"].values()), nf, p["skipped"], p["missing"]))
+    rs = [g[k] for g in groups for k in ("T3", "T6", "N3", "N6") if k in g]
+    hint = ("Pairs: %d (same model and effort; for Claude Code and Cursor, which do not record effort, the same model). "
+            "P = pass, F = fail, U = ungraded. Flagged pairs (memory used, isolation found, "
+            "settings answered no, or over the time box): %d, shown apart. Left out: %s with different or unknown settings; "
+            "%s with no partner. %s: settings not confirmed by the gate. %s not shown."
+            % (sum(c["pairs"] for c in p["cells"].values()), nf, plural(p["skipped"], "pair", "pairs"),
+               plural(p["missing"], "run", "runs"), plural(sum(1 for r in rs if unconfirmed(r)), "run", "runs"),
+               plural(sum(g.get("repeats", 0) for g in groups), "repeat attempt", "repeat attempts")))
     return {"id": "pairs", "kind": "bars", "title": "2. With skill vs without skill: pass count per pair (T3 and T6)",
             "groups": labels, "series": ["with skill", "without skill"], "values": values, "unit": "pass", "notes": notes, "hint": hint}
 
@@ -356,9 +382,12 @@ def chart_specs(rows):
     mt, tp, me = money_time(g), t6_pass(rows), methods(g)
     pc = lambda p, n: 100.0 * p / n if n else None
     c = tp["counts"]
-    small_hint = ("With-skill T6 rows: %d pass, %d fail, %d ungraded; %d learners have no T6 row; %d flagged rows are not in the bar. "
+    small_hint = ("With-skill T6 rows: %d pass, %d fail, %d ungraded; %s no T6 row; %s not in the bar. "
+                  "%s: settings not confirmed by the gate. %s not shown. "
                   "The lab baseline used a 5-minute limit; the class used a 10-minute box."
-                  % (c["pass"], c["fail"], c["ungraded"], tp["missing"], tp["flagged"]))
+                  % (c["pass"], c["fail"], c["ungraded"], plural(tp["missing"], "learner has", "learners have"),
+                     plural(tp["flagged"], "flagged row is", "flagged rows are"),
+                     plural(tp["unconfirmed"], "run", "runs"), plural(tp["repeats"], "repeat attempt", "repeat attempts")))
     return [
         {"id": "money", "kind": "bars", "title": "1a. Money per learner: stage 1 vs stage 3 (USD, API list price) (not a matched comparison)",
          "groups": mt["labels"], "series": SERIES3, "values": mt["cost"], "unit": "USD"},

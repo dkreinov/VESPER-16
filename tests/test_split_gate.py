@@ -120,6 +120,18 @@ class Gate(unittest.TestCase):
         rid = list(reg.data["runs"])[0]
         self.assertNotIn("settings_confirmed", reg.data["runs"][rid])
 
+    def test_s3_not_tty_records_not_asked(self):        # ruling R9: no gate -> "not_asked", never "no"
+        fakes.ready_for_s3(self.w)
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.w, "new", "s3", "--task", "all", "--name", "MIRA")
+        reg = self.w.Registry.load()
+        rids = [x["run_id"] for x in reg.actives("3")]
+        self.assertEqual(len(rids), 4)
+        self.assertEqual({reg.data["runs"][r].get("settings_confirmed") for r in rids}, {"not_asked"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            run(self.w, "done", rids[0], "--no-form")
+        self.assertEqual(self.w.Registry.load().row(rids[0], "3")["settings_confirmed"], "not_asked")
+
     def test_s3_both_pages_and_row(self):
         s1, _ = fakes.ready_for_s3(self.w)
         out, asked = self._tty(["y", "", "y"], "new", "s3", "--task", "both", "--name", "MIRA")

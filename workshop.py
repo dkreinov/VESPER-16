@@ -423,6 +423,8 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
 def s3_show(reg, rid, n, total, task, folder, prompt, desc=None, extra=None):
     """Show one stage-3 run: its own page in a terminal, else the plain block."""
     if not gate_on():
+        reg.data["runs"][rid]["settings_confirmed"] = "not_asked"     # no terminal, no gate: unconfirmed, not "no"
+        reg.save()
         return s3_run_block(n, total, task, folder, prompt, desc=desc)
     agent = reg.data.get("agent") or ""
     model = SMALL_SHORT.get(agent) or "; ".join("%s %s" % (k, v) for k, v in SMALL_SHORT.items())
@@ -2004,7 +2006,7 @@ FAILED_NOTE = "  At least one attempt failed. Costs describe attempts, not equal
 
 def show_rows(rows, note=True):
     cols = [("run_id", 16), ("stage", 5), ("task", 4), ("model", 20), ("elapsed_min", 7), ("emulator_runs", 6),
-            ("tok_in", 9), ("tok_out", 8), ("cost_usd", 7), ("score", 6), ("grading", 9)]
+            ("tok_in", 9), ("tok_out", 8), ("cost_usd", 7), ("score", 9), ("grading", 9)]
     print("  ".join(n.ljust(w) for n, w in cols))
     for r in rows:
         tin = sum(int(r.get(k) or 0) for k in ("tok_uncached", "tok_cache_read", "tok_cache_write")
@@ -2012,7 +2014,8 @@ def show_rows(rows, note=True):
         mdl = r.get("model", "")
         if mdl and r.get("effort"):
             mdl = "%s/%s" % (mdl, r["effort"])
-        v = dict(r, model=mdl, tok_in=M.fmt_k(tin) if tin else "", tok_out=M.fmt_k(int(r["tok_out"])) if str(r.get("tok_out", "")).isdigit() else "")
+        sc = ("%s %s" % (r.get("score", ""), verdict(r))).strip()
+        v = dict(r, model=mdl, score=sc, tok_in=M.fmt_k(tin) if tin else "", tok_out=M.fmt_k(int(r["tok_out"])) if str(r.get("tok_out", "")).isdigit() else "")
         print("  ".join(str(v.get(n, ""))[:w].ljust(w) for n, w in cols))
     if note and any(str(r.get("cost_usd", "")).strip() for r in rows):
         print(COST_NOTE)
@@ -2056,13 +2059,25 @@ def tasks_word(n):
     return "task" if n == 1 else "tasks"
 
 
+def settings_match(rw, rc):
+    """'same': same non-empty model and same non-empty effort. 'no_effort': same non-empty model and BOTH
+    efforts empty (Claude Code and Cursor do not log effort). '' otherwise: models differ or are unknown,
+    efforts differ, or only one effort is known."""
+    g = lambda r, k: str((r or {}).get(k, "")).strip()
+    if not g(rw, "model") or g(rw, "model") != g(rc, "model"):
+        return ""
+    ew, ec = g(rw, "effort"), g(rc, "effort")
+    if not ew and not ec:
+        return "no_effort"
+    return "same" if ew and ew == ec else ""
+
+
 def same_settings(rw, rc):
-    """True only when both rows have the same model AND the same effort. An empty value is unknown, so not the same."""
-    for k in ("model", "effort"):
-        a, b = str((rw or {}).get(k, "")).strip(), str((rc or {}).get(k, "")).strip()
-        if not a or a != b:
-            return False
-    return True
+    """True when the pair is a matched comparison (see settings_match)."""
+    return bool(settings_match(rw, rc))
+
+
+SAME_LABEL = {"same": " (same model)", "no_effort": " (same model; effort not recorded)"}
 
 
 def verdict(row):
@@ -2074,8 +2089,9 @@ def verdict(row):
 
 def compare_control(reg, rw, rc, task="T3", note=""):
     """Task WITH the skill (rw) vs WITHOUT the skill (rc, control), same parent."""
-    if same_settings(rw, rc):
-        banner("%s: WITH vs WITHOUT the skill (same model)%s" % (task, note))
+    match = settings_match(rw, rc)
+    if match:
+        banner("%s: WITH vs WITHOUT the skill%s%s" % (task, SAME_LABEL[match], note))
     else:
         banner("%s: WITH vs WITHOUT the skill%s" % (task, note))
         print(UNMATCHED_NOTE)
@@ -2111,10 +2127,10 @@ def _gain(rw, rc):
 def leakage_line(reg, parent):
     """Observed score gains, when both pairs (T3 and T6, skill vs control) are graded. No verdict."""
     g = {}
-    for r in reg.data["rows"].values():
+    for r in sorted(reg.data["rows"].values(), key=lambda r: float(r["start"] or 0)):   # earliest attempt
         run = reg.data["runs"].get(r["run_id"], {})
         if r["stage"] == "3" and run.get("parent") == parent:
-            g[(r["task"], is_control(run) or r.get("method") == "none")] = r
+            g.setdefault((r["task"], is_control(run) or r.get("method") == "none"), r)
     gains = [_gain(g.get((t, False)), g.get((t, True))) if (t, False) in g and (t, True) in g else None
              for t in ("T3", "T6")]
     if None in gains:
@@ -2135,7 +2151,7 @@ def payback(reg, r1, r2, r3, t6=False, shown_table=False):
               % (AFTER_ALL if reg.actives("3") else "Now"))
 
 
-def show_compare(reg, s3_id=None):
+def show_compare(reg, s3_id=None, cost_note=True):
     """Real pairs only: the same task on the same model, WITH vs WITHOUT the skill (T3 and T6).
     The stage-1 writer (large model) is never put in a table; it appears in one cost line."""
     rows3 = [r for r in reg.data["rows"].values() if r["stage"] == "3"]
@@ -2151,12 +2167,12 @@ def show_compare(reg, s3_id=None):
     if not pick:
         return
     print("\n" + OBSERVED_NOTE)
-    if any(str(r.get("cost_usd", "")).strip() for r in rows3):
+    if cost_note and any(str(r.get("cost_usd", "")).strip() for r in rows3):
         print(COST_NOTE)
     for parent in parents:
         mine = [r for r in rows3 if runs.get(r["run_id"], {}).get("parent") == parent]
         g = {}
-        for r in mine:
+        for r in sorted(mine, key=lambda r: float(r["start"] or 0)):    # repeat attempts: the earliest one
             run = runs.get(r["run_id"], {})
             g.setdefault((r["task"], is_control(run) or r.get("method") == "none"), r)
         reg_ctl = {run["task"] for run in runs.values()
@@ -2286,7 +2302,7 @@ def cmd_done(a):
     clear_screen()
     banner("STAGE %s FINISHED        run %s" % (stage, rid))
     print()
-    show_rows([row])
+    show_rows([row], note=stage != "3")          # stage 3: show_compare prints the cost note once
     print(ascii_frame(snap_path(rid, stage)))
     print(memory_line(row))
     print(isolation_lines(row))
@@ -2548,7 +2564,7 @@ def cmd_show(a):
         print("No results yet.")
     else:
         show_rows(rows)
-        show_compare(reg)
+        show_compare(reg, cost_note=False)          # show_rows printed the cost note: once per output
         if not reg.actives() and any(needs_submit(r) for r in rows):
             all_done_box(reg, show=False)
     for x in reg.actives():

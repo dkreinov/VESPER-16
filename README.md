@@ -89,15 +89,16 @@ Codex: if Memories are on, type /memories first in each new workshop thread and 
 **Stage 3 runs four agents at the same time.** `new s3 --task all` (the default way; `--name` works with it)
 makes four runs in one command: (1) T3 WITH your skill, (2) T3 WITHOUT the skill (the control: same model, same
 task, no skill in the folder, and a prompt without the skill sentences; stop it at 10 min),
-(3) T6 WITH your skill (a new task: the real test), and (4) T6 WITHOUT the skill (control, same name on the
-nameplate; stop it at 10 min). Runs 2 and 4 show what the skill adds in one attempt; `show` compares each pair, marks each score
+(3) T6 WITH your skill (a different task that shares components with T3), and (4) T6 WITHOUT the skill (control, same name on the
+nameplate; stop it at 10 min). Runs 2 and 4 make the matched comparison: what the skill adds in one attempt; `show` compares each pair, marks each score
 PASS or FAIL, and prints the observed score gains on T3 and T6. These results neither identify nor rule out answer
 reuse, and reliability is unknown (one attempt per condition). The tool prints the order to start the four threads
-(random per stage-1 run). At the end of each run it prints an isolation check: a scan of the agent log for reads
-outside the run folder. The scan finds some outside reads; it is not proof. A run that takes more than 10 minutes
+(random per stage-1 run) and shows the runs in that order. At the end of each run it prints an isolation check: a scan
+of the agent's tool calls for reads of other run folders, the kit folder and memory files. The scan finds some outside
+reads; it is not proof. A run that takes more than 10 minutes from its prompt (the time in the agent log) to `done`
 is flagged as an overrun. `--task both` (T6 and T3 with the skill) still works. You can start the runs one by one instead:
 `new s3 --task T6` asks for your name (up to 8 letters A-Z) and
-writes it into `tasks/T6.md`; T6 is a new task that your skill has never seen. `new s3 --task T3` repeats the
+writes it into `tasks/T6.md`; T6 is a different task that shares components with T3. `new s3 --task T3` repeats the
 stage-1 game. Open each folder in its own new thread and choose the small model there (Claude Code: Haiku;
 Codex: gpt-6-luna; Cursor: its cheapest model). The prompt gives a budget of 6 emulator runs; the time box is
 10 minutes (the tool records the time; it does not stop the agent). End each run with the `done <run_id>`
