@@ -36,7 +36,7 @@ class EffortTest(unittest.TestCase):
         self.assertEqual(row["model"], "gpt-6.1-sol")
         self.assertIn("gpt-6.1-sol/medium", out)
         with open(os.path.join(w.ws_home(), "results.csv"), encoding="utf-8") as f:
-            self.assertEqual(f.readline().strip().split(",")[-1], "effort")
+            self.assertEqual(f.readline().strip().split(",")[-3], "effort")
 
 
 class PayBackTest(unittest.TestCase):

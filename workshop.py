@@ -17,7 +17,7 @@
 The tool never talks to an agent: you paste every prompt. It sends nothing over the network; it only
 opens the results form in your browser. See README.md (Workshop), MANUAL.md and HOMEWORK.md.
 """
-import argparse, csv, hashlib, io, json, math, os, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
+import argparse, csv, glob, hashlib, io, json, math, os, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
 from urllib.parse import urlencode
 
 KIT = os.path.dirname(os.path.abspath(__file__))
@@ -85,7 +85,8 @@ PART_DEST = {"2": ".wiki", "3": ".prebuilt", "4": ".grader"}
 ROW_FIELDS = ["alias", "run_id", "stage", "revision", "parent_run_id", "task", "agent", "model", "method",
               "skill_source", "skill_hash", "skill_has_solution", "elapsed_min", "wall_min", "emulator_runs",
               "tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd", "price_table",
-              "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used", "memory_used", "effort"]
+              "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used", "memory_used", "effort",
+              "model_switched", "settings_confirmed"]
 LINE = "-" * 72
 
 
@@ -368,6 +369,48 @@ def s3_run_block(n, total, task, folder, prompt, desc=None):
     print(c_prompt((" PROMPT%s " % num).center(72, "-")))
     print(prompt.rstrip("\n"))
     print(c_prompt((" END OF PROMPT%s " % num).center(72, "-")))
+
+
+def gate_on():
+    """The confirmation gate runs only in an interactive terminal."""
+    return bool(sys.stdout.isatty())
+
+
+def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=False):
+    """One run as its own page (terminal only). Repeats the steps until the learner answers y."""
+    while True:
+        clear_screen()
+        print("\n" + c_banner(WIDE) + "\n" + c_banner("  " + head) + "\n" + c_banner(WIDE))
+        if extra:
+            extra()
+        print("\n  1. Open this folder as a NEW project in your agent:\n\n       %s" % folder)
+        print("\n  2. Start a NEW thread.")
+        n = 3
+        if mem:
+            print("\n  3. " + c_next("/memories -> turn memory off for this chat."))
+            n = 4
+        print("\n  %d. Model: %s" % (n, model_line))
+        if ask("\n  Done with these steps? [y/n]: ", "y").lower().startswith("y"):
+            break
+    reg.data["runs"][rid]["settings_confirmed"] = "yes"
+    reg.save()
+    prompt_block(prompt)
+    print("\n  Paste it and send it.")
+    if not last:
+        ask("\n  Press Enter for the next run: ", "")
+
+
+def s3_show(reg, rid, n, total, task, folder, prompt, desc=None):
+    """Show one stage-3 run: its own page in a terminal, else the plain block."""
+    if not gate_on():
+        return s3_run_block(n, total, task, folder, prompt, desc=desc)
+    agent = reg.data.get("agent") or ""
+    model = SMALL_SHORT.get(agent) or "; ".join("%s %s" % (k, v) for k, v in SMALL_SHORT.items())
+    desc = desc or {"T6": "T6 (new task)", "T3": "T3 (same task as stage 1)"}.get(task, task)
+    nm = reg.data["runs"][rid].get("name", "")
+    head = "STAGE 3 - RUN %d of %d  %s%s" % (n, total, desc, ("   name on T6: " + nm) if nm and task == "T6" else "")
+    run_page(reg, rid, head, folder, prompt, model, n >= total,
+             mem=codex_memories_on(reg) and agent in ("codex", ""))
 
 
 def method_notice(method, when):
@@ -781,8 +824,9 @@ def new_s3_both(reg, a):
     """new s3 --task both: the T6 run, then the T3 run, in one process and one terminal."""
     r1, f1, p1 = create_s3_run(reg, a, "T6")
     a.s3_first = r1
-    s3_header(reg, a, True)
-    s3_run_block(1, 2, "T6", f1, p1)
+    if not gate_on():
+        s3_header(reg, a, True)
+    s3_show(reg, r1, 1, 2, "T6", f1, p1)
     try:
         r2, f2, p2 = create_s3_run(reg, a, "T3")
     except Exception as e:
@@ -790,7 +834,7 @@ def new_s3_both(reg, a):
         print("  The T6 run %s is valid. Start the T3 run later with:  python workshop.py new s3 --task T3" % r1)
         next_box("python workshop.py done " + r1, "when the T6 agent says it is done, run:")
         return 1
-    s3_run_block(2, 2, "T3", f2, p2)
+    s3_show(reg, r2, 2, 2, "T3", f2, p2)
     next_box(["python workshop.py done %s   (T6)" % r1, "python workshop.py done %s   (T3)" % r2],
              "when an agent is done, run its line:")
     return 0
@@ -819,11 +863,12 @@ def new_s3_all(reg, a):
     if not made:
         return 1
     a.s3_first = made["t6"][0] if "t6" in made else next(iter(made.values()))[0]
-    s3_header(reg, a, True, total=4)
+    if not gate_on():
+        s3_header(reg, a, True, total=4)
     order = [k for k in ALL_ORDER if k in made]
     for i, k in enumerate(order, 1):
         rid, f, p = made[k]
-        s3_run_block(i, 4, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k])
+        s3_show(reg, rid, i, 4, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k])
     next_box(["python workshop.py done %s   %s" % (made[k][0], ALL_LABEL[k]) for k in order],
              "when an agent is done (or at 10 min), run its line:")
     return 0 if len(made) == 4 else 1
@@ -864,8 +909,9 @@ def cmd_new(a):
                                      skill_source="none", skill_hash="", skill_has_solution="", session=None, name="")
         f = make_run_folder(reg, rid, task)
         prompt = render_prompt("stage1", task=task, run_id=rid)
-        banner("STAGE 1 - the agent with NO skill        run %s" % rid)
-        method_notice(method, " (used in stage 2)")
+        if not gate_on():
+            banner("STAGE 1 - the agent with NO skill        run %s" % rid)
+            method_notice(method, " (used in stage 2)")
         done_cmd = "python workshop.py done"
     else:
         g = find_global_vesper_skills()
@@ -878,8 +924,9 @@ def cmd_new(a):
             return new_s3_both(reg, a)
         rid, f, prompt = create_s3_run(reg, a, task)
         a.s3_first = rid
-        s3_header(reg, a, False)
-        s3_run_block(1, 1, task, f, prompt)
+        if not gate_on():
+            s3_header(reg, a, False)
+        s3_show(reg, rid, 1, 1, task, f, prompt)
         next_box("python workshop.py done " + rid, "when the agent is done, run:")
         hint = second_s3_hint(reg, rid)
         if hint:
@@ -890,6 +937,11 @@ def cmd_new(a):
     reg.start_active(rid, "1" if a.stage == "s1" else "3")
     reg.save()
     mem = (reg.data.get("agent") or "") in ("codex", "") and codex_memories_on(reg)
+    if gate_on():
+        run_page(reg, rid, "STAGE 1 - the agent with NO skill        run %s" % rid, f, prompt, "your default model",
+                 True, extra=lambda: method_notice(method, " (used in stage 2)"), mem=mem)
+        next_box(done_cmd, "when the agent says it is done, run:")
+        return 0
     print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd, mem=mem)
     return 0
 
@@ -927,7 +979,67 @@ def find_sessions(run_id):
         if (agent, sid) not in seen:
             seen.add((agent, sid))
             out.append({"agent": agent, "sid": sid, "path": p})
+    return _join_threads(out)
+
+
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _join_threads(found):
+    """Codex continues one thread in a new file rollout-<time>-<PARENT>_<CHILD>.jsonl when the model changes.
+    Files of one thread become ONE session: sid = the first file's thread id, paths = all its files."""
+    cx = [x for x in found if x["agent"] == "codex"]
+    if len(cx) < 2:
+        return found
+    names = [os.path.basename(x["path"]).lower() for x in cx]
+    own = [(_UUID_RE.findall(n) or [""])[-1] for n in names]
+    grp = list(range(len(cx)))
+
+    def top(i):
+        while grp[i] != i:
+            i = grp[i]
+        return i
+    for i in range(len(cx)):
+        for j in range(len(cx)):
+            if i != j and own[j] and own[j] + "_" in names[i]:
+                grp[top(i)] = top(j)
+    groups = {}
+    for i in range(len(cx)):
+        groups.setdefault(top(i), []).append(i)
+    if all(len(v) == 1 for v in groups.values()):
+        return found
+    joined = {}
+    for idx in groups.values():
+        idx.sort(key=lambda i: names[i])
+        first = cx[idx[0]]
+        ids = _UUID_RE.findall(names[idx[0]])
+        sid = ids[0] if ids and len(idx) > 1 else first["sid"]
+        joined[id(first)] = dict(first, sid=sid, paths=[cx[i]["path"] for i in idx])
+        for i in idx[1:]:
+            joined[id(cx[i])] = None
+    out = []
+    for x in found:
+        if x["agent"] != "codex":
+            out.append(x)
+        elif joined.get(id(x)):
+            out.append(joined[id(x)])
     return out
+
+
+def session_paths(session):
+    """All log files of a stored session (a split Codex thread has several)."""
+    s = session or {}
+    paths = list(s.get("paths") or [])
+    p = s.get("path")
+    if p and p not in paths:
+        paths.insert(0, p)
+    if len(paths) == 1 and s.get("agent") == "codex":      # a session stored before the join: look for its siblings
+        ids = _UUID_RE.findall(os.path.basename(p).lower())
+        if ids:
+            for q in sorted(glob.glob(os.path.join(M.codex_home(), "sessions", "**", "*%s*.jsonl" % ids[0]), recursive=True)):
+                if q not in paths:
+                    paths.append(q)
+    return paths
 
 
 def _runlog_times(folder, t0, t1, only_run):
@@ -968,7 +1080,18 @@ _USE_RE = re.compile(r"(skill-creator|writing-skills)(?:/|\\\\|\\)SKILL\.md|\$(s
 
 
 def detect_method_used(path, t0, t1):
-    """Which skill-writing help the agent really used: 'skill-creator', 'writing-skills', 'none', or '' (no log)."""
+    """Which skill-writing help the agent really used: 'skill-creator', 'writing-skills', 'none', or '' (no log).
+    path may be a list of log files (one split thread)."""
+    if isinstance(path, (list, tuple)):
+        res = [_method_used_one(p, t0, t1) for p in path]
+        for name in ("skill-creator", "writing-skills", "none"):
+            if name in res:
+                return name
+        return ""
+    return _method_used_one(path, t0, t1)
+
+
+def _method_used_one(path, t0, t1):
     if not path or not os.path.exists(path):
         return ""
     lines = []
@@ -1010,7 +1133,15 @@ def _message_text(d):
 
 
 def detect_memory_used(path, t0, t1):
-    """Did Codex Memories reach the agent? 'yes', 'no', or '' (no log).
+    """Did Codex Memories reach the agent? 'yes', 'no', or '' (no log). path may be a list of files."""
+    if isinstance(path, (list, tuple)):
+        res = [_memory_used_one(p, t0, t1) for p in path]
+        return "yes" if "yes" in res else ("no" if "no" in res else "")
+    return _memory_used_one(path, t0, t1)
+
+
+def _memory_used_one(path, t0, t1):
+    """
     yes = a developer/system message has a '## Memory' section that names VESPER (the session start
     may lie before t0, so these are not time-filtered), or a tool call/result in the window reads .codex/memories."""
     if not path or not os.path.exists(path):
@@ -1048,7 +1179,7 @@ def count_runs(folder, t0, t1):
 
 def measure_stage(run, t0, t1):
     s = run.get("session") or {}
-    res = {"agent": s.get("agent", ""), "model": "", "effort": "", "tok_uncached": "", "tok_cache_read": "",
+    res = {"agent": s.get("agent", ""), "model": "", "effort": "", "model_switched": "", "tok_uncached": "", "tok_cache_read": "",
            "tok_cache_write": "", "tok_out": "", "cost_usd": "", "measurement": ""}
     found = []
     if s.get("agent") == "codex":
@@ -1067,6 +1198,14 @@ def measure_stage(run, t0, t1):
             models |= c["models"]
             acts += [x for x in (c["first"], c["last"]) if x]
         c = M.cost(tot, models)
+        if s["agent"] == "codex" and len(found) > 1:
+            # one split thread: price each file with its own model; model/effort = the file with most output
+            parts = [M.cost(x["tot"], x["models"]) for x in found]
+            c = None if any(v is None for v in parts) else sum(parts)
+            top = max(found, key=lambda x: x["tot"].get("o", 0))
+            models = top["models"] or models
+            eff = (0, top.get("effort") or eff[1])
+            res["model_switched"] = "yes" if len({frozenset(x["models"]) for x in found}) > 1 else "no"
         res.update(model=" ".join(sorted(models)), effort=eff[1], tok_uncached=tot["i"], tok_cache_read=tot["cr"],
                    tok_cache_write=tot["cw"], tok_out=tot["o"], cost_usd=("%.2f" % c) if c is not None else "",
                    measurement="log" if s["agent"] == "codex" else "log, output lower bound")
@@ -1442,7 +1581,8 @@ def finish_stage(reg, rid, stage, a, grade=True):
         reg.end_active(rid)
     else:
         fields["revision"] = int(row.get("revision") or 1) + 1
-    fields["memory_used"] = detect_memory_used((run.get("session") or {}).get("path"), t0, t1)
+    fields["memory_used"] = detect_memory_used(session_paths(run.get("session")), t0, t1)
+    fields["settings_confirmed"] = run.get("settings_confirmed", "")
     reg.set_row(rid, stage, fields)
     reg.save()
     reg.write_csv()
@@ -1662,7 +1802,7 @@ def cmd_harvest(a):
     run["skill_has_solution"] = status
     reg.mark_done(base)
     row = finish_stage(reg, rid, "2", a, grade=False)
-    used = detect_method_used((run.get("session") or {}).get("path"), float(row["start"]), float(row["cutoff"]))
+    used = detect_method_used(session_paths(run.get("session")), float(row["start"]), float(row["cutoff"]))
     reg.set_row(rid, "2", {"method_used": used})
     reg.save()
     reg.write_csv()
