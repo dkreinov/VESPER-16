@@ -1,4 +1,4 @@
-"""The form keeps 18 questions; a T6 stage-3 row pre-fills task=T6 and its run_id (which names the parent)."""
+"""The form has two questions: alias and all_results. A T6 row travels as a v1 line carrying task=T6 and its run_id."""
 import os, sys, unittest
 from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -10,17 +10,18 @@ class FormV2(unittest.TestCase):
         self.w, _ = fresh_ws()
         self.cfg = self.w.load_config()
 
-    def test_eighteen_questions_no_name_field(self):
-        self.assertEqual(len(self.cfg["fields"]), 18)
-        self.assertNotIn("name", self.cfg["fields"])
-        self.assertTrue(set(self.cfg["fields"]) <= set(self.w.ROW_FIELDS))
+    def test_two_questions(self):
+        self.assertEqual(list(self.cfg["fields"]), ["alias"])
+        self.assertTrue(self.cfg["all_results_field"])
 
-    def test_t6_row_prefills_task_and_run_id(self):
-        link = self.w.form_link({"run_id": "s3-ab12-t6-9f3c", "stage": "3", "task": "T6"}, self.cfg)
+    def test_t6_row_in_all_results(self):
+        link = self.w.form_link([{"alias": "a", "run_id": "s3-ab12-t6-9f3c", "stage": "3", "task": "T6"}], self.cfg)
         q = parse_qs(urlparse(link).query)
-        self.assertEqual(q[self.cfg["fields"]["task"]], ["T6"])
-        self.assertEqual(q[self.cfg["fields"]["run_id"]], ["s3-ab12-t6-9f3c"])
-        self.assertEqual(q[self.cfg["fields"]["stage"]], ["3"])
+        self.assertEqual(set(q) - {"id"}, {self.cfg["fields"]["alias"], self.cfg["all_results_field"]})
+        line = q[self.cfg["all_results_field"]][0].split("\n")[1]
+        self.assertIn("task=T6", line.split(";"))
+        self.assertIn("run_id=s3-ab12-t6-9f3c", line.split(";"))
+        self.assertIn("stage=3", line.split(";"))
 
 
 if __name__ == "__main__":

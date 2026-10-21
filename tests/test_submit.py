@@ -60,12 +60,12 @@ class Submit(unittest.TestCase):
         self.assertTrue(all(r["grading"] == "graded" for r in self.rows().values() if r["stage"] in ("1", "3")))
         self.assertEqual(wb.call_count, 1)
         self.assertIn("The form opens in ONE browser window. Check it and click Submit, then press Enter here.", out)
-        self.assertIn("2 results are in this link", out)
+        self.assertIn("2 results to submit.", out)
+        self.assertNotIn("window 1 of", out)
         link = wb.call_args[0][0]
         cfg = self.w.load_config()
         q = parse_qs(urlparse(link).query)
-        self.assertEqual(q[cfg["fields"]["run_id"]], ["ALL"])
-        self.assertEqual(q[cfg["fields"]["stage"]], ["all"])
+        self.assertEqual(set(q) - {"id"}, {cfg["fields"]["alias"], cfg["all_results_field"]})
         self.assertEqual(q[cfg["fields"]["alias"]], ["t"])
         lines = q[cfg["all_results_field"]][0].split("\n")
         self.assertEqual(lines[0], "vesper-results v1")
@@ -84,19 +84,26 @@ class Submit(unittest.TestCase):
         cap(self.w, "submit", tty_in="\n")
         cap(self.w, "done", self.rid)            # new revision of stage 1
         out, wb = cap(self.w, "submit", tty_in="\n")
-        self.assertIn("1 results are in this link", out)
+        self.assertIn("1 results to submit.", out)
 
-    def test_long_data_falls_back_to_per_row(self):
+    def test_long_data_splits_into_windows(self):
         install_fake_grader(self.w)
         reg = self.w.Registry.load()
         for r in reg.data["rows"].values():
             r["task"] = "x" * 4000
         reg.save()
         out, wb = cap(self.w, "submit", tty_in="\n\n")
-        self.assertIn("too long for one window", out)
+        self.assertIn("in 2 windows", out)
+        self.assertIn("window 1 of 2", out)
+        self.assertIn("window 2 of 2", out)
         self.assertEqual(wb.call_count, 2)
-        self.assertIn("Result 1 of 2", out)
+        cfg = self.w.load_config()
+        for c in wb.call_args_list:
+            q = parse_qs(urlparse(c[0][0]).query)
+            self.assertEqual(set(q) - {"id"}, {cfg["fields"]["alias"], cfg["all_results_field"]})
+            self.assertEqual(len(q[cfg["all_results_field"]][0].split("\n")), 2)
         self.assertIn("All 2 results submitted", out)
+        self.assertTrue(all(r["submitted_rev"] == r["revision"] for r in self.rows().values()))
 
     def test_escaping(self):
         t = self.w.all_results_text([{"alias": "a;b=c\nd%"}])
@@ -116,6 +123,18 @@ class Submit(unittest.TestCase):
         out, wb = cap(self.w, "form", self.rid, "1", tty_in="\n")
         self.assertTrue(wb.called)
         self.assertEqual(self.rows()[self.rid + "|1"]["submitted_rev"], 1)
+
+    def test_form_command_sends_one_row_in_all_results(self):
+        out, wb = cap(self.w, "form", self.rid, "1", tty_in="\n")
+        cfg = self.w.load_config()
+        q = parse_qs(urlparse(wb.call_args[0][0]).query)
+        self.assertEqual(set(q) - {"id"}, {cfg["fields"]["alias"], cfg["all_results_field"]})
+        lines = q[cfg["all_results_field"]][0].split("\n")
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], "vesper-results v1")
+        self.assertIn("run_id=" + self.rid, lines[1])
+        self.assertIn("vesper-results v1", out)
+        self.assertNotIn(" 1. alias", out)
 
 
 if __name__ == "__main__":

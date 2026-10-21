@@ -89,6 +89,25 @@ class AllResultsTest(unittest.TestCase):
         self.assertEqual(by[("s1-bbbb", "1")]["score"], "9")
 
 
+class TwoColumnExportTest(unittest.TestCase):
+    def test_alias_and_all_results_only(self):
+        import workshop
+        rows = []
+        for rid, st in (("s1-aaaa", "1"), ("s3-aaaa-t6-1111", "3")):
+            r = {k: "" for k in workshop.ROW_FIELDS}
+            r.update(alias="ann", run_id=rid, stage=st, revision="1", task="T3", score="100", grading="graded")
+            rows.append(r)
+        p = os.path.join(tempfile.mkdtemp(prefix="charts_2c_"), "e.csv")
+        with open(p, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["ID", "Start time", "Completion time", "Email", "Name", "1. alias", "2. all_results"])
+            w.writerow(["1", serial(DAY_A), serial(DAY_A), "anonymous", "", "ann", workshop.all_results_text(rows)])
+        got = charts.dedup(charts.load_rows([p]))
+        self.assertEqual({(r["run_id"], r["stage"]) for r in got}, {("s1-aaaa", "1"), ("s3-aaaa-t6-1111", "3")})
+        self.assertEqual({r["alias"] for r in got}, {"ann"})
+        self.assertEqual(len(charts.in_range(got, DAY_A.date(), DAY_A.date())), 2)
+
+
 class ChartsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="charts_")

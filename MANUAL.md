@@ -80,8 +80,14 @@ folder in an agent again.
 ## Results and cleanup
 
 - With the tool, the last step is `python workshop.py submit`: it grades first if needed, then sends every result that is not yet submitted in ONE form window.
-- By hand, type your numbers into the results form: https://forms.cloud.microsoft/r/xdtPcwF24a
-  (alias, run_id such as `s1-<s1code>` or `s3-<s1code>-t6-<code>`, stage 1/2/3, revision 1, task T3 or T6, agent, model, method,
-  skill_has_solution (the part of your stage-1 game in the skill, for example 27%; write 0% if none), elapsed_min, emulator_runs, the token numbers, cost_usd if you know it, score,
-  grading = graded, measurement = manual). Rows with another run-id format are not shown in the class charts.
+- By hand, fill the results form: https://forms.cloud.microsoft/r/xdtPcwF24a
+  The form has TWO fields. Field 1 `alias`: your alias. Field 2 `all_results` (long answer): the lines below, one line per run.
+  The first line is exactly `vesper-results v1`. Then write one line per run (stage 1, 2, 3), with no spaces around `;` and `=`:
+  ```
+  vesper-results v1
+  run_id=...;stage=...;revision=1;task=...;agent=...;model=...;method=...;skill_has_solution=...;elapsed_min=...;emulator_runs=...;tok_uncached=...;tok_cache_read=...;tok_out=...;cost_usd=...;score=...;grading=graded;measurement=manual
+  ```
+  Example values: run_id `s1-<s1code>` or `s3-<s1code>-t6-<code>`, stage 1/2/3, task T3 or T6,
+  skill_has_solution (the part of your stage-1 game in the skill, for example 27%; write 0% if none), grading = graded, measurement = manual.
+  You can leave a key empty (`cost_usd=`). Rows with another run-id format are not shown in the class charts.
 - When you finish, delete `%LOCALAPPDATA%\vesper-manual` (Linux: `~/vesper-manual`) and the `unlocked` folder.

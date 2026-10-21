@@ -262,9 +262,9 @@ class FlowTest(unittest.TestCase):
             run(self.w, "unlock", "4", "wrong")
 
     def test_form_link(self):
-        cfg = {"form_url": "https://forms.office.com/r/x?id=1", "fields": {"cost_usd": "r9"}}
-        self.assertEqual(self.w.form_link({"cost_usd": "0.33"}, cfg),
-                         "https://forms.office.com/r/x?id=1&r9=0.33")
+        cfg = {"form_url": "https://forms.office.com/r/x?id=1", "fields": {"alias": "r1"}, "all_results_field": "r9"}
+        link = self.w.form_link([{"alias": "t", "run_id": "q"}], cfg)
+        self.assertTrue(link.startswith("https://forms.office.com/r/x?id=1&r1=t&r9=vesper-results+v1"))
 
 
 if __name__ == "__main__":

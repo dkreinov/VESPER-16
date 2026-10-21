@@ -1288,35 +1288,40 @@ def load_config():
         return {"form_url": "", "fields": {}}
 
 
-def form_link(row, cfg=None):
+def form_link(rows, cfg=None):
+    """One prefilled link: alias + all_results (v1 lines for `rows`). A single dict is accepted as one row."""
     cfg = cfg or load_config()
-    if not cfg.get("form_url"):
+    fid = cfg.get("all_results_field")
+    if not cfg.get("form_url") or not fid:
         return None
-    q = urlencode({fid: row.get(k, "") for k, fid in cfg.get("fields", {}).items()})
-    return cfg["form_url"] + ("&" if "?" in cfg["form_url"] else "?") + q
+    if isinstance(rows, dict):
+        rows = [rows]
+    vals = {}
+    if "alias" in cfg.get("fields", {}):
+        vals[cfg["fields"]["alias"]] = rows[0].get("alias", "") if rows else ""
+    vals[fid] = all_results_text(rows)
+    return cfg["form_url"] + ("&" if "?" in cfg["form_url"] else "?") + urlencode(vals)
 
 
 def submit(row, a, confirm=False):
-    """Show one row for the form: short URL, 18 numbered answers, and (unless --no-form) open the link.
+    """Show one row for the form: short URL, the v1 line that is sent, and (unless --no-form) open the link.
     With confirm=True on a TTY, ask for Enter after the browser step; returns True when the learner confirmed."""
     cfg = load_config()
-    fields = list(cfg.get("fields", {}))
     if not cfg.get("form_url"):
         print("\nRow for the shared sheet (tab-separated):\n" + "\t".join(str(row.get(k, "")) for k in ROW_FIELDS))
         return False
     short = cfg.get("short_url") or cfg["form_url"]
     print("\n  RESULTS FORM:  %s" % c_link(short))
-    print("  Answers (question number. name: value):\n")
-    for i, k in enumerate(fields, 1):
-        print("  %2d. %-19s %s" % (i, k + ":", row.get(k, "")))
+    print("  Fields: alias = %s, all_results = these lines:\n" % row.get("alias", ""))
+    print(all_results_text([row]))
     if getattr(a, "no_form", False):
         return False
     again = "python workshop.py form %s %s" % (row.get("run_id", ""), row.get("stage", ""))
-    if webbrowser.open(form_link(row, cfg)):
+    if webbrowser.open(form_link([row], cfg)):
         print("\n  The form opens in a NEW browser window, with these values filled in.")
         print("  Check them and click Submit.")
     else:
-        print("\n  The browser did not open. Open the link above, type the values, and click Submit.")
+        print("\n  The browser did not open. Open the form URL, type the alias, paste the lines above into all_results, and click Submit.")
     print("  Window closed by mistake? Open it again:  %s" % again)
     if confirm and sys.stdout.isatty() and sys.stdin and sys.stdin.isatty():
         return ask("\n  Click Submit in the browser, then press Enter (s = skip this one): ", "").lower() != "s"
@@ -1370,17 +1375,18 @@ def all_results_text(rows):
     return "\n".join(lines)
 
 
-def all_link(rows, cfg=None):
-    """One prefilled link for every row, or None when there is no form, no all_results field, or it is too long."""
+def split_windows(rows, cfg=None):
+    """Split rows into the fewest consecutive groups whose prefilled link fits MAX_LINK (one row per group at least)."""
     cfg = cfg or load_config()
-    fid = cfg.get("all_results_field")
-    if not cfg.get("form_url") or not fid:
-        return None
-    alias = rows[0].get("alias", "") if rows else ""
-    vals = {cfg["fields"]["alias"]: alias, cfg["fields"]["run_id"]: "ALL", cfg["fields"]["stage"]: "all",
-            fid: all_results_text(rows)}
-    link = cfg["form_url"] + ("&" if "?" in cfg["form_url"] else "?") + urlencode(vals)
-    return link if len(link) <= MAX_LINK else None
+    groups, cur = [], []
+    for r in rows:
+        if cur and len(form_link(cur + [r], cfg)) > MAX_LINK:
+            groups.append(cur)
+            cur = []
+        cur.append(r)
+    if cur:
+        groups.append(cur)
+    return groups
 
 
 def grade_ungraded(reg):
@@ -1414,38 +1420,37 @@ def cmd_submit(a):
     if not tty:
         a.no_form = True               # print only: no browser, nothing marked
     cfg = load_config()
-    link = all_link(rows, cfg)
-    if link:
-        print("\n  RESULTS FORM:  %s" % c_link(cfg.get("short_url") or cfg["form_url"]))
-        print("  %d results are in this link." % len(rows))
-        if not tty:
-            print("\n  Link:\n%s" % link)
-            return 0
-        if webbrowser.open(link):
-            print("\n  The form opens in ONE browser window. Check it and click Submit, then press Enter here.")
-        else:
-            print("\n  The browser did not open. Open this link, check it and click Submit, then press Enter here:\n%s" % link)
-        if ask("\n  Press Enter when submitted (s = skip, mark nothing): ", "").lower() == "s":
-            print("\nNothing marked. Run submit again when you are ready.")
-            return 0
+    if not cfg.get("form_url") or not cfg.get("all_results_field"):
         for r in rows:
-            mark_submitted(reg, r)
-        print("\nAll %d results submitted" % len(rows))
+            submit(r, a)
         return 0
-    if cfg.get("form_url") and cfg.get("all_results_field"):
-        print("\nThe results are too long for one window. Using one window per result.")
-    n, skipped = len(rows), 0
-    for i, r in enumerate(rows, 1):
-        if tty:
-            clear_screen()
-        print("Result %d of %d: %s stage %s %s score %s" % (i, n, r["run_id"], r["stage"], r["task"], r["score"]))
-        if submit(r, a, confirm=tty):
+    groups = split_windows(rows, cfg)
+    n = len(groups)
+    print("\n  RESULTS FORM:  %s" % c_link(cfg.get("short_url") or cfg["form_url"]))
+    print("  %d results to submit%s." % (len(rows), "" if n == 1 else ", in %d windows" % n))
+    done = 0
+    for i, g in enumerate(groups, 1):
+        link = form_link(g, cfg)
+        label = "" if n == 1 else "window %d of %d" % (i, n)
+        if not tty:
+            print("\n  %sLink (%d results):\n%s" % (label + "  " if label else "", len(g), link))
+            continue
+        if webbrowser.open(link):
+            print("\n  The form opens in ONE browser window%s. Check it and click Submit, then press Enter here."
+                  % (" (%s)" % label if label else ""))
+        else:
+            print("\n  The browser did not open%s. Open this link, check it and click Submit, then press Enter here:\n%s"
+                  % (" (%s)" % label if label else "", link))
+            print("  Or open the form URL, type the alias, and paste these lines into all_results:\n" + all_results_text(g))
+        if ask("\n  Press Enter when submitted (s = skip, mark nothing): ", "").lower() == "s":
+            print("\nNothing marked for this window. Run submit again when you are ready.")
+            continue
+        for r in g:
             mark_submitted(reg, r)
-        elif tty:
-            skipped += 1
+        done += len(g)
     if tty:
-        print("\n" + ("All %d results submitted" % n if not skipped else
-                      "%d of %d results submitted, %d skipped (run submit again for them)" % (n - skipped, n, skipped)))
+        print("\nAll %d results submitted" % done if done == len(rows) else
+              "\n%d of %d results submitted (run submit again for the rest)" % (done, len(rows)))
     return 0
 
 
