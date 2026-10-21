@@ -191,6 +191,94 @@ class OutsideReadsTest(unittest.TestCase):
         self.assertEqual(self.w.detect_outside_reads(None, 0, 1, self.folder), ("unknown", ""))
 
 
+class ReviewInputsTest(unittest.TestCase):
+    """Every failing input of the 2026-10-21 adversarial review (MAJOR-4..7, MINOR-6)."""
+    setUp = OutsideReadsTest.setUp
+    scan = OutsideReadsTest.scan
+
+    def tearDown(self):
+        os.environ.pop("VESPER_WS_USERHOME", None)
+
+    def scan_tool(self, name, inp):
+        with open(self.log, "w") as f:
+            f.write(json.dumps({"type": "assistant", "timestamp": iso(self.t), "message": {"content": [
+                {"type": "tool_use", "name": name, "input": inp}]}}) + "\n")
+        return self.w.detect_outside_reads([self.log], self.t - 5, self.t + 5, self.folder)
+
+    def scan_shell_command(self, args):
+        with open(self.log, "w") as f:
+            f.write(json.dumps({"timestamp": iso(self.t), "type": "response_item", "payload": {
+                "type": "function_call", "name": "shell_command", "arguments": json.dumps(args)}}) + "\n")
+        return self.w.detect_outside_reads([self.log], self.t - 5, self.t + 5, self.folder)
+
+    def test_glob_reads_of_other_runs(self):          # MAJOR-4
+        for cmd in ("cat ../s1-*/solutions/*.vsa", "ls ../*/solutions",
+                    "cat %s/*/solutions/T3.vsa" % self.runs, "Get-ChildItem ..\\* -Recurse",
+                    "cat %s/s?-*/solutions/T3.vsa" % self.runs.replace("\\", "/")):
+            self.assertEqual(self.scan(cmd)[0], "detected", cmd)
+        self.assertEqual(self.scan_tool("Glob", {"pattern": "../**/*.vsa"})[0], "detected")
+        self.assertEqual(self.scan_tool("Glob", {"pattern": "*/solutions/*.vsa", "path": self.runs})[0], "detected")
+        for cmd in ("ls *.vsa solutions/*", "cat ../s1-aaaa/solutions/*.vsa"):     # globs in the own folder
+            self.assertEqual(self.scan(cmd), ("not_detected", ""), cmd)
+
+    def test_pwd_and_env_forms(self):                 # MAJOR-5
+        for cmd in ('cat "$PWD/../s1-dddd/solutions/T3.vsa"', "cat $(pwd)/../s1-dddd/solutions/T3.vsa",
+                    "Get-Content $PWD\\..\\s1-dddd\\solutions\\T3.vsa", "type %CD%\\..\\s1-dddd\\solutions\\T3.vsa",
+                    "cat ${PWD}/../s1-dddd/x", "Get-Content (Get-Location)\\..\\s1-dddd\\x"):
+            st, note = self.scan(cmd)
+            self.assertEqual(st, "detected", cmd)
+            self.assertIn("other run s1-dddd", note, cmd)
+        os.environ["VESPER_TEST_RUNS"] = self.runs
+        try:
+            for cmd in ("Get-Content ${env:VESPER_TEST_RUNS}\\s1-dddd\\x", "Get-Content $env:VESPER_TEST_RUNS\\s1-dddd\\x",
+                        "type %VESPER_TEST_RUNS%\\s1-dddd\\x", "cat $VESPER_TEST_RUNS/s1-dddd/x"):
+                self.assertEqual(self.scan(cmd)[0], "detected", cmd)
+        finally:
+            del os.environ["VESPER_TEST_RUNS"]
+
+    def test_recursive_search_from_an_ancestor(self):  # MAJOR-5, R7
+        os.environ["VESPER_WS_USERHOME"] = self.home         # the runs home is inside the user home
+        for cmd in ("find ~ -name '*.vsa'", "rg --files -g '*.vsa' ~", "Get-ChildItem -Recurse %s" % self.home,
+                    "Get-ChildItem ${env:USERPROFILE} -Recurse -Filter *.vsa", "dir /s %s\\*.vsa" % self.home,
+                    "find %s -name '*.vsa'" % self.runs, "cd ~ && find . -name '*.vsa'",
+                    "ls -R ../..", "find %s -name x" % self.w.KIT):
+            self.assertEqual(self.scan(cmd)[0], "detected", cmd)
+        for cmd in ("ls -la ~", "cat ~/notes.txt", "find . -name '*.vsa'", "rg --files", "grep -rn x .",
+                    "cp -r examples out"):
+            self.assertEqual(self.scan(cmd), ("not_detected", ""), cmd)
+        st, note = self.scan("find ~ -name '*.vsa'")
+        self.assertNotIn(self.home.replace("\\", "/").lower(), note.lower())
+
+    def test_cd_into_a_subfolder_is_not_an_escape(self):   # MAJOR-6
+        os.makedirs(os.path.join(self.folder, "examples", "a"))
+        for cmd in ("cd examples && ls ..", "cd examples/a && cat ../../tasks/T3.md", "pushd examples; ls ..",
+                    "Set-Location examples; Get-ChildItem .."):
+            self.assertEqual(self.scan(cmd), ("not_detected", ""), cmd)
+        self.assertEqual(self.scan_shell_command({"command": "ls ..", "workdir": os.path.join(self.folder, "examples")}),
+                         ("not_detected", ""))
+        for cmd in ("cd examples && ls ../..", "cd .. && ls", "cd .. && cat s1-dddd/x", "cd examples && cd .. && ls .."):
+            self.assertEqual(self.scan(cmd)[0], "detected", cmd)
+        self.assertEqual(self.scan_shell_command({"command": "ls ..", "workdir": self.folder})[0], "detected")
+
+    def test_long_token_is_linear(self):               # MAJOR-7 / R8
+        blob = "A" * 200000
+        for cmd in ("echo %s" % blob, "python -c 'x=\"%s\"'" % ("/a" * 100000)):
+            t = time.time()
+            self.assertEqual(self.scan(cmd), ("not_detected", ""))
+            self.assertLess(time.time() - t, 1.0)
+
+    def test_note_has_no_home_or_user_name(self):       # MINOR-6 / R10
+        slug = "c--users-jdoe-work-s1-aaaa"
+        st, note = self.scan("cat %s" % os.path.join(self.w.M.claude_home(), "projects", slug, "memory", "MEMORY.md"))
+        self.assertEqual(st, "detected")
+        self.assertNotIn("jdoe", note)
+        self.assertIn("memory (claude project memory)", note)
+        os.environ["VESPER_WS_USERHOME"] = self.home
+        st, note = self.scan("cat ~/.codex/memories/MEMORY.md")
+        self.assertEqual(st, "detected")
+        self.assertNotIn(self.home.replace("\\", "/").lower(), note.lower())
+
+
 class DoneFieldsTest(unittest.TestCase):
     def _s1(self, wall, calls):
         w, _ = fresh_ws()

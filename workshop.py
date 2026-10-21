@@ -17,7 +17,7 @@
 The tool never talks to an agent: you paste every prompt. It sends nothing over the network; it only
 opens the results form in your browser. See README.md (Workshop), MANUAL.md and HOMEWORK.md.
 """
-import argparse, csv, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
+import argparse, csv, fnmatch, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
 from urllib.parse import urlencode
 
 KIT = os.path.dirname(os.path.abspath(__file__))
@@ -1248,6 +1248,13 @@ _HOME_STORES = (".skills", ".grader", ".snapshots", ".prebuilt", ".guides")   # 
 _PATCH = re.compile(r"\*\*\* begin patch(.*?)(?:\*\*\* end patch|$)", re.I | re.S)
 _WORKDIR = re.compile(r"[\"']?(?:workdir|cwd)[\"']?\s*:\s*[\"']([^\"']+)[\"']", re.I)
 _WRITER_T6 = re.compile(r"t6\.md|t6font", re.I)
+_MEM_TOK = re.compile(r"\.codex/memories(?:/|$)|/projects/[^/]+/memory(?:/|$)", re.I)   # used per token: linear
+_GLOB_CH = re.compile(r"[*?\[]")
+_PWD_MARK = "@pwd@"                                   # the current folder ($PWD, %CD%, ...), resolved per command
+_CD_CMDS = ("cd", "pushd", "set-location", "sl", "chdir")
+# a recursive listing or search: find/tree, -r/-R/-rn/-Recurse/--recursive, dir /s, rg --files, a ** glob
+_RECURSIVE = re.compile(r"(?:^|[\s;&|(])(?:find|tree)(?=\s|$)|(?:^|\s)(?:-[a-qs-z]?r[a-qs-z]{0,2}|-recurse|--recursive"
+                        r"|--files|/s)(?=\s|$)|\*\*", re.I)
 
 
 def _strings(v, out):
@@ -1260,6 +1267,14 @@ def _strings(v, out):
     elif isinstance(v, list):
         for x in v:
             _strings(x, out)
+
+
+def _cwd_args(v, out):
+    """A workdir/cwd argument (Codex shell_command) as 'workdir:"..."' text, so the scan resolves '..' from it."""
+    if isinstance(v, dict):
+        for k in ("workdir", "cwd"):
+            if isinstance(v.get(k), str) and v[k]:
+                out.append('workdir:"%s"' % v[k])
 
 
 def _call_text(d):
@@ -1275,13 +1290,17 @@ def _call_text(d):
                 raw = json.loads(raw)
             except ValueError:
                 pass
+        _cwd_args(raw, parts)
         _strings(raw, parts)
     elif d.get("type") == "assistant":
         c = (d.get("message") or {}).get("content")
         if isinstance(c, list):
             for b in c:
                 if isinstance(b, dict) and b.get("type") == "tool_use":
-                    _strings(b.get("input"), parts)
+                    inp = b.get("input")
+                    if b.get("name") == "Glob" and isinstance(inp, dict) and inp.get("path") and inp.get("pattern"):
+                        parts.append(inp["path"].rstrip("/\\") + "/" + inp["pattern"])    # the pattern is under path
+                    _strings(inp, parts)
     return "\n".join(parts)
 
 
@@ -1301,6 +1320,10 @@ def _npath(p):
         p = re.sub(r"^/([a-z])(?=/|$)", r"\1:", p)
     p = posixpath.normpath(p) if p else p
     return p + "/" if re.match(r"^[a-z]:$", p, re.I) else p
+
+
+def _is_abs(p):
+    return p.startswith("/") or bool(re.match(r"^[a-z]:", p, re.I))
 
 
 def _within(q, root):
@@ -1324,9 +1347,19 @@ def _iso_roots(folder):
             "claude": _npath(os.path.abspath(M.claude_home()))}
 
 
+def _env_path(m):
+    """$env:NAME, ${env:NAME}, %NAME%, $NAME, ${NAME} -> the value when it is one absolute path; else unchanged."""
+    name = next(g for g in m.groups() if g)
+    v = os.environ.get(name) or os.environ.get(name.upper()) or ""
+    if v and os.path.isabs(v) and os.pathsep not in v:
+        return _npath(os.path.abspath(v))
+    return m.group(0)
+
+
 def _norm_call_text(text):
     """Unescape JSON/JS string text, drop patch bodies (written text, not reads), fold case,
-    expand home variables, and turn Git Bash drive paths into c:/ paths."""
+    expand home and environment variables, mark the current folder ($PWD, %CD%, ...) and
+    turn Git Bash drive paths into c:/ paths."""
     if "\\\\" in text:                     # escaped strings: \\ is a separator, \n a line break
         text = re.sub(r"\\{2,}", "/", text)
         text = re.sub(r"\\[nr]", "\n", text)
@@ -1335,16 +1368,33 @@ def _norm_call_text(text):
     text = _PATCH.sub(lambda m: "\n".join(l for l in m.group(1).splitlines() if l.lstrip().startswith("*** ")), text)
     text = _fold(text)
     home = _npath(os.path.abspath(user_home()))
-    subs = [(r"\$env:userprofile|%userprofile%|\$\{home\}|\$home(?!\w)", home),
+    subs = [(r"\$\{?pwd\}?(?!\w)|\$\(pwd\)|%cd%|\$?\(get-location\)(?:\.path)?", _PWD_MARK),
+            (r"\$env:userprofile(?!\w)|\$\{env:(?:userprofile|home)\}|\$env:home(?!\w)|%userprofile%"
+             r"|\$\{home\}|\$home(?!\w)", home),
             (r"(?<![\w~.$-])~(?=/|$|[%s])" % _PATH_END, home)]
     for var in ("localappdata", "appdata"):
         if os.environ.get(var.upper()):
-            subs.append((r"\$env:%s(?!\w)|%%%s%%" % (var, var), _npath(os.path.abspath(os.environ[var.upper()]))))
+            subs.append((r"\$env:%s(?!\w)|\$\{env:%s\}|%%%s%%" % (var, var, var),
+                         _npath(os.path.abspath(os.environ[var.upper()]))))
     for rx, val in subs:
         text = re.sub(rx, lambda m, v=val: v, text, flags=re.I)
+    text = re.sub(r"\$\{env:(\w+)\}|\$env:(\w+)|%(\w+)%|\$\{([a-z_]\w*)\}|\$([a-z_]\w*)", _env_path, text, flags=re.I)
     if _WIN:
         text = re.sub(r"(?<![\w/.:~-])/([a-z])(?=/)", r"\1:", text)
     return text
+
+
+def _glob_reaches(q, root):
+    """True when the glob pattern q can match a path below root (another run folder, a store, ...)."""
+    qc, rc = q.rstrip("/").split("/"), root.rstrip("/").split("/")
+    for i, part in enumerate(rc):
+        if i >= len(qc):
+            return False
+        if qc[i] == "**":
+            return True
+        if not fnmatch.fnmatchcase(part, qc[i]):
+            return False
+    return len(qc) > len(rc)
 
 
 def _classify(q, roots):
@@ -1354,7 +1404,14 @@ def _classify(q, roots):
     if _within(q, roots["codex_mem"]) or re.search(r"(^|/)\.codex/memories(/|$)", q):
         return "memory " + q[q.find("memories"):][:60]
     if (_within(q, roots["claude"]) or "/.claude/" in q) and re.search(r"/projects/[^/]+/memory(/|$)", q):
-        return "memory " + q[q.find("/projects/") + 1:][:60]
+        return "memory (claude project memory)"       # the project slug holds the user's path: not in the note
+    if _GLOB_CH.search(q):                              # a pattern: can it reach another run, a store or the kit?
+        for r in roots["runs"]:
+            if _glob_reaches(q, r):
+                return "runs home glob " + (q[len(r):].strip("/") if _within(q, r) else q)
+        for r in roots["kits"]:
+            if _glob_reaches(q, r) or _within(q, r):
+                return "kit glob " + (q[len(r):].strip("/") if _within(q, r) else q)
     for r in roots["runs"]:
         if _within(q, r):
             rel = q[len(r):].strip("/")
@@ -1372,39 +1429,89 @@ def _classify(q, roots):
     return None
 
 
+def _resolve(tok, cwd):
+    tok = tok.replace(_PWD_MARK, cwd)
+    return _npath(tok) if _is_abs(tok) else posixpath.normpath(posixpath.join(cwd, tok))
+
+
 def _scan_text(text, roots, writer):
     """Hits (short strings) for reads of guarded knowledge in the text of one tool call."""
     text = _norm_call_text(text)
+    own = roots["own"]
     found = []
     for r in sorted(set(roots["runs"] + roots["kits"] + [roots["codex_mem"]]), key=len, reverse=True):
         rx = r"(?<![\w.-])%s(?=$|/|[%s])[^%s]*" % (re.escape(r.rstrip("/")), _PATH_END, _PATH_END)
         found += [_npath(m.group(0).rstrip(".:")) for m in re.finditer(rx, text)]
-    found += [_npath(m.group(0)) for m in re.finditer(r"[^%s]*(?:\.codex/memories|/projects/[^/%s]+/memory)(?=/|$|[%s])[^%s]*"
-                                                     % ((_PATH_END,) * 4), text)]
     cwds = []
     for m in _WORKDIR.finditer(text):
-        w = _npath(m.group(1))
-        cwds.append(w if w.startswith("/") or re.match(r"^[a-z]:", w, re.I) else posixpath.join(roots["own"], w))
+        cwds.append(_resolve(m.group(1), own))
+    cwds = cwds or [own]
+    rec = bool(_RECURSIVE.search(text))
+    searched = list(cwds) if rec else []         # folders a recursive command may start from
+    prev = ""
     for tok in _TOKEN.findall(text):
-        if ".." in tok.split("/") and not tok.startswith("/") and not re.match(r"^[a-z]:", tok, re.I):
-            found += [posixpath.normpath(posixpath.join(c, tok)) for c in (cwds or [roots["own"]])]
+        low = tok.lower()
+        if _MEM_TOK.search(tok):
+            found.append(_npath(tok.replace(_PWD_MARK, cwds[0])))
+        if prev in _CD_CMDS and low != "/d":     # cd X: X is read (listed) and the next tokens resolve from it
+            cwds = [_resolve(tok, c) for c in cwds]
+            found += cwds
+            if rec:
+                searched += cwds
+        elif _PWD_MARK in tok or _is_abs(tok):
+            q = [_resolve(tok, c) for c in cwds]
+            found += q
+            if rec:
+                searched += q
+        elif ".." in tok.split("/") or any(not _within(c, own) for c in cwds):
+            q = [_resolve(tok, c) for c in cwds]
+            if not any(_within(x, own) for x in q):     # a '..' that stays in the own folder from any cwd is fine
+                found += q
+                if rec:
+                    searched += q
+        if not (prev == "cd" and low == "/d"):
+            prev = low
     hits = []
     for q in found:
         h = _classify(q, roots)
         if h and h not in hits:
             hits.append(h)
+    for q in searched:                           # a recursive search from an ancestor of the runs home
+        base = q.split("*")[0].split("?")[0].rstrip("/") if _GLOB_CH.search(q) else q.rstrip("/")
+        if not base or base == "/":
+            continue
+        for r in roots["runs"]:
+            if base != r.rstrip("/") and _within(r, base):
+                h = "recursive search over " + base
+                if h not in hits:
+                    hits.append(h)
     if writer and _WRITER_T6.search(text):
         hits.append("writer reads T6 (%s)" % _WRITER_T6.search(text).group(0))
     return hits
 
 
+def _private(note):
+    """No home folder or user name in a note that goes into the results: the home folder becomes '~'."""
+    homes = {_npath(os.path.abspath(user_home())).rstrip("/"), _npath(os.path.expanduser("~")).rstrip("/")}
+    for h in sorted(homes, key=len, reverse=True):
+        if len(h) > 3:
+            note = re.sub(re.escape(h) + r"(?=/|$|[^\w.-])", "~", note, flags=re.I)
+    users = {os.path.basename(os.path.expanduser("~")), os.environ.get("USERNAME", ""), os.environ.get("USER", "")}
+    for u in users:
+        if len(u) >= 3:
+            note = re.sub(r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(u), "<user>", note, flags=re.I)
+    return note
+
+
 def detect_outside_reads(paths, t0, t1, folder, writer=False):
     """Targeted scan of the agent's tool calls in [t0, t1] for reads of knowledge a run must not have:
-    another run folder or a store in the runs home (.skills, .grader, ...), the kit folder (tasks,
-    solutions, guides, ...: a run folder has its own copies), agent memory files, and for the
-    stage-1/2 writer (writer=True) any T6.md / t6font reference. Other paths are ignored.
-    Returns (status, note): 'detected' (note = first 3 hits), 'not_detected', or 'unknown' (no log).
-    A scan finds some outside reads; it is not proof."""
+    another run folder or a store in the runs home (.skills, .grader, ...), also by a glob pattern or a
+    recursive search from an ancestor of the runs home, the kit folder (tasks, solutions, guides, ...: a run
+    folder has its own copies), agent memory files, and for the stage-1/2 writer (writer=True) any T6.md /
+    t6font reference. Other paths are ignored. '..' resolves from the own folder, a workdir argument, or a
+    'cd X' earlier in the same command.
+    Returns (status, note): 'detected' (note = first 3 hits, no home path or user name), 'not_detected',
+    or 'unknown' (no log). A scan finds some outside reads; it is not proof."""
     if isinstance(paths, str):
         paths = [paths]
     paths = [p for p in (paths or []) if p and os.path.exists(p)]
@@ -1429,7 +1536,7 @@ def detect_outside_reads(paths, t0, t1, folder, writer=False):
                         hits.append(h)
     if not hits:
         return "not_detected", ""
-    return "detected", "; ".join(hits[:3])[:200]
+    return "detected", _private("; ".join(hits[:3]))[:200]
 
 
 def isolation_lines(row):
@@ -1438,7 +1545,7 @@ def isolation_lines(row):
     if st == "not_detected":
         out += " (A scan finds some outside reads; not proof.)"
     if st == "detected" and row.get("isolation_note"):
-        out += "\n  " + row["isolation_note"]
+        out += "\n    " + row["isolation_note"]
     return out
 
 
