@@ -297,7 +297,7 @@ class FlowTest(unittest.TestCase):
         out = "\n".join(self.w.block_lines(sk, blocks))
         self.assertIn("  SKILL.md lines 3-9 = your T3 solution lines 2-8 (7 lines)", out)
         self.assertIn("      LDW #5, r4", out)
-        self.assertIn("  These blocks in your skill are your T3 solution. Knowledge or the answer? "
+        self.assertIn("  These blocks in your skill come from your T3 solution. Knowledge or the answer? "
                       "You will see this again in the leakage check.", out)
         self.assertNotIn("... and", out)
         none = self.w.block_lines(sk, [])

@@ -2462,7 +2462,7 @@ def block_lines(skill_dir, blocks):
                 shown += 1
     if len(blocks) > 6:
         out.append("  ... and %d more blocks" % (len(blocks) - 6))
-    out.append("  These blocks in your skill are your T3 solution. Knowledge or the answer? "
+    out.append("  These blocks in your skill come from your T3 solution. Knowledge or the answer? "
                "You will see this again in the leakage check.")
     return out
 
