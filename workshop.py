@@ -343,6 +343,7 @@ def s3_header(reg, a, both, total=None):
     if right and getattr(a, "name_from_alias", False):
         print("  (change: --name OTHER)")
     print("  Wait until the agent is done; do not ask it anything else.")
+    print("  If an agent asks a question, reply: Make reasonable assumptions and continue.")
     print("  Time box %d min: stop any agent still working at %d min, then run its done line."
           % (TIME_BOX_MIN, TIME_BOX_MIN))
 
@@ -723,6 +724,7 @@ def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False)
     prompt_block(prompt)
     print("\n  %d. Wait until the agent says it is done. Do not ask it anything else in this thread."
           % (5 if mem else 4))
+    print("     If it asks a question, reply: Make reasonable assumptions and continue.")
     if cmd:
         next_box(cmd, then)
 

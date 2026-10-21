@@ -8,6 +8,6 @@ How to write it: read and follow the guide at {guide}/superpowers-writing-skills
 
 Make it general, not only for this game.
 
-Do not read memory files or notes from earlier sessions.
+Do not read memory files or notes from earlier sessions. Work only inside this folder: do not read or change files outside it.
 
 Work on your own until the task is done. Do not stop to ask for approval or a design review.

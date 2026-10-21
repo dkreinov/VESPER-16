@@ -4,7 +4,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
 from fakes import fresh_ws, run  # noqa: E402
 
-SENT = "Do not read memory files or notes from earlier sessions.\n\nWork on your own"
+SENT = ("Do not read memory files or notes from earlier sessions. Work only inside this folder: "
+        "do not read or change files outside it.\n\nWork on your own")
 
 
 class MemoryUsed(unittest.TestCase):
