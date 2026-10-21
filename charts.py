@@ -223,9 +223,11 @@ def flag_reasons(r):
         out.append("memory used")
     if r.get("isolation") == "detected":
         out.append("isolation")
-    if r.get("settings_confirmed") != "yes":
+    # The settings gate and the 10-minute box exist only in stage 3 (the stage-1 writer has 20 minutes, no gate).
+    s3 = str(r.get("stage", "")) == "3"
+    if s3 and r.get("settings_confirmed") != "yes":
         out.append("settings not confirmed")
-    if r.get("overrun") == "yes":
+    if s3 and r.get("overrun") == "yes":
         out.append("over time box")
     return out
 

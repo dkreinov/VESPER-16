@@ -281,5 +281,27 @@ class ArmsAndPairsTest(unittest.TestCase):
         charts.chart_specs([r])                          # must not raise
 
 
+class FlagStageTest(unittest.TestCase):
+    """The settings gate and the 10-minute box exist only in stage 3."""
+
+    def row(self, stage, **kw):
+        r = {f: "" for f in charts.FIELDS}
+        r.update(stage=stage, **kw)
+        return r
+
+    def test_stage1_and_2_not_flagged_for_settings_or_time(self):
+        for st in ("1", "2"):
+            self.assertFalse(charts.flagged(self.row(st, overrun="yes")), st)
+
+    def test_stage3_flags(self):
+        self.assertTrue(charts.flagged(self.row("3", settings_confirmed="")))
+        self.assertTrue(charts.flagged(self.row("3", settings_confirmed="yes", overrun="yes")))
+        self.assertFalse(charts.flagged(self.row("3", settings_confirmed="yes", overrun="no")))
+
+    def test_memory_and_isolation_flag_every_stage(self):
+        self.assertTrue(charts.flagged(self.row("1", memory_used="yes")))
+        self.assertTrue(charts.flagged(self.row("2", isolation="detected")))
+
+
 if __name__ == "__main__":
     unittest.main()
