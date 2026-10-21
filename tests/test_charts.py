@@ -16,7 +16,7 @@ def serial(d):
 
 def row(day, **kw):
     r = {f: "" for f in charts.FIELDS}
-    r.update({"revision": "1", "grading": "graded", "measurement": "log"}, **kw)
+    r.update({"revision": "1", "grading": "graded", "measurement": "log", "settings_confirmed": "yes"}, **kw)
     return ["1", serial(day), serial(day), "anonymous", ""] + [str(r[f]) for f in charts.FIELDS]
 
 
@@ -149,10 +149,9 @@ class ChartsTest(unittest.TestCase):
         self.assertEqual(mt["labels"], ["ann", "cat"])
         self.assertEqual(mt["cost"][0], [0.81, 0.05, 0.03])
         self.assertEqual(mt["time"][1], [12.0, 10.0, None])
-        pts = charts.leakage(g)
-        self.assertIn({"x": 60.0, "y": 2.0, "series": "T3", "label": "ann", "passed": True}, pts)
-        self.assertIn({"x": 0.0, "y": 10.0, "series": "T6", "label": "cat", "passed": False}, pts)
-        self.assertEqual(charts.t6_pass(a), {"class": (1, 2), "baseline": (0, 12)})
+        self.assertFalse(hasattr(charts, "leakage"))
+        t = charts.t6_pass(a)
+        self.assertEqual((t["class"], t["baseline"], t["flagged"]), ((1, 2), (0, 12), 0))
         self.assertEqual(charts.methods(g), {"builtin": {"median_min": 10.0, "passed": 0, "n": 1},
                                              "plain": {"median_min": 3.5, "passed": 1, "n": 1}})
 
@@ -161,7 +160,8 @@ class ChartsTest(unittest.TestCase):
         self.assertEqual(charts.main([self.xlsx, "--from", "2026-10-27", "--to", "2026-10-27", "--out", out]), 0)
         with open(os.path.join(out, "charts.html"), encoding="utf-8") as f:
             page = f.read()
-        self.assertEqual(page.count("<svg"), 5)          # 1a, 1b, 2, 3, 4
+        self.assertEqual(page.count("<svg"), 5)          # 1a, 1b, 2 (paired), 3, 4
+        self.assertNotIn("Leakage", page)
         self.assertIn("ann", page)
         self.assertNotIn("bob", page)
         self.assertIn("1/2", page)                        # class T6 pass count
@@ -179,6 +179,106 @@ class ChartsTest(unittest.TestCase):
             w.writerow(["ann", "s3-aaaa-t6-1111", "3", "T6", "100", "%.0f" % DAY_A.timestamp()])
         rows = charts.load_rows([p])
         self.assertEqual(rows[0]["_date"].date(), DAY_A.date())
+
+
+def r3(rid, task, **kw):
+    d = {f: "" for f in charts.FIELDS}
+    d.update(alias="x", run_id=rid, stage="3", task=task, revision="1", grading="graded", settings_confirmed="yes",
+             model="m", effort="high", method="plain")
+    d.update(kw)
+    d["_date"] = DAY_A
+    return d
+
+
+def s1(code):
+    d = {f: "" for f in charts.FIELDS}
+    d.update(alias=code, run_id="s1-" + code, stage="1", task="T3", revision="1", grading="graded", score="100", method="plain")
+    d["_date"] = DAY_A
+    return d
+
+
+class ArmsAndPairsTest(unittest.TestCase):
+    def test_control_never_counts_as_skill(self):
+        rows = [s1("aaaa"), r3("s3-aaaa-t6-1111", "T6", score="40"),
+                r3("s3-aaaa-n6-2222", "T6", score="100", method="none")]
+        self.assertEqual(charts.arm(rows[2]), "control")
+        self.assertEqual(charts.arm(rows[1]), "skill")
+        self.assertEqual(charts.t6_pass(rows)["class"], (0, 1))     # the n6 pass does not raise it
+        g = charts.learners(rows)[0]
+        self.assertEqual(g["T6"]["run_id"], "s3-aaaa-t6-1111")
+        self.assertEqual(g["N6"]["run_id"], "s3-aaaa-n6-2222")
+
+    def test_method_none_is_control_even_with_t_tag(self):
+        self.assertEqual(charts.arm(r3("s3-aaaa-t6-1111", "T6", method="none")), "control")
+
+    def test_pass_rule(self):
+        self.assertTrue(charts.passed(r3("s3-aaaa-t6-1111", "T6", score="90")))
+        self.assertFalse(charts.passed(r3("s3-aaaa-t3-1111", "T3", score="95")))
+        self.assertTrue(charts.passed(r3("s3-aaaa-t3-1111", "T3", score="100")))
+
+    def rows_pair(self, eff_ctl="high", ctl_score="100", model_ctl="m", **flag):
+        return [s1("aaaa"), r3("s3-aaaa-t6-1111", "T6", score="95", **flag),
+                r3("s3-aaaa-n6-2222", "T6", score=ctl_score, method="none", effort=eff_ctl, model=model_ctl),
+                r3("s3-aaaa-t3-3333", "T3", score="100", **flag),
+                r3("s3-aaaa-n3-4444", "T3", score="50", method="none", effort=eff_ctl, model=model_ctl)]
+
+    def test_pairs_same_settings(self):
+        p = charts.paired(charts.learners(self.rows_pair()))
+        c = p["cells"][("m", "high", "T6", False)]
+        self.assertEqual((c["pairs"], c["skill"]["pass"], c["control"]["pass"]), (1, 1, 1))
+        c3 = p["cells"][("m", "high", "T3", False)]
+        self.assertEqual((c3["skill"]["pass"], c3["control"]["fail"]), (1, 1))
+
+    def test_pairs_differing_or_unknown_settings_skipped(self):
+        for kw in ({"eff_ctl": "low"}, {"eff_ctl": ""}, {"model_ctl": "other"}):
+            p = charts.paired(charts.learners(self.rows_pair(**kw)))
+            self.assertEqual((p["cells"], p["skipped"]), ({}, 2), kw)
+
+    def test_missing_partner_counted(self):
+        rows = [s1("aaaa"), r3("s3-aaaa-t6-1111", "T6", score="95")]
+        p = charts.paired(charts.learners(rows))
+        self.assertEqual((p["cells"], p["missing"]), ({}, 1))
+
+    def test_flagged_pairs_apart_and_counted(self):
+        spec = charts.pair_spec(charts.learners(self.rows_pair(memory_used="yes")))
+        self.assertTrue(all("[flagged]" in g for g in spec["groups"]))
+        self.assertIn("Flagged pairs", spec["hint"])
+        self.assertIn(": 2, shown apart", spec["hint"])
+
+    def test_flag_reasons(self):
+        base = r3("s3-aaaa-t6-1111", "T6", score="100")
+        self.assertFalse(charts.flagged(base))
+        for kw in ({"memory_used": "yes"}, {"isolation": "detected"}, {"settings_confirmed": ""}, {"settings_confirmed": "no"},
+                   {"overrun": "yes"}):
+            self.assertTrue(charts.flagged(dict(base, **kw)), kw)
+        self.assertFalse(charts.flagged(dict(base, isolation="not_detected", overrun="no")))
+
+    def test_t6_counts_flagged_ungraded_missing(self):
+        rows = [s1("aaaa"), s1("bbbb"), s1("cccc"), s1("dddd"),
+                r3("s3-aaaa-t6-1111", "T6", score="100"),
+                r3("s3-bbbb-t6-1111", "T6", score="", grading="ungraded"),
+                r3("s3-cccc-t6-1111", "T6", score="100", memory_used="yes")]
+        t = charts.t6_pass(rows)
+        self.assertEqual(t["class"], (1, 1))
+        self.assertEqual((t["counts"]["ungraded"], t["flagged"], t["missing"]), (1, 1, 1))
+        small = [s for s in charts.chart_specs(rows) if s["id"] == "small"][0]
+        self.assertIn("1 ungraded", small["hint"])
+        self.assertIn("1 flagged", small["hint"])
+        self.assertIn("1 learners have no T6 row", small["hint"])
+
+    def test_titles(self):
+        specs = {s["id"]: s for s in charts.chart_specs([s1("aaaa")])}
+        self.assertNotIn("leak", specs)
+        self.assertIn("pairs", specs)
+        self.assertTrue(specs["money"]["title"].endswith("(not a matched comparison)"))
+        self.assertTrue(specs["time"]["title"].endswith("(not a matched comparison)"))
+        self.assertIn("10-minute", specs["small"]["title"])
+
+    def test_old_rows_without_new_fields_load(self):
+        r = {f: "" for f in charts.FIELDS}
+        r.update(run_id="s3-aaaa-t6-1111", stage="3", task="T6", score="100")
+        r["_date"] = DAY_A
+        charts.chart_specs([r])                          # must not raise
 
 
 if __name__ == "__main__":
