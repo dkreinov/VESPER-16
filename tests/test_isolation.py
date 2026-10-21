@@ -370,9 +370,10 @@ class HarvestStepTest(unittest.TestCase):
     def test_inspection_step(self):
         w, _ = fresh_ws()
         rid, out = fakes.ready_for_s3(w)
-        self.assertIn("Before stage 3 (2 minutes): open ", out)
-        self.assertIn("SKILL.md and find one verified rule, one reusable code part, and one uncertainty.", out)
-        self.assertLess(out.index("Before stage 3"), out.index("NEXT:"))
+        self.assertNotIn("Before stage 3 (2 minutes)", out)
+        self.assertIn("  No block of your T3 solution was found in your skill "
+                      "(line match; it cannot see knowledge in your own words).", out)
+        self.assertLess(out.index("No block of your T3"), out.index("NEXT:"))
         self.assertIn("Isolation check:", out)
 
 

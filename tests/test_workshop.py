@@ -249,6 +249,70 @@ class FlowTest(unittest.TestCase):
         found, share = self.w.detect_solution(sk, snap)
         self.assertEqual(share, 1.0)
 
+    def _blocks(self, sol_text, skill_files):
+        snap = os.path.join(self.tmp, "sol2.vsa")
+        with open(snap, "w") as f:
+            f.write(sol_text)
+        sk = os.path.join(self.tmp, "sk2")
+        os.makedirs(sk, exist_ok=True)
+        for name, text in skill_files.items():
+            os.makedirs(os.path.dirname(os.path.join(sk, name)), exist_ok=True)
+            with open(os.path.join(sk, name), "w") as f:
+                f.write(text)
+        return sk, snap
+
+    GAME = ("start:\n  LDW #5, r4\n  LDW #7, r5\n  MUL #3, r4\nloop:\n  ADD r4, r5\n  CMP #9, r5\n  SHR #2, r5\n  BNE loop\n"
+            "  ST r5, [r4]\n  JMP start\n")
+
+    def test_blocks_found_with_renamed_labels_and_registers(self):
+        renamed = self.GAME.replace("start", "begin").replace("loop", "again").replace("r4", "r9").replace("r5", "r2")
+        sk, snap = self._blocks(self.GAME, {"references/x.md": "text\n```\n" + renamed + "```\n"})
+        blocks, share = self.w.solution_blocks(sk, snap)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["rel"], "references/x.md")
+        self.assertGreaterEqual(blocks[0]["n"], 5)
+        self.assertEqual(share, 1.0)
+        found, share2 = self.w.detect_solution(sk, snap)
+        self.assertEqual([r for r, _ in found], ["references/x.md"])
+
+    def test_kit_example_lines_are_ignored(self):
+        with open(os.path.join(self.w.KIT, "examples", "fill.vsa"), encoding="utf-8") as f:
+            kit_text = f.read()
+        sk, snap = self._blocks(kit_text, {"copy.vsa": kit_text})
+        blocks, share = self.w.solution_blocks(sk, snap)
+        self.assertEqual(blocks, [])
+        self.assertEqual(share, 0.0)
+
+    def test_short_common_lines_make_no_block(self):
+        sol = "RET\nLDW #1, r1\nLDW #2, r2\nADD r1, r2\nRET\nST r1, [r2]\nRET\nFRAME\nJMP x\nx: RET\n"
+        skill = "RET\nfoo\nLDW #1, r1\nbar\nLDW #2, r2\nbaz\nADD r1, r2\nqux\nRET\nzed\nFRAME\n"
+        sk, snap = self._blocks(sol, {"a.vsa": skill})
+        blocks, share = self.w.solution_blocks(sk, snap)
+        self.assertEqual(blocks, [])
+        self.assertEqual(self.w.detect_solution(sk, snap)[0], [])
+
+    def test_block_lines_show_location_and_no_block_message(self):
+        sk, snap = self._blocks(self.GAME, {"SKILL.md": "intro\n" + self.GAME})
+        blocks, _ = self.w.solution_blocks(sk, snap)
+        out = "\n".join(self.w.block_lines(sk, blocks))
+        self.assertIn("  SKILL.md lines 3-9 = your T3 solution lines 2-8 (7 lines)", out)
+        self.assertIn("      LDW #5, r4", out)
+        self.assertIn("  These blocks in your skill are your T3 solution. Knowledge or the answer? "
+                      "You will see this again in the leakage check.", out)
+        self.assertNotIn("... and", out)
+        none = self.w.block_lines(sk, [])
+        self.assertEqual(none, ["  No block of your T3 solution was found in your skill "
+                                "(line match; it cannot see knowledge in your own words)."])
+
+    def test_more_than_six_blocks(self):
+        sol = "\n".join("ins%d_%d" % (b, i) for b in range(8) for i in range(5)) + "\n"
+        parts = ["\n".join("ins%d_%d" % (b, i) for i in range(5)) for b in range(8)]
+        sk, snap = self._blocks(sol, {"a.md": "\nnoise\n".join(parts)})
+        blocks, _ = self.w.solution_blocks(sk, snap)
+        self.assertEqual(len(blocks), 8)
+        out = self.w.block_lines(sk, blocks)
+        self.assertIn("  ... and 2 more blocks", out)
+
     def test_cleanup_removes_only_own_items(self):
         mine = os.path.join(self.tmp, "keep.txt")
         with open(mine, "w") as f:

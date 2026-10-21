@@ -17,7 +17,7 @@
 The tool never talks to an agent: you paste every prompt. It sends nothing over the network; it only
 opens the results form in your browser. See README.md (Workshop), MANUAL.md and HOMEWORK.md.
 """
-import argparse, csv, fnmatch, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
+import argparse, csv, difflib, fnmatch, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
 from urllib.parse import urlencode
 
 KIT = os.path.dirname(os.path.abspath(__file__))
@@ -2354,47 +2354,117 @@ def skill_hash(d):
     return h.hexdigest()[:16]
 
 
+MIN_BLOCK = 5      # a match counts only when this many lines in a row are the same
+_REG_RE = re.compile(r"\br\d{1,2}\b")
+_LABEL_DEF = re.compile(r"^\s*([A-Za-z_.][\w.]*)\s*:")
+_EQU_DEF = re.compile(r"^\s*\.(?:equ|define|set)\s+([A-Za-z_]\w*)", re.I)
+
+
 def _norm_lines(text):
-    return {re.sub(r"\s+", " ", ln.strip()) for ln in text.splitlines() if ln.strip()}
+    """[(line number, normalised text)] without blank lines. Comments go; labels and registers become
+    placeholders, so a renamed label or register still matches."""
+    raw = [(i, re.sub(r"\s+", " ", ln.split(";", 1)[0].strip().lower())) for i, ln in enumerate(text.splitlines(), 1)]
+    raw = [(i, ln) for i, ln in raw if ln]
+    names = set()
+    for _, ln in raw:
+        m = _LABEL_DEF.match(ln) or _EQU_DEF.match(ln)
+        if m:
+            names.add(m.group(1))
+    out = []
+    for i, ln in raw:
+        if names:
+            ln = re.sub(r"(?<![\w.])(%s)(?![\w])" % "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)), "LBL", ln)
+        ln = _REG_RE.sub("REG", ln)
+        out.append((i, re.sub(r"\s+", " ", ln)))
+    return out
+
+
+def _kit_lines():
+    """Normalised lines of the kit's generic code (examples and guides): they do not count as the learner's."""
+    kit = set()
+    for sub in ("examples", "guides"):
+        for dp, _, fs in os.walk(os.path.join(KIT, sub)):
+            for n in fs:
+                try:
+                    with open(os.path.join(dp, n), encoding="utf-8", errors="replace") as f:
+                        kit |= {t for _, t in _norm_lines(f.read())}
+                except OSError:
+                    pass
+    return kit
 
 
 GAME_SHARE = 0.5   # the skill holds at least this part of the stage-1 game -> "the finished game"
 
 
-def detect_solution(skill_dir, snapshot):
-    """Return (found, share). found: [(rel, reason)]. share: part of the stage-1 game lines in the skill."""
-    found, sol, seen = [], set(), set()
-    if snapshot and os.path.exists(snapshot):
-        with open(snapshot, encoding="utf-8", errors="replace") as f:
-            sol = _norm_lines(f.read())
-    for dp, _, fs in os.walk(skill_dir):
+def solution_blocks(skill_dir, snapshot):
+    """Return (blocks, share). A block is a dict: rel, a, b (skill lines), c, d (solution lines), n.
+    share: part of the stage-1 solution lines (kit lines left out) covered by blocks of >= MIN_BLOCK lines."""
+    if not (snapshot and os.path.exists(snapshot)):
+        return [], 0.0
+    with open(snapshot, encoding="utf-8", errors="replace") as f:
+        sol = _norm_lines(f.read())
+    kit = _kit_lines()
+    # kit lines may sit inside a block (they bridge it), but they never count toward the block or the share
+    sol_keys = [t for _, t in sol]
+    countable = {k for k, (_, t) in enumerate(sol) if t not in kit}
+    blocks, covered = [], set()
+    for dp, dns, fs in os.walk(skill_dir):
+        dns.sort()
         for n in sorted(fs):
             p = os.path.join(dp, n)
-            rel = os.path.relpath(p, skill_dir)
             try:
                 with open(p, encoding="utf-8", errors="replace") as f:
-                    text = f.read()
+                    lines = _norm_lines(f.read())
             except OSError:
                 continue
-            lines = _norm_lines(text)
-            common = lines & sol
-            seen |= common
-            why = []
-            if n.lower().endswith(".vsa"):
-                why.append("assembly program (.vsa)")
-            else:
-                for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):
-                    k = len(block.strip().splitlines())
-                    if k > 15:
-                        why.append("code block of %d lines" % k)
-                        break
-            if sol and lines and len(common) / len(lines | sol) >= 0.25:
-                why.append("overlaps the stage-1 solution")
-            if why:
-                if sol:
-                    why.append("%d of its %d lines are in your game" % (len(common), len(lines)))
-                found.append((rel, ", ".join(why)))
-    return found, (len(seen) / len(sol) if sol else 0.0)
+            if not lines:
+                continue
+            sm = difflib.SequenceMatcher(None, [t for _, t in lines], sol_keys, autojunk=False)
+            for m in sm.get_matching_blocks():
+                idx = [k for k in range(m.b, m.b + m.size) if k in countable]
+                if m.size < MIN_BLOCK or len(idx) < MIN_BLOCK:
+                    continue
+                lo, hi = idx[0] - m.b, idx[-1] - m.b          # a block starts and ends on a line of yours
+                covered.update(idx)
+                blocks.append({"rel": os.path.relpath(p, skill_dir).replace("\\", "/"),
+                               "a": lines[m.a + lo][0], "b": lines[m.a + hi][0],
+                               "c": sol[m.b + lo][0], "d": sol[m.b + hi][0], "n": hi - lo + 1})
+    return blocks, (len(covered) / len(countable) if countable else 0.0)
+
+
+def detect_solution(skill_dir, snapshot):
+    """Return (found, share). found: [(rel, reason)], one per skill file with a block.
+    share: part of the stage-1 solution lines (kit lines left out) that sit in blocks of the skill."""
+    blocks, share = solution_blocks(skill_dir, snapshot)
+    per = {}
+    for b in blocks:
+        per[b["rel"]] = per.get(b["rel"], 0) + b["n"]
+    return [(rel, "%d lines in blocks of your T3 solution" % k) for rel, k in per.items()], share
+
+
+def block_lines(skill_dir, blocks):
+    """The lines harvest prints for the blocks (see the W8 step)."""
+    if not blocks:
+        return ["  No block of your T3 solution was found in your skill "
+                "(line match; it cannot see knowledge in your own words)."]
+    out = []
+    for b in blocks[:6]:
+        out.append("  %s lines %d-%d = your T3 solution lines %d-%d (%d lines)" % (b["rel"], b["a"], b["b"], b["c"], b["d"], b["n"]))
+        try:
+            with open(os.path.join(skill_dir, b["rel"]), encoding="utf-8", errors="replace") as f:
+                src = f.read().splitlines()
+        except OSError:
+            src = []
+        shown = 0
+        for ln in src[b["a"] - 1:b["b"]]:
+            if ln.split(";", 1)[0].strip() and shown < 3:
+                out.append("      " + ln.rstrip()[:100])
+                shown += 1
+    if len(blocks) > 6:
+        out.append("  ... and %d more blocks" % (len(blocks) - 6))
+    out.append("  These blocks in your skill are your T3 solution. Knowledge or the answer? "
+               "You will see this again in the leakage check.")
+    return out
 
 
 def cmd_skill(a):
@@ -2461,6 +2531,7 @@ def cmd_harvest(a):
     shutil.copytree(src, dst)
     clear_screen()
     found, share = detect_solution(dst, snap_path(rid, "1"))
+    blocks, _ = solution_blocks(dst, snap_path(rid, "1"))
     # Record only: line overlap cannot tell a helper from a cached answer, so the learner is not asked.
     # The percentage goes to the form for the debrief; --move-aside is for the instructor.
     status = "%d%%" % round(share * 100)
@@ -2501,8 +2572,8 @@ def cmd_harvest(a):
     print(isolation_lines(row))
     memories_card(reg)
     print("\n" + SAVED_LINE)
-    print("\n  Before stage 3 (2 minutes): open %s and find one verified rule, one reusable code part, "
-          "and one uncertainty." % os.path.join(dst, "SKILL.md"))
+    print()
+    print("\n".join(block_lines(dst, blocks)))
     next_box(["python workshop.py new s3 --task all",
               "(cmd/PowerShell: one command; it starts all four runs)"],
              "stage 3: FOUR new agent threads (T3, T3 control, T6, T6 control). Run:")
