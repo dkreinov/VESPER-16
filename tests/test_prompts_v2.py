@@ -33,7 +33,7 @@ class PromptsV2(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             run(self.w, "new", "s3", "--task", "T6", "--name", "mira")
         text = out.getvalue()
-        for s in ("model gpt-6-luna", "Time box 10 min, 6 runs", "RUN  T6 (new task)", "name on T6: MIRA"):
+        for s in ("model gpt-6-luna", "Time box 10 min: stop any agent still working at 10 min, then run its done line.", "6 runs each", "RUN  T6 (new task)", "name on T6: MIRA"):
             self.assertIn(s, text)
         self.assertNotIn("Haiku", text)
 

@@ -42,7 +42,7 @@ Work in a local folder, not on OneDrive. Choose any 4 hex digits (0-9a-f) for <s
 
 ## Stage 3 — two new agents with the skill, at the same time
 
-With the tool, `python workshop.py new s3 --task both` is the default way (separate commands `--task T6` and `--task T3` also work). By hand: make two run folders: T6 (your name) and T3 again. Use the same <s1code> as in your stage-1 run_id (`s1-<s1code>`), and choose new 4 hex digits for <code>.
+With the tool, `python workshop.py new s3 --task all` is the default way. It makes three runs: T3 with the skill, T3 WITHOUT the skill (the control: no skill folders, and a prompt without the skill sentences; run id tag `n3`), and T6 with the skill (a bonus). Separate commands (`--task both`, `--task T6`, `--task T3`) also work. By hand: make two run folders: T6 (your name) and T3 again. Use the same <s1code> as in your stage-1 run_id (`s1-<s1code>`), and choose new 4 hex digits for <code>.
 
 1. Make the first run folder as in stage 1, step 1, but with `$R3 = "$env:LOCALAPPDATA\vesper-manual\s3-<s1code>-t6-<code>"`
    and `$R3` instead of `$R` in all commands of that step. Do **not** copy `tasks\T3.md`. Instead write your T6 task:

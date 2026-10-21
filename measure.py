@@ -244,6 +244,7 @@ def codex_sessions(t0, t1, sid=None):
         if not sid and not recent(fp, t0):
             continue
         cwd, before, during, models, first, last = None, None, None, set(), None, None
+        effort, eff_ts = "", None
         for d in jsonl(fp):
             p = d.get("payload") or {}
             typ = d.get("type")
@@ -253,6 +254,9 @@ def codex_sessions(t0, t1, sid=None):
                 cwd = p.get("cwd") or cwd
                 if p.get("model"):
                     models.add(p["model"])
+                ets = parse_ts(d.get("timestamp"))
+                if p.get("effort") and ets is not None and ets <= t1 and (eff_ts is None or ets >= eff_ts):
+                    effort, eff_ts = str(p["effort"]), ets      # last turn_context up to the end of the window
             if typ == "event_msg":
                 u = find_total_usage(p)
             elif typ == "token_usage_record":            # newer Codex: per-response record with thread totals
@@ -279,7 +283,7 @@ def codex_sessions(t0, t1, sid=None):
                    cr=cached, cw=g("cache_write_input_tokens"),
                    o=g("output_tokens"))                # includes reasoning tokens
         out.append(dict(agent="codex", file=fp, cwd=cwd, tot=tot, models=models, first=first, last=last,
-                        sid=os.path.basename(fp)[:-6]))
+                        effort=effort, eff_ts=eff_ts, sid=os.path.basename(fp)[:-6]))
     return out
 
 

@@ -6,7 +6,9 @@
   python workshop.py done [run_id]          end stage 1 or 3: measure, grade, form
   python workshop.py skill                  stage 2: prints the skill-writing prompt (same thread)
   python workshop.py harvest                end stage 2: take the skill out, check it
-  python workshop.py new s3 --task both     stage 3, both runs (T6, then T3) in one command (recommended)
+  python workshop.py new s3 --task all      stage 3, three runs in one command (default): T3 with the skill,
+                                            T3 without the skill (control), T6 with the skill
+  python workshop.py new s3 --task both     stage 3, two runs (T6, then T3) in one command
   python workshop.py new s3 --task T6       stage 3, run 1: T6 with your name, a NEW agent thread
   python workshop.py new s3 --task T3       stage 3, run 2: T3 again, a SECOND new agent thread
   python workshop.py unlock 4 <password>    grader (only after the agent is done)
@@ -72,7 +74,7 @@ PART_DEST = {"2": ".wiki", "3": ".prebuilt", "4": ".grader"}
 ROW_FIELDS = ["alias", "run_id", "stage", "revision", "parent_run_id", "task", "agent", "model", "method",
               "skill_source", "skill_hash", "skill_has_solution", "elapsed_min", "wall_min", "emulator_runs",
               "tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd", "price_table",
-              "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used", "memory_used"]
+              "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used", "memory_used", "effort"]
 LINE = "-" * 72
 
 
@@ -305,14 +307,17 @@ def memories_card(reg):
         print(c_next("  " + l))
 
 
-SMALL_SHORT = {"claude": 'Haiku (type "/model haiku")', "codex": "gpt-6-luna",
+SMALL_SHORT = {"claude": "Haiku (/model haiku)", "codex": "gpt-6-luna, effort medium",
                "cursor": "its cheapest model"}
 
 
-def s3_header(reg, a, both):
+def s3_header(reg, a, both, total=None):
     """Compact stage-3 header: title (+ T6 name), one steps paragraph, one wait line."""
     agent = reg.data.get("agent") or ""
-    title = "STAGE 3 - %s WITH your skill" % ("two NEW agents" if both else "a NEW agent")
+    if total == 3:
+        title = "STAGE 3 - three NEW agents (T3 with skill, T3 without skill, T6 with skill)"
+    else:
+        title = "STAGE 3 - %s WITH your skill" % ("two NEW agents" if both else "a NEW agent")
     first = reg.data["runs"][a.s3_first]
     right = ("name on T6: " + first["name"]) if first.get("task") == "T6" and first.get("name") else ""
     print("\n" + c_banner(WIDE))
@@ -321,7 +326,7 @@ def s3_header(reg, a, both):
     model = SMALL_SHORT.get(agent) or "; ".join("%s %s" % (k, v) for k, v in SMALL_SHORT.items())
     mem = codex_memories_on(reg) and agent in ("codex", "")
     chunks = ["new project from the folder", "-> new thread"] + (["-> /memories off"] if mem else []) \
-        + ["-> model " + model, "-> paste its prompt.   Time box %d min, %d runs." % (TIME_BOX_MIN, S3_RUN_BUDGET)]
+        + ["-> model " + model, "-> paste its prompt.   %d runs each." % S3_RUN_BUDGET]
     lines, cur = [], ("For EACH run:" if both else "For this run:")
     for c in chunks:
         if len(cur) + 1 + len(c) > 70:
@@ -336,11 +341,13 @@ def s3_header(reg, a, both):
     if right and getattr(a, "name_from_alias", False):
         print("  (change: --name OTHER)")
     print("  Wait until the agent is done; do not ask it anything else.")
+    print("  Time box %d min: stop any agent still working at %d min, then run its done line."
+          % (TIME_BOX_MIN, TIME_BOX_MIN))
 
 
-def s3_run_block(n, total, task, folder, prompt):
+def s3_run_block(n, total, task, folder, prompt, desc=None):
     """One run: its title line with the full folder path, then the prompt between magenta lines."""
-    desc = {"T6": "T6 (new task)", "T3": "T3 (same task as stage 1)"}.get(task, task)
+    desc = desc or {"T6": "T6 (new task)", "T3": "T3 (same task as stage 1)"}.get(task, task)
     of = " %d of %d" % (n, total) if total > 1 else ""
     num = " %d" % n if total > 1 else ""
     print("\n" + c_bold("  RUN%s  %s   folder: %s" % (of, desc, folder)))
@@ -388,6 +395,10 @@ def choose_active(reg, acts):
     sys.exit("Nothing finished. Name the run that is done:\n  " + "\n  ".join(next_cmd(x) for x in acts))
 
 
+def is_control(run):
+    return run.get("stage") == "3" and run.get("skill_source") == "none"
+
+
 def s3_run_id(reg, parent, task):
     """s3-<stage-1 code>-<task>-<new code>: the form's run_id names the stage-1 parent (charts.py links them)."""
     pcode = parent.split("-", 1)[1] if parent.startswith("s1-") else "none"
@@ -404,10 +415,11 @@ def second_s3_hint(reg, rid):
     """The command for the paired stage-3 task of the same parent, when it was not started yet."""
     run = reg.data["runs"][rid]
     other = PAIR.get(run["task"])
-    if not other or not run["parent"]:
+    if not other or not run["parent"] or is_control(run):
         return ""
     for r in reg.data["runs"].values():
-        if r.get("stage") == "3" and r.get("parent") == run["parent"] and r.get("task") == other:
+        if r.get("stage") == "3" and r.get("parent") == run["parent"] and r.get("task") == other \
+                and not is_control(r):
             return ""
     return "python workshop.py new s3 --task " + other
 
@@ -713,7 +725,7 @@ def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False)
         next_box(cmd, then)
 
 
-def create_s3_run(reg, a, task, name=None):
+def create_s3_run(reg, a, task, name=None, control=False):
     """Create one stage-3 run (registry row, folder, active). Returns (run_id, folder, prompt).
     On failure the registry row and active entry are removed, so no half state stays."""
     src, parent, sh, shs = resolve_skill(reg, a.skill)
@@ -727,14 +739,19 @@ def create_s3_run(reg, a, task, name=None):
             raw = ask("Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
         name = T6F.normalise(raw)
     name = name or ""
-    rid = s3_run_id(reg, parent, task)
-    reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""),
-                                 code=rid.rsplit("-", 1)[1], stage="3", parent=parent,
-                                 skill_source=a.skill if a.skill in ("own", "wiki") else "path",
-                                 skill_hash=sh, skill_has_solution=shs, session=None, name=name)
+    rid = s3_run_id(reg, parent, "n3" if control else task)
+    if control:       # control run: same folder, no skill, no skill sentences in the prompt
+        reg.data["runs"][rid] = dict(folder="", task=task, method="none", code=rid.rsplit("-", 1)[1], stage="3",
+                                     parent=parent, skill_source="none", skill_hash="", skill_has_solution="",
+                                     session=None, name=name)
+    else:
+        reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""),
+                                     code=rid.rsplit("-", 1)[1], stage="3", parent=parent,
+                                     skill_source=a.skill if a.skill in ("own", "wiki") else "path",
+                                     skill_hash=sh, skill_has_solution=shs, session=None, name=name)
     try:
-        f = make_run_folder(reg, rid, task, skill_dir=src, name=name)
-        prompt = render_prompt("stage3", task=task, run_id=rid)
+        f = make_run_folder(reg, rid, task, skill_dir=None if control else src, name=name)
+        prompt = render_prompt("stage3-noskill" if control else "stage3", task=task, run_id=rid)
     except BaseException:
         reg.data["runs"].pop(rid, None)
         reg.save()
@@ -764,6 +781,35 @@ def new_s3_both(reg, a):
     return 0
 
 
+ALL_DESC = {"t3": "T3 WITH the skill",
+            "n3": "T3 WITHOUT the skill (control: stop it at 10 min)",
+            "t6": "T6 WITH the skill (bonus: a new task)"}
+
+
+def new_s3_all(reg, a):
+    """new s3 --task all: T3 with the skill, T3 without it (control), T6 with the skill; one terminal."""
+    made = {}
+    try:
+        made["t6"] = create_s3_run(reg, a, "T6")          # first: it asks for the T6 name
+        made["t3"] = create_s3_run(reg, a, "T3")
+        made["n3"] = create_s3_run(reg, a, "T3", control=True)
+    except Exception as e:
+        print(c_err("\n  A run could not be created: %s" % e))
+        print("  Runs already created stay valid; start the missing ones later with --task T6 or T3.")
+    if not made:
+        return 1
+    a.s3_first = made["t6"][0] if "t6" in made else next(iter(made.values()))[0]
+    s3_header(reg, a, True, total=3)
+    order = [k for k in ("t3", "n3", "t6") if k in made]
+    for i, k in enumerate(order, 1):
+        rid, f, p = made[k]
+        s3_run_block(i, 3, "T6" if k == "t6" else "T3", f, p, desc=ALL_DESC[k])
+    label = {"t3": "(T3 with skill)", "n3": "(T3 without skill)", "t6": "(T6 with skill)"}
+    next_box(["python workshop.py done %s   %s" % (made[k][0], label[k]) for k in order],
+             "when an agent is done (or at 10 min), run its line:")
+    return 0 if len(made) == 3 else 1
+
+
 def cmd_new(a):
     ws_home(check=True)
     reg = Registry.load()
@@ -775,15 +821,16 @@ def cmd_new(a):
                      "then run this command again.")
         reg = Registry.load()
     task = a.task
-    if task == "both" and a.stage != "s3":
-        sys.exit("--task both is for stage 3 only:  python workshop.py new s3 --task both")
+    if task in ("both", "all") and a.stage != "s3":
+        sys.exit("--task %s is for stage 3 only:  python workshop.py new s3 --task all" % task)
     acts = reg.actives()
     blocking = acts if a.stage == "s1" else [x for x in acts if x["stage"] != "3"]
     if blocking:
         sys.exit("\n".join(active_lines(reg)))
     if a.stage == "s3":
         same = [x for x in acts if reg.data["runs"].get(x["run_id"], {}).get("task") in
-                (("T6", "T3") if task == "both" else (task,))]
+                (("T6", "T3") if task in ("both", "all") else (task,))
+                and (task == "all" or not is_control(reg.data["runs"].get(x["run_id"], {})))]
         if same:
             sys.exit("Stage 3 with %s is already active: %s\n  When that agent is done:  %s"
                      % (task, same[0]["run_id"], next_cmd(same[0])))
@@ -805,6 +852,8 @@ def cmd_new(a):
         if g:
             sys.exit("A VESPER skill is in a global folder, so stage 3 would not be clean:\n  " + "\n  ".join(g)
                      + "\nMove it away (or run harvest / cleanup), then run this command again.")
+        if task == "all":
+            return new_s3_all(reg, a)
         if task == "both":
             return new_s3_both(reg, a)
         rid, f, prompt = create_s3_run(reg, a, task)
@@ -979,7 +1028,7 @@ def count_runs(folder, t0, t1):
 
 def measure_stage(run, t0, t1):
     s = run.get("session") or {}
-    res = {"agent": s.get("agent", ""), "model": "", "tok_uncached": "", "tok_cache_read": "",
+    res = {"agent": s.get("agent", ""), "model": "", "effort": "", "tok_uncached": "", "tok_cache_read": "",
            "tok_cache_write": "", "tok_out": "", "cost_usd": "", "measurement": ""}
     found = []
     if s.get("agent") == "codex":
@@ -989,14 +1038,16 @@ def measure_stage(run, t0, t1):
     acts = _runlog_times(run["folder"], t0, t1, False) or []
     if found:
         tot = {"i": 0, "cr": 0, "cw": 0, "o": 0}
-        models = set()
+        models, eff = set(), (-1, "")
         for c in found:
+            if c.get("effort"):
+                eff = max(eff, (c.get("eff_ts") or 0, c["effort"]))
             for k in tot:
                 tot[k] += c["tot"].get(k, 0)
             models |= c["models"]
             acts += [x for x in (c["first"], c["last"]) if x]
         c = M.cost(tot, models)
-        res.update(model=" ".join(sorted(models)), tok_uncached=tot["i"], tok_cache_read=tot["cr"],
+        res.update(model=" ".join(sorted(models)), effort=eff[1], tok_uncached=tot["i"], tok_cache_read=tot["cr"],
                    tok_cache_write=tot["cw"], tok_out=tot["o"], cost_usd=("%.2f" % c) if c is not None else "",
                    measurement="log" if s["agent"] == "codex" else "log, output lower bound")
     res["elapsed_min"] = ("%.1f" % ((max(acts) - min(acts)) / 60)) if len(acts) >= 2 else ""
@@ -1152,13 +1203,16 @@ def ascii_frame(path, frame=300):
 
 
 def show_rows(rows):
-    cols = [("run_id", 16), ("stage", 5), ("task", 4), ("model", 18), ("elapsed_min", 7), ("emulator_runs", 6),
+    cols = [("run_id", 16), ("stage", 5), ("task", 4), ("model", 20), ("elapsed_min", 7), ("emulator_runs", 6),
             ("tok_in", 9), ("tok_out", 8), ("cost_usd", 7), ("score", 6), ("grading", 9)]
     print("  ".join(n.ljust(w) for n, w in cols))
     for r in rows:
         tin = sum(int(r.get(k) or 0) for k in ("tok_uncached", "tok_cache_read", "tok_cache_write")
                   if str(r.get(k, "")).isdigit())
-        v = dict(r, tok_in=M.fmt_k(tin) if tin else "", tok_out=M.fmt_k(int(r["tok_out"])) if str(r.get("tok_out", "")).isdigit() else "")
+        mdl = r.get("model", "")
+        if mdl and r.get("effort"):
+            mdl = "%s/%s" % (mdl, r["effort"])
+        v = dict(r, model=mdl, tok_in=M.fmt_k(tin) if tin else "", tok_out=M.fmt_k(int(r["tok_out"])) if str(r.get("tok_out", "")).isdigit() else "")
         print("  ".join(str(v.get(n, ""))[:w].ljust(w) for n, w in cols))
 
 
@@ -1200,11 +1254,39 @@ def tasks_word(n):
     return "task" if n == 1 else "tasks"
 
 
+def compare_control(reg, rw, rc):
+    """T3 WITH the skill (rw) vs T3 WITHOUT the skill (rc, control), same parent and model."""
+    banner("T3 WITH the skill vs T3 WITHOUT the skill (same model)")
+    print("\n" + c_bold("  %-15s %16s %16s %10s" % ("", "without", "with skill", "change")))
+    print("  %-15s %16s %16s %10s" % ("", rc["run_id"], rw["run_id"], ""))
+    print("  " + "-" * 60)
+    for name, keys, f in COMPARE:
+        a, b = _val(rc, *keys), _val(rw, *keys)
+        fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
+        ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" else ""
+        print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), color_change(ch)))
+    if _val(rc, "score") is None or _val(rw, "score") is None:
+        print("\n  Score not graded yet.  python workshop.py unlock 4 <password>  then  python workshop.py grade")
+
+
 def show_compare(reg, s3_id=None):
-    """Each stage-3 row vs its stage-1 parent (no skill), plus what writing the skill cost."""
+    """Each stage-3 row vs its stage-1 parent (no skill), plus what writing the skill cost.
+    A control row (T3 without the skill) is compared with the T3-with-skill row of the same parent."""
     s3s = [r for r in reg.data["rows"].values() if r["stage"] == "3" and (not s3_id or r["run_id"] == s3_id)]
+    rows3 = [r for r in reg.data["rows"].values() if r["stage"] == "3"]
     for r3 in sorted(s3s, key=lambda r: float(r["start"] or 0)):
-        parent = reg.data["runs"].get(r3["run_id"], {}).get("parent", "")
+        run3 = reg.data["runs"].get(r3["run_id"], {})
+        parent = run3.get("parent", "")
+        sib = [r for r in rows3 if r is not r3 and reg.data["runs"].get(r["run_id"], {}).get("parent") == parent
+               and r["task"] == "T3"]
+        if is_control(run3) or r3.get("method") == "none":
+            if s3_id:
+                w = [r for r in sib if not is_control(reg.data["runs"].get(r["run_id"], {}))]
+                if w:
+                    compare_control(reg, w[0], r3)
+                else:
+                    print("\n  The T3 run WITH the skill is not finished yet: no comparison with the control.")
+            continue
         r1, r2 = reg.row(parent, "1"), reg.row(parent, "2")
         if not r1:
             continue
@@ -1226,18 +1308,26 @@ def show_compare(reg, s3_id=None):
             chc = color_change(ch)
             print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), chc))
         c1, c2, c3 = _val(r1, "cost_usd"), _val(r2, "cost_usd"), _val(r3, "cost_usd")
+        s1s, s3s_ = _val(r1, "score"), _val(r3, "score")
+        ok = s1s is not None and s3s_ is not None and not t6 and (s3s_ >= s1s or (s3s_ >= 90 and s1s >= 90))
         if c2 is not None:
             print("\n  Writing the skill (stage 2): %s min, $%.2f." % (r2.get("elapsed_min", "?"), c2))
-            if c1 is not None and c3 is not None and not t6:
+            if ok and c1 is not None and c3 is not None:
                 if c1 > c3:
                     n = max(1, math.ceil(c2 / (c1 - c3)))
                     print("  The skill pays for itself after %d %s like this one (stage-2 cost / saving per task)."
                           % (n, tasks_word(n)))
                 else:
                     print("  The skill did not save money on this task.")
-        if _val(r1, "score") is None or _val(r3, "score") is None:
+        if s1s is not None and s3s_ is not None and not t6 and not ok:
+            print("  The skill run scored lower (%d vs %d): no saving is counted." % (s3s_, s1s))
+        if s1s is None or s3s_ is None:
             print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password>  then  python workshop.py grade"
                   % ("After BOTH agents are done" if reg.actives("3") else "Now"))
+        if r3["task"] == "T3":
+            ctl = [r for r in sib if is_control(reg.data["runs"].get(r["run_id"], {}))]
+            if ctl:
+                compare_control(reg, r3, ctl[0])
 
 
 def finish_stage(reg, rid, stage, a, grade=True):
@@ -1437,7 +1527,7 @@ def cmd_skill(a):
         sys.exit("Do stage 1 first:  python workshop.py new s1")
     rid = acts2[0]["run_id"] if again else max(s1, key=lambda r: float(r["cutoff"] or 0))["run_id"]
     if reg.row(rid, "2"):
-        sys.exit("Stage 2 of %s is already done. Next:  python workshop.py new s3 --task T6" % rid)
+        sys.exit("Stage 2 of %s is already done. Next:  python workshop.py new s3 --task all" % rid)
     run = reg.data["runs"][rid]
     if again:
         print("\n  Stage 2 is already running (the clock started at the first 'skill'). Here is the prompt again.")
@@ -1471,7 +1561,7 @@ def cmd_harvest(a):
             acts = reg.actives()
             sys.exit("Stage 2 of %s is already harvested.\n"
                      "  Form again:  python workshop.py form %s 2\n"
-                     "  Next:        %s" % (rid, rid, next_cmd(acts[-1]) if acts else "python workshop.py new s3 --task T6"))
+                     "  Next:        %s" % (rid, rid, next_cmd(acts[-1]) if acts else "python workshop.py new s3 --task all"))
         sys.exit("harvest ends stage 2. Start stage 2 with:  python workshop.py skill")
     rid = acts2[0]["run_id"]
     run = reg.data["runs"][rid]
@@ -1527,9 +1617,9 @@ def cmd_harvest(a):
     print(memory_line(row))
     memories_card(reg)
     submit(row, a)
-    next_box(["python workshop.py new s3 --task both",
-              "(cmd/PowerShell: one command; it starts both runs)"],
-             "stage 3: TWO new agent threads (T6, then T3). Run:")
+    next_box(["python workshop.py new s3 --task all",
+              "(cmd/PowerShell: one command; it starts all three runs)"],
+             "stage 3: THREE new agent threads (T3, T3 control, T6). Run:")
     return 0
 
 
@@ -1701,7 +1791,8 @@ def parse(argv):
     s.set_defaults(func=cmd_doctor)
     s = sub.add_parser("new")
     s.add_argument("stage", choices=["s1", "s3"])
-    s.add_argument("--task", default="T3", choices=["T3", "T4", "T6", "both"])
+    s.add_argument("--task", default="T3", choices=["T3", "T4", "T6", "both", "all"],
+                   help="stage 3: use all (recommended) = T3 with skill, T3 without skill (control), T6")
     s.add_argument("--name", help="T6 (or both) only: your name on the screen (up to 8 letters A-Z; default: asked)")
     s.add_argument("--method", default="random", choices=["random"] + METHODS)
     s.add_argument("--skill", default="own", help="own | wiki | <folder with SKILL.md>")

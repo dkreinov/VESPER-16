@@ -65,7 +65,7 @@ class MemoryUsed(unittest.TestCase):
         self.assertEqual(w.Registry.load().row(rid, "1")["memory_used"], "yes")
         self.assertIn("Agent memory in context: yes (Codex Memories; see the debrief)", out.getvalue())
         with open(os.path.join(w.ws_home(), "results.csv"), encoding="utf-8") as f:
-            self.assertEqual(f.readline().strip().split(",")[-1], "memory_used")
+            self.assertEqual(f.readline().strip().split(",")[-2:], ["memory_used", "effort"])
 
 
 class Prompts(unittest.TestCase):

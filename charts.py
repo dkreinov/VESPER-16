@@ -22,7 +22,7 @@ PASS = 90                    # score >= PASS = pass (as in the lab runs)
 T6_BASELINE = (0, 12)        # small model, no skill: 0/12 pass in 5 min (Haiku 0/6, gpt-6-luna 0/6)
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]   # categorical slots 1-3 of the validated default palette
 NEUTRAL = "#8a8985"
-S3_ID = re.compile(r"^s3-([0-9a-f]{4})-(t\d)-[0-9a-f]{4}$")
+S3_ID = re.compile(r"^s3-([0-9a-f]{4})-([tn]\d)-[0-9a-f]{4}$")
 M_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 R_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 
@@ -171,7 +171,8 @@ def learners(rows):
         if st in ("1", "2") and rid.startswith("s1-"):
             by.setdefault(rid, {})["s%s" % st] = r
         elif st == "3" and parent_id(rid):
-            by.setdefault(parent_id(rid), {})[r.get("task", "").upper()] = r
+            ctl = r.get("method") == "none" or S3_ID.match(rid).group(2).startswith("n")
+            by.setdefault(parent_id(rid), {})["N3" if ctl else r.get("task", "").upper()] = r   # N3 = control
     out = []
     for rid in sorted(by):
         g = by[rid]

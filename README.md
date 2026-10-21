@@ -68,7 +68,8 @@ python workshop.py new s1                 # stage 1: checks this computer (docto
 python workshop.py done                   # the agent is done: measure, (grade), results form
 python workshop.py skill                  # stage 2: the prompt that asks the SAME agent to write a skill
 python workshop.py harvest                # stage 2 is done: take the skill out and check it
-python workshop.py new s3 --task both     # stage 3, both runs (T6, then T3): the default way
+python workshop.py new s3 --task all      # stage 3, three runs (T3 with skill, T3 without skill, T6): the default way
+python workshop.py new s3 --task both     # stage 3, two runs (T6, then T3)
 python workshop.py new s3 --task T6       # alternative: stage 3, run 1: T6 with YOUR name (it asks), a NEW agent thread
 python workshop.py new s3 --task T3       # stage 3, run 2: T3 again, a SECOND new agent thread (same time)
 python workshop.py done <run_id>          # end one stage-3 run (plain `done` asks which one)
@@ -84,8 +85,11 @@ Open each run folder that `new` prints as its own project in your agent (Codex, 
 in a new thread, and paste the prompt. Stage 2 uses the same thread as stage 1.
 Codex: if Memories are on, type /memories first in each new workshop thread and turn memory off for that chat.
 
-**Stage 3 runs two agents at the same time.** `new s3 --task both` (the default way; `--name` works with it)
-makes both runs in one command: first T6, then T3. You can start them one by one instead:
+**Stage 3 runs three agents at the same time.** `new s3 --task all` (the default way; `--name` works with it)
+makes three runs in one command: (1) T3 WITH your skill, (2) T3 WITHOUT the skill (the control: same model, same
+task, no skill in the folder, and a prompt without the skill sentences; stop it at 10 min), and
+(3) T6 WITH your skill (a bonus: a new task). Run 2 shows what the skill really adds; `show` compares run 1
+with run 2. `--task both` (T6 and T3 with the skill) still works. You can start the runs one by one instead:
 `new s3 --task T6` asks for your name (up to 8 letters A-Z) and
 writes it into `tasks/T6.md`; T6 is a new task that your skill has never seen. `new s3 --task T3` repeats the
 stage-1 game. Open each folder in its own new thread and choose the small model there (Claude Code: Haiku;

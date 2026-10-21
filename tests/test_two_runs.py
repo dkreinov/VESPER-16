@@ -71,8 +71,9 @@ class TwoRunsTest(unittest.TestCase):
         rid = [x["run_id"] for x in reg.actives() if reg.data["runs"][x["run_id"]]["task"] == task][0]
         return rid, out
 
-    def test_harvest_box_recommends_task_both(self):
-        self.assertIn("python workshop.py new s3 --task both", self.harvest_out)
+    def test_harvest_box_recommends_task_all(self):
+        self.assertIn("python workshop.py new s3 --task all", self.harvest_out)
+        self.assertIn("one command", self.harvest_out)
 
     def test_new_s3_both_creates_two_runs(self):
         out = capture(run, self.w, "new", "s3", "--task", "both", "--name", "MIRA")
