@@ -217,17 +217,24 @@ class DoneFieldsTest(unittest.TestCase):
     def test_not_detected_and_no_overrun(self):
         w, rid, out = self._s1(60, ["ls"])
         row = w.Registry.load().row(rid, "1")
-        self.assertEqual((row["isolation"], row["overrun"]), ("not_detected", "no"))
+        self.assertEqual((row["isolation"], row["overrun"]), ("not_detected", ""))   # no time box in stage 1
         self.assertIn("  Isolation check: not_detected. (A scan finds some outside reads; not proof.)", out)
         self.assertNotIn("time box: flagged", out)
 
     def test_detected_and_overrun(self):
         w, rid, out = self._s1(700, ["cat tasks/T6.md"])
         row = w.Registry.load().row(rid, "1")
-        self.assertEqual((row["isolation"], row["overrun"]), ("detected", "yes"))
+        self.assertEqual((row["isolation"], row["overrun"]), ("detected", ""))      # 700 s in stage 1: not an overrun
         self.assertTrue(row["isolation_note"])
         self.assertIn("  Isolation check: detected.", out)
-        self.assertIn("  Over the 10-minute time box: flagged in the results.", out)
+        self.assertNotIn("time box: flagged", out)
+
+    def test_overrun_rule_stage3_only(self):
+        w, _ = fresh_ws()
+        self.assertEqual(w.overrun_flag("3", 0, 601), "yes")
+        self.assertEqual(w.overrun_flag("3", 0, 600), "no")
+        self.assertEqual(w.overrun_flag("1", 0, 3000), "")
+        self.assertEqual(w.overrun_flag("2", 0, 3000), "")
 
 
 class HarvestStepTest(unittest.TestCase):
