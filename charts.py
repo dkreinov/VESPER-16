@@ -172,7 +172,7 @@ def learners(rows):
             by.setdefault(rid, {})["s%s" % st] = r
         elif st == "3" and parent_id(rid):
             ctl = r.get("method") == "none" or S3_ID.match(rid).group(2).startswith("n")
-            by.setdefault(parent_id(rid), {})["N3" if ctl else r.get("task", "").upper()] = r   # N3 = control
+            by.setdefault(parent_id(rid), {})["N" + r.get("task", "T3")[-1] if ctl else r.get("task", "").upper()] = r   # N3 / N6 = control
     out = []
     for rid in sorted(by):
         g = by[rid]

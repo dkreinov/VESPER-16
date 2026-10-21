@@ -69,50 +69,68 @@ class TaskAllTest(unittest.TestCase):
         self.w, _ = fresh_ws()
         self.s1, _ = fakes.ready_for_s3(self.w)
 
-    def test_all_creates_three_runs(self):
+    def test_all_creates_four_runs(self):
         out = capture(run, self.w, "new", "s3", "--task", "all", "--name", "MIRA")
         reg = self.w.Registry.load()
         runs = {x["run_id"]: reg.data["runs"][x["run_id"]] for x in reg.actives()}
-        self.assertEqual(len(runs), 3)
+        self.assertEqual(len(runs), 4)
         self.assertEqual({r["parent"] for r in runs.values()}, {self.s1})
-        t6 = [i for i, r in runs.items() if r["task"] == "T6"]
-        n3 = [i for i, r in runs.items() if "-n3-" in i]
-        t3 = [i for i, r in runs.items() if r["task"] == "T3" and "-t3-" in i]
-        self.assertEqual((len(t6), len(n3), len(t3)), (1, 1, 1))
-        ctl = runs[n3[0]]
-        self.assertEqual((ctl["skill_source"], ctl["method"]), ("none", "none"))
-        f = ctl["folder"]
-        for sub in (".agents", ".claude", ".cursor"):
-            self.assertFalse(os.path.exists(os.path.join(f, sub)))
-        with open(os.path.join(f, "AGENTS.md"), encoding="utf-8") as fh:
-            self.assertNotIn("Skills are in", fh.read())
-        self.assertTrue(os.path.exists(os.path.join(runs[t3[0]]["folder"], ".agents", "skills", "vesper16", "SKILL.md")))
-        for h in ("RUN 1 of 3  T3 WITH the skill",
-                  "RUN 2 of 3  T3 WITHOUT the skill (control: stop it at 10 min)",
-                  "RUN 3 of 3  T6 WITH the skill (bonus: a new task)",
+        by = {}
+        for i, r in runs.items():
+            by[i.split("-")[2]] = (i, r)
+        self.assertEqual(sorted(by), ["n3", "n6", "t3", "t6"])
+        for k in ("n3", "n6"):
+            ctl = by[k][1]
+            self.assertEqual((ctl["skill_source"], ctl["method"]), ("none", "none"))
+            f = ctl["folder"]
+            for sub in (".agents", ".claude", ".cursor"):
+                self.assertFalse(os.path.exists(os.path.join(f, sub)))
+            with open(os.path.join(f, "AGENTS.md"), encoding="utf-8") as fh:
+                self.assertNotIn("Skills are in", fh.read())
+        for k in ("t3", "t6"):
+            self.assertTrue(os.path.exists(os.path.join(by[k][1]["folder"], ".agents", "skills", "vesper16", "SKILL.md")))
+        self.assertEqual(by["n6"][1]["task"], "T6")
+        with open(os.path.join(by["n6"][1]["folder"], "tasks", "T6.md"), encoding="utf-8") as fh:
+            self.assertIn("MIRA", fh.read())
+        for h in ("RUN 1 of 4  T3 WITH the skill",
+                  "RUN 2 of 4  T3 WITHOUT the skill (control: stop it at 10 min)",
+                  "RUN 3 of 4  T6 WITH the skill (a new task: the real test)",
+                  "RUN 4 of 4  T6 WITHOUT the skill (control: stop it at 10 min)",
                   "Time box 10 min: stop any agent still working at 10 min, then run its done line."):
             self.assertIn(h, out)
         for i in runs:
             self.assertIn("python workshop.py done " + i, out)
-        # the control prompt: no skill sentences, same budget
-        cp = out.split("PROMPT 2 ", 1)[1].split("END OF PROMPT 2", 1)[0]
-        self.assertNotIn("vesper16 skill", cp)
-        self.assertNotIn("SKILL NOT FOUND", cp)
-        self.assertNotIn("Load the skill", cp)
-        self.assertIn("You have 6 runs", cp)
+        for n in ("2", "4"):       # the control prompts: no skill sentences, same budget
+            cp = out.split("PROMPT %s " % n, 1)[1].split("END OF PROMPT %s" % n, 1)[0]
+            self.assertNotIn("vesper16 skill", cp)
+            self.assertNotIn("SKILL NOT FOUND", cp)
+            self.assertNotIn("Load the skill", cp)
+            self.assertIn("You have 6 runs", cp)
         self.assertIn("Use the vesper16 skill", out)       # the other two prompts keep it
 
-    def test_control_compare_block(self):
+    def _graded(self, t3, n3, t6, n6, tm=(2, 5, 3, 6)):
         capture(run, self.w, "new", "s3", "--task", "all", "--name", "MIRA")
         reg = self.w.Registry.load()
-        ids = [x["run_id"] for x in reg.actives()]
-        n3 = [i for i in ids if "-n3-" in i][0]
-        t3 = [i for i in ids if "-t3-" in i][0]
-        reg.set_row(t3, "3", dict(task="T3", cost_usd="0.10", score="100", start="3", method="plain"))
-        reg.set_row(n3, "3", dict(task="T3", cost_usd="0.30", score="40", start="4", method="none"))
-        out = capture(self.w.show_compare, reg, n3)
-        self.assertIn("T3 WITH the skill vs T3 WITHOUT the skill (same model)", out)
-        self.assertIn(t3, out)
+        ids = {x["run_id"].split("-")[2]: x["run_id"] for x in reg.actives()}
+        for k, sc, m, t in zip(("t3", "n3", "t6", "n6"), (t3, n3, t6, n6), ("plain", "none", "plain", "none"), tm):
+            reg.set_row(ids[k], "3", dict(task=k.upper().replace("N", "T"), cost_usd="0.10", score=sc,
+                                          elapsed_min=str(t), start=str(3 + len(k) + int(k[1])), method=m))
+        return reg, ids
+
+    def test_control_compare_blocks_and_leakage(self):
+        reg, ids = self._graded("100", "40", "90", "50")
+        out = capture(self.w.show_compare, reg, ids["n3"])
+        self.assertIn("T3: WITH vs WITHOUT the skill (same model)", out)
+        out = capture(self.w.show_compare, reg)
+        self.assertIn("T6: WITH vs WITHOUT the skill (same model) - a new task, no leakage possible", out)
+        self.assertNotIn("YOUR RESULT", out)
+        self.assertIn("Skill gain on T3: +60 points / +60% time; on T6: +40 points / +50% time.", out)
+        self.assertIn("points to leakage (the skill holds parts of the T3 answer)", out)
+
+    def test_no_leakage_line_when_t6_ungraded(self):
+        reg, ids = self._graded("100", "40", "", "")
+        out = capture(self.w.show_compare, reg)
+        self.assertNotIn("Leakage check", out)
 
 
 class ChartsN3Test(unittest.TestCase):

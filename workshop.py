@@ -6,8 +6,8 @@
   python workshop.py done [run_id]          end stage 1 or 3: measure, grade, form
   python workshop.py skill                  stage 2: prints the skill-writing prompt (same thread)
   python workshop.py harvest                end stage 2: take the skill out, check it
-  python workshop.py new s3 --task all      stage 3, three runs in one command (default): T3 with the skill,
-                                            T3 without the skill (control), T6 with the skill
+  python workshop.py new s3 --task all      stage 3, four runs in one command (default): T3 with the skill,
+                                            T3 without (control), T6 with, T6 without (control)
   python workshop.py new s3 --task both     stage 3, two runs (T6, then T3) in one command
   python workshop.py new s3 --task T6       stage 3, run 1: T6 with your name, a NEW agent thread
   python workshop.py new s3 --task T3       stage 3, run 2: T3 again, a SECOND new agent thread
@@ -314,7 +314,9 @@ SMALL_SHORT = {"claude": "Haiku (/model haiku)", "codex": "gpt-6-luna, effort me
 def s3_header(reg, a, both, total=None):
     """Compact stage-3 header: title (+ T6 name), one steps paragraph, one wait line."""
     agent = reg.data.get("agent") or ""
-    if total == 3:
+    if total == 4:
+        title = "STAGE 3 - four NEW agents (T3 and T6, each with and without the skill)"
+    elif total == 3:
         title = "STAGE 3 - three NEW agents (T3 with skill, T3 without skill, T6 with skill)"
     else:
         title = "STAGE 3 - %s WITH your skill" % ("two NEW agents" if both else "a NEW agent")
@@ -739,7 +741,7 @@ def create_s3_run(reg, a, task, name=None, control=False):
             raw = ask("Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
         name = T6F.normalise(raw)
     name = name or ""
-    rid = s3_run_id(reg, parent, "n3" if control else task)
+    rid = s3_run_id(reg, parent, ("n" + task[-1]) if control else task)
     if control:       # control run: same folder, no skill, no skill sentences in the prompt
         reg.data["runs"][rid] = dict(folder="", task=task, method="none", code=rid.rsplit("-", 1)[1], stage="3",
                                      parent=parent, skill_source="none", skill_hash="", skill_has_solution="",
@@ -783,31 +785,35 @@ def new_s3_both(reg, a):
 
 ALL_DESC = {"t3": "T3 WITH the skill",
             "n3": "T3 WITHOUT the skill (control: stop it at 10 min)",
-            "t6": "T6 WITH the skill (bonus: a new task)"}
+            "t6": "T6 WITH the skill (a new task: the real test)",
+            "n6": "T6 WITHOUT the skill (control: stop it at 10 min)"}
+ALL_LABEL = {"t3": "(T3 with skill)", "n3": "(T3 without skill)", "t6": "(T6 with skill)", "n6": "(T6 without skill)"}
+ALL_ORDER = ("t3", "n3", "t6", "n6")
 
 
 def new_s3_all(reg, a):
-    """new s3 --task all: T3 with the skill, T3 without it (control), T6 with the skill; one terminal."""
+    """new s3 --task all: T3 and T6, each with the skill and without it (control); one terminal."""
     made = {}
     try:
         made["t6"] = create_s3_run(reg, a, "T6")          # first: it asks for the T6 name
+        nm = reg.data["runs"][made["t6"][0]].get("name", "")
         made["t3"] = create_s3_run(reg, a, "T3")
         made["n3"] = create_s3_run(reg, a, "T3", control=True)
+        made["n6"] = create_s3_run(reg, a, "T6", name=nm, control=True)   # same name as the T6 skill run
     except Exception as e:
         print(c_err("\n  A run could not be created: %s" % e))
         print("  Runs already created stay valid; start the missing ones later with --task T6 or T3.")
     if not made:
         return 1
     a.s3_first = made["t6"][0] if "t6" in made else next(iter(made.values()))[0]
-    s3_header(reg, a, True, total=3)
-    order = [k for k in ("t3", "n3", "t6") if k in made]
+    s3_header(reg, a, True, total=4)
+    order = [k for k in ALL_ORDER if k in made]
     for i, k in enumerate(order, 1):
         rid, f, p = made[k]
-        s3_run_block(i, 3, "T6" if k == "t6" else "T3", f, p, desc=ALL_DESC[k])
-    label = {"t3": "(T3 with skill)", "n3": "(T3 without skill)", "t6": "(T6 with skill)"}
-    next_box(["python workshop.py done %s   %s" % (made[k][0], label[k]) for k in order],
+        s3_run_block(i, 4, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k])
+    next_box(["python workshop.py done %s   %s" % (made[k][0], ALL_LABEL[k]) for k in order],
              "when an agent is done (or at 10 min), run its line:")
-    return 0 if len(made) == 3 else 1
+    return 0 if len(made) == 4 else 1
 
 
 def cmd_new(a):
@@ -1254,9 +1260,9 @@ def tasks_word(n):
     return "task" if n == 1 else "tasks"
 
 
-def compare_control(reg, rw, rc):
-    """T3 WITH the skill (rw) vs T3 WITHOUT the skill (rc, control), same parent and model."""
-    banner("T3 WITH the skill vs T3 WITHOUT the skill (same model)")
+def compare_control(reg, rw, rc, task="T3", note=""):
+    """Task WITH the skill (rw) vs WITHOUT the skill (rc, control), same parent and model."""
+    banner("%s: WITH vs WITHOUT the skill (same model)%s" % (task, note))
     print("\n" + c_bold("  %-15s %16s %16s %10s" % ("", "without", "with skill", "change")))
     print("  %-15s %16s %16s %10s" % ("", rc["run_id"], rw["run_id"], ""))
     print("  " + "-" * 60)
@@ -1269,6 +1275,55 @@ def compare_control(reg, rw, rc):
         print("\n  Score not graded yet.  python workshop.py unlock 4 <password>  then  python workshop.py grade")
 
 
+T6_NOTE = " - a new task, no leakage possible"
+
+
+def _gain(rw, rc):
+    """(score points, time %) of the skill run over its control; None when a value is missing."""
+    sw, sc = _val(rw, "score"), _val(rc, "score")
+    tw, tc = _val(rw, "elapsed_min"), _val(rc, "elapsed_min")
+    if sw is None or sc is None or tw is None or not tc:
+        return None
+    return sw - sc, (tc - tw) / tc * 100
+
+
+def leakage_line(reg, parent):
+    """The leakage check, when both pairs (T3 and T6, skill vs control) are graded."""
+    g = {}
+    for r in reg.data["rows"].values():
+        run = reg.data["runs"].get(r["run_id"], {})
+        if r["stage"] == "3" and run.get("parent") == parent:
+            g[(r["task"], is_control(run) or r.get("method") == "none")] = r
+    pairs = [_gain(g.get((t, False)), g.get((t, True))) if (t, False) in g and (t, True) in g else None
+             for t in ("T3", "T6")]
+    if None in pairs:
+        return ""
+    return ("  Leakage check: Skill gain on T3: %+d points / %+d%% time; on T6: %+d points / %+d%% time. "
+            "A much larger gain on T3 than on T6 points to leakage (the skill holds parts of the T3 answer)."
+            % (round(pairs[0][0]), round(pairs[0][1]), round(pairs[1][0]), round(pairs[1][1])))
+
+
+def payback(reg, r1, r2, r3, t6=False, shown_table=False):
+    """What writing the skill cost, and the pay-back rule (only when the score holds)."""
+    c1, c2, c3 = _val(r1, "cost_usd"), _val(r2, "cost_usd"), _val(r3, "cost_usd")
+    s1s, s3s_ = _val(r1, "score"), _val(r3, "score")
+    ok = s1s is not None and s3s_ is not None and not t6 and (s3s_ >= s1s or (s3s_ >= 90 and s1s >= 90))
+    if c2 is not None:
+        print("\n  Writing the skill (stage 2): %s min, $%.2f." % (r2.get("elapsed_min", "?"), c2))
+        if ok and c1 is not None and c3 is not None:
+            if c1 > c3:
+                n = max(1, math.ceil(c2 / (c1 - c3)))
+                print("  The skill pays for itself after %d %s like this one (stage-2 cost / saving per task)."
+                      % (n, tasks_word(n)))
+            else:
+                print("  The skill did not save money on this task.")
+    if s1s is not None and s3s_ is not None and not t6 and not ok:
+        print("  The skill run scored lower (%d vs %d): no saving is counted." % (s3s_, s1s))
+    if (s1s is None or s3s_ is None) and shown_table:
+        print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password>  then  python workshop.py grade"
+              % ("After BOTH agents are done" if reg.actives("3") else "Now"))
+
+
 def show_compare(reg, s3_id=None):
     """Each stage-3 row vs its stage-1 parent (no skill), plus what writing the skill cost.
     A control row (T3 without the skill) is compared with the T3-with-skill row of the same parent."""
@@ -1278,16 +1333,30 @@ def show_compare(reg, s3_id=None):
         run3 = reg.data["runs"].get(r3["run_id"], {})
         parent = run3.get("parent", "")
         sib = [r for r in rows3 if r is not r3 and reg.data["runs"].get(r["run_id"], {}).get("parent") == parent
-               and r["task"] == "T3"]
+               and r["task"] == r3["task"]]
+        note = T6_NOTE if r3["task"] == "T6" else ""
         if is_control(run3) or r3.get("method") == "none":
             if s3_id:
                 w = [r for r in sib if not is_control(reg.data["runs"].get(r["run_id"], {}))]
                 if w:
-                    compare_control(reg, w[0], r3)
+                    compare_control(reg, w[0], r3, r3["task"], note)
+                    ll = leakage_line(reg, parent)
+                    if ll:
+                        print("\n" + ll)
                 else:
-                    print("\n  The T3 run WITH the skill is not finished yet: no comparison with the control.")
+                    print("\n  The %s run WITH the skill is not finished yet: no comparison with the control."
+                          % r3["task"])
             continue
         r1, r2 = reg.row(parent, "1"), reg.row(parent, "2")
+        ctl = [r for r in sib if is_control(reg.data["runs"].get(r["run_id"], {}))]
+        if ctl:          # a control pair exists: WITH vs WITHOUT (same model) replaces stage 1 vs stage 3
+            compare_control(reg, r3, ctl[0], r3["task"], note)
+            if r1 and r3["task"] == "T3":
+                payback(reg, r1, r2, r3)
+            ll = leakage_line(reg, parent)
+            if ll:
+                print("\n" + ll)
+            continue
         if not r1:
             continue
         t6 = r3["task"] == "T6"
@@ -1307,27 +1376,7 @@ def show_compare(reg, s3_id=None):
                   if a and b is not None and name != "Score" and not t6 else "")
             chc = color_change(ch)
             print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), chc))
-        c1, c2, c3 = _val(r1, "cost_usd"), _val(r2, "cost_usd"), _val(r3, "cost_usd")
-        s1s, s3s_ = _val(r1, "score"), _val(r3, "score")
-        ok = s1s is not None and s3s_ is not None and not t6 and (s3s_ >= s1s or (s3s_ >= 90 and s1s >= 90))
-        if c2 is not None:
-            print("\n  Writing the skill (stage 2): %s min, $%.2f." % (r2.get("elapsed_min", "?"), c2))
-            if ok and c1 is not None and c3 is not None:
-                if c1 > c3:
-                    n = max(1, math.ceil(c2 / (c1 - c3)))
-                    print("  The skill pays for itself after %d %s like this one (stage-2 cost / saving per task)."
-                          % (n, tasks_word(n)))
-                else:
-                    print("  The skill did not save money on this task.")
-        if s1s is not None and s3s_ is not None and not t6 and not ok:
-            print("  The skill run scored lower (%d vs %d): no saving is counted." % (s3s_, s1s))
-        if s1s is None or s3s_ is None:
-            print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password>  then  python workshop.py grade"
-                  % ("After BOTH agents are done" if reg.actives("3") else "Now"))
-        if r3["task"] == "T3":
-            ctl = [r for r in sib if is_control(reg.data["runs"].get(r["run_id"], {}))]
-            if ctl:
-                compare_control(reg, r3, ctl[0])
+        payback(reg, r1, r2, r3, t6, shown_table=True)
 
 
 def finish_stage(reg, rid, stage, a, grade=True):
@@ -1618,8 +1667,8 @@ def cmd_harvest(a):
     memories_card(reg)
     submit(row, a)
     next_box(["python workshop.py new s3 --task all",
-              "(cmd/PowerShell: one command; it starts all three runs)"],
-             "stage 3: THREE new agent threads (T3, T3 control, T6). Run:")
+              "(cmd/PowerShell: one command; it starts all four runs)"],
+             "stage 3: FOUR new agent threads (T3, T3 control, T6, T6 control). Run:")
     return 0
 
 
