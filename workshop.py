@@ -1357,7 +1357,11 @@ def needs_submit(r):
 
 
 RESULTS_HEADER = "vesper-results v1"
-MAX_LINK = 7000
+# Microsoft sign-in copies the whole link (base64) into its redirect; a 5,500-character link failed with
+# AADSTS90015 "query string is too long". Keep each link short enough to survive that redirect.
+MAX_LINK = 2500
+LINE_SKIP = ("alias",)             # the alias has its own form field
+SHA_LEN = 12
 LOCKED_MSG = "Unlock the grader first:  python workshop.py unlock 4 <password from the slide>  (then run submit again)"
 
 
@@ -1369,9 +1373,18 @@ def esc_value(v):
 
 
 def all_results_text(rows):
+    """One line per row; empty fields are left out (the reader treats a missing key as empty)."""
     lines = [RESULTS_HEADER]
     for r in rows:
-        lines.append(";".join("%s=%s" % (k, esc_value(r.get(k, ""))) for k in ROW_FIELDS))
+        parts = []
+        for k in ROW_FIELDS:
+            v = "" if r.get(k) is None else str(r.get(k))
+            if k in LINE_SKIP or v == "":
+                continue
+            if k == "solution_sha":
+                v = v[:SHA_LEN]
+            parts.append("%s=%s" % (k, esc_value(v)))
+        lines.append(";".join(parts))
     return "\n".join(lines)
 
 

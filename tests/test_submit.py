@@ -71,7 +71,11 @@ class Submit(unittest.TestCase):
         self.assertEqual(lines[0], "vesper-results v1")
         self.assertEqual(len(lines), 3)
         for ln in lines[1:]:
-            self.assertEqual([p.split("=")[0] for p in ln.split(";")], self.w.ROW_FIELDS)
+            keys = [p.split("=")[0] for p in ln.split(";")]
+            self.assertNotIn("alias", keys)                       # alias has its own field
+            self.assertEqual(keys, [k for k in self.w.ROW_FIELDS if k in keys])   # order kept
+            self.assertTrue({"run_id", "stage", "revision"} <= set(keys))
+        self.assertLess(len(link), self.w.MAX_LINK)
         self.assertTrue(all(r["submitted_rev"] == r["revision"] for r in self.rows().values()))
         out, wb = cap(self.w, "submit", tty_in="")
         self.assertIn("Nothing to submit", out)
@@ -106,8 +110,17 @@ class Submit(unittest.TestCase):
         self.assertTrue(all(r["submitted_rev"] == r["revision"] for r in self.rows().values()))
 
     def test_escaping(self):
-        t = self.w.all_results_text([{"alias": "a;b=c\nd%"}])
-        self.assertEqual(t.split("\n")[1].split(";")[0], "alias=a%3Bb%3Dc%0Ad%25")
+        t = self.w.all_results_text([{"run_id": "a;b=c\nd%"}])
+        self.assertEqual(t.split("\n")[1].split(";")[0], "run_id=a%3Bb%3Dc%0Ad%25")
+
+    def test_short_lines(self):
+        """Empty fields and the alias are left out; solution_sha is cut to 12 characters; the reader still works."""
+        import charts
+        t = self.w.all_results_text([{"alias": "t", "run_id": "s1-ab12", "stage": "1", "task": "T3",
+                                      "skill_hash": "", "solution_sha": "f" * 64, "score": "100.0"}])
+        self.assertEqual(t.split("\n")[1], "run_id=s1-ab12;stage=1;task=T3;score=100.0;solution_sha=" + "f" * 12)
+        d = charts.expand_all_results(t)[0]
+        self.assertEqual((d["run_id"], d["score"], d.get("skill_hash", "")), ("s1-ab12", "100.0", ""))
 
     def test_no_form_prints_only(self):
         install_fake_grader(self.w)
