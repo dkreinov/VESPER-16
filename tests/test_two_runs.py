@@ -187,3 +187,40 @@ class TwoRunsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FourRunsTest(unittest.TestCase):
+    def setUp(self):
+        self.w, self.tmp = fresh_ws()
+        self.s1, _ = fakes.ready_for_s3(self.w)
+
+    def test_next_box_lists_all_still_active(self):
+        capture(run, self.w, "new", "s3", "--task", "all", "--name", "mira")
+        reg = self.w.Registry.load()
+        ids = [x["run_id"] for x in reg.actives()]
+        self.assertEqual(len(ids), 4)
+        lab = {i: self.w.run_label(reg, i) for i in ids}
+        self.assertEqual(sorted(lab.values()), sorted(["(T3 with skill)", "(T3 without skill)",
+                                                       "(T6 with skill)", "(T6 without skill)"]))
+        out = capture(run, self.w, "done", ids[0], "--no-form")
+        self.assertIn("NEXT: 3 agents are still working. When each one is done (or at 15 min), run its line:", out)
+        self.assertNotIn("BOTH", out)
+        self.assertIn("After ALL your stage-3 agents are done", out)
+        for i in ids[1:]:
+            self.assertIn("python workshop.py done %s   %s" % (i, lab[i]), out)
+        self.assertNotIn("python workshop.py done %s   " % ids[0], out)
+        for i in ids[1:3]:
+            out = capture(run, self.w, "done", i, "--no-form")
+        self.assertIn("1 agent is still working", out)
+        out = capture(run, self.w, "done", ids[3], "--no-form")
+        self.assertNotIn("still working", out)
+        self.assertNotIn("After ALL", out)
+        self.assertIn("python workshop.py submit", out)
+
+    def test_two_run_case(self):
+        capture(run, self.w, "new", "s3", "--task", "both", "--name", "mira")
+        reg = self.w.Registry.load()
+        a, b = [x["run_id"] for x in reg.actives()]
+        out = capture(run, self.w, "done", a, "--no-form")
+        self.assertIn("1 agent is still working", out)
+        self.assertIn("python workshop.py done %s   (" % b, out)

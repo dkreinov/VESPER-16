@@ -846,6 +846,26 @@ ALL_DESC = {"t3": "T3 WITH the skill",
             "n6": "T6 WITHOUT the skill (control: stop it at 10 min)"}
 ALL_LABEL = {"t3": "(T3 with skill)", "n3": "(T3 without skill)", "t6": "(T6 with skill)", "n6": "(T6 without skill)"}
 ALL_ORDER = ("t3", "n3", "t6", "n6")
+AFTER_ALL = "After ALL your stage-3 agents are done"
+
+
+def run_label(reg, rid):
+    """'(T3 with skill)' style label of a stage-3 run."""
+    run = reg.data["runs"].get(rid, {})
+    task = run.get("task", "")
+    return "(%s %s skill)" % (task, "without" if is_control(run) else "with")
+
+
+def still_working_box(reg, left):
+    """NEXT box listing every still-active stage-3 run, one line each, with its label."""
+    left = sorted(left, key=lambda x: float(x.get("start") or 0))
+    lines = ["%s   %s" % (next_cmd(x), run_label(reg, x["run_id"])) for x in left]
+    if len(left) == 1:
+        head = "1 agent is still working. When it is done (or at 15 min), run its line:"
+    else:
+        head = ("%d agents are still working. When each one is done (or at 15 min), run its line:"
+                % len(left))
+    next_box(lines, head)
 
 
 def new_s3_all(reg, a):
@@ -1523,7 +1543,7 @@ def payback(reg, r1, r2, r3, t6=False, shown_table=False):
         print("  The skill run scored lower (%d vs %d): no saving is counted." % (s3s_, s1s))
     if (s1s is None or s3s_ is None) and shown_table:
         print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password>  then  python workshop.py grade"
-              % ("After BOTH agents are done" if reg.actives("3") else "Now"))
+              % (AFTER_ALL if reg.actives("3") else "Now"))
 
 
 def show_compare(reg, s3_id=None):
@@ -1676,7 +1696,7 @@ def cmd_done(a):
     print(ascii_frame(snap_path(rid, stage)))
     print(memory_line(row))
     if row["grading"] == "ungraded":
-        who = "After BOTH agents are done" if stage == "3" and reg.actives("3") else "After the agent is done"
+        who = AFTER_ALL if stage == "3" and reg.actives("3") else "After the agent is done"
         print("\nNot graded yet. %s:  python workshop.py unlock 4 <password>  "
               "then  python workshop.py grade" % who)
     print("\n" + SAVED_LINE)
@@ -1686,8 +1706,7 @@ def cmd_done(a):
         show_compare(reg, rid)
         left = reg.actives("3")
         if left:
-            task = reg.data["runs"].get(left[0]["run_id"], {}).get("task", "")
-            next_box(next_cmd(left[0]), "the other agent (%s) is still working. When it is done:" % task)
+            still_working_box(reg, left)
         else:
             next_box(SUBMIT_CMD, "the last step: send all results to the form. Run:")
     return 0
