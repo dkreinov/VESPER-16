@@ -198,7 +198,7 @@ class Registry:
     def write_csv(self):
         p = os.path.join(ws_home(), "results.csv")
         with open(p + ".tmp", "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=ROW_FIELDS)
+            w = csv.DictWriter(f, fieldnames=ROW_FIELDS, extrasaction="ignore")
             w.writeheader()
             for k in sorted(self.data["rows"]):
                 w.writerow(self.data["rows"][k])
@@ -1275,19 +1275,21 @@ def form_link(row, cfg=None):
     return cfg["form_url"] + ("&" if "?" in cfg["form_url"] else "?") + q
 
 
-def submit(row, a):
+def submit(row, a, confirm=False):
+    """Show one row for the form: short URL, 18 numbered answers, and (unless --no-form) open the link.
+    With confirm=True on a TTY, ask for Enter after the browser step; returns True when the learner confirmed."""
     cfg = load_config()
     fields = list(cfg.get("fields", {}))
     if not cfg.get("form_url"):
         print("\nRow for the shared sheet (tab-separated):\n" + "\t".join(str(row.get(k, "")) for k in ROW_FIELDS))
-        return
+        return False
     short = cfg.get("short_url") or cfg["form_url"]
     print("\n  RESULTS FORM:  %s" % c_link(short))
     print("  Answers (question number. name: value):\n")
     for i, k in enumerate(fields, 1):
         print("  %2d. %-19s %s" % (i, k + ":", row.get(k, "")))
     if getattr(a, "no_form", False):
-        return
+        return False
     again = "python workshop.py form %s %s" % (row.get("run_id", ""), row.get("stage", ""))
     if webbrowser.open(form_link(row, cfg)):
         print("\n  The form opens in a NEW browser window, with these values filled in.")
@@ -1295,6 +1297,53 @@ def submit(row, a):
     else:
         print("\n  The browser did not open. Open the link above, type the values, and click Submit.")
     print("  Window closed by mistake? Open it again:  %s" % again)
+    if confirm and sys.stdout.isatty() and sys.stdin and sys.stdin.isatty():
+        return ask("\n  Click Submit in the browser, then press Enter (s = skip this one): ", "").lower() != "s"
+    return False
+
+
+SUBMIT_CMD = "python workshop.py submit"
+SAVED_LINE = "Saved. You submit all results at the end:  python workshop.py submit"
+
+
+def mark_submitted(reg, row):
+    r = reg.row(row["run_id"], row["stage"])
+    r["submitted_rev"] = int(r.get("revision") or 1)
+    reg.save()
+
+
+def needs_submit(r):
+    sr = r.get("submitted_rev")
+    return sr in (None, "") or int(r.get("revision") or 1) > int(sr)
+
+
+def cmd_submit(a):
+    reg = Registry.load()
+    rows = sorted([r for r in reg.data["rows"].values() if needs_submit(r)],
+                  key=lambda r: (str(r["stage"]), float(r["start"] or 0)))
+    if not rows:
+        print("Nothing to submit. All results are submitted.")
+        return 0
+    tty = sys.stdout.isatty() and bool(sys.stdin) and sys.stdin.isatty() and not getattr(a, "no_form", False)
+    if not tty:
+        a.no_form = True               # print only: no browser, nothing marked
+    elif os.path.exists(grader_path()) and any(r["stage"] in ("1", "3") and r["grading"] == "ungraded" for r in rows):
+        print("Run python workshop.py grade first")
+        if ask("Submit anyway? [y/N] ", "n").lower() != "y":
+            return 0
+    n, skipped = len(rows), 0
+    for i, r in enumerate(rows, 1):
+        if tty:
+            clear_screen()
+        print("Result %d of %d: %s stage %s %s score %s" % (i, n, r["run_id"], r["stage"], r["task"], r["score"]))
+        if submit(r, a, confirm=tty):
+            mark_submitted(reg, r)
+        elif tty:
+            skipped += 1
+    if tty:
+        print("\n" + ("All %d results submitted" % n if not skipped else
+                      "%d of %d results submitted, %d skipped (run submit again for them)" % (n - skipped, n, skipped)))
+    return 0
 
 
 def sha256_file(p):
@@ -1630,7 +1679,7 @@ def cmd_done(a):
         who = "After BOTH agents are done" if stage == "3" and reg.actives("3") else "After the agent is done"
         print("\nNot graded yet. %s:  python workshop.py unlock 4 <password>  "
               "then  python workshop.py grade" % who)
-    submit(row, a)
+    print("\n" + SAVED_LINE)
     if stage == "1":
         next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
     else:
@@ -1639,6 +1688,8 @@ def cmd_done(a):
         if left:
             task = reg.data["runs"].get(left[0]["run_id"], {}).get("task", "")
             next_box(next_cmd(left[0]), "the other agent (%s) is still working. When it is done:" % task)
+        else:
+            next_box(SUBMIT_CMD, "the last step: send all results to the form. Run:")
     return 0
 
 
@@ -1660,8 +1711,9 @@ def cmd_grade(a):
         reg.save()
         reg.write_csv()
         print("%s stage %s: score %s" % (r["run_id"], r["stage"], score))
-        submit(reg.row(r["run_id"], r["stage"]), a)
+    print("\n" + SAVED_LINE)
     show_compare(reg)
+    next_box(SUBMIT_CMD, "the last step: send all results to the form. Run:")
     return 0
 
 
@@ -1823,7 +1875,7 @@ def cmd_harvest(a):
     print("  Skill help the agent used: %s (drawn method: %s)" % (used or "unknown", run["method"]))
     print(memory_line(row))
     memories_card(reg)
-    submit(row, a)
+    print("\n" + SAVED_LINE)
     next_box(["python workshop.py new s3 --task all",
               "(cmd/PowerShell: one command; it starts all four runs)"],
              "stage 3: FOUR new agent threads (T3, T3 control, T6, T6 control). Run:")
@@ -1886,6 +1938,8 @@ def cmd_show(a):
     else:
         show_rows(rows)
         show_compare(reg)
+        if not reg.actives() and any(needs_submit(r) for r in rows):
+            next_box(SUBMIT_CMD, "the last step: send all results to the form. Run:")
     for x in reg.actives():
         print("\nActive: stage %s of %s (%s). Next:  %s"
               % (x["stage"], x["run_id"], reg.data["runs"].get(x["run_id"], {}).get("task", ""), next_cmd(x)))
@@ -1902,7 +1956,8 @@ def cmd_form(a):
                  % (" for %s %s" % (a.run_id, a.stage or "") if a.run_id else ""))
     row = max(rows, key=lambda r: float(r["cutoff"] or 0))
     print("\n  Form for run %s, stage %s:" % (row["run_id"], row["stage"]))
-    submit(row, a)
+    if submit(row, a, confirm=True):
+        mark_submitted(reg, row)
     return 0
 
 
@@ -2031,6 +2086,9 @@ def parse(argv):
     s.add_argument("stage", nargs="?", choices=["1", "2", "3"])
     s.add_argument("--no-form", action="store_true")
     s.set_defaults(func=cmd_form)
+    s = sub.add_parser("submit", help="send all results that are not yet submitted to the results form")
+    s.add_argument("--no-form", action="store_true", help="print the links and answers only; mark nothing")
+    s.set_defaults(func=cmd_submit)
     s = sub.add_parser("cleanup")
     s.add_argument("--yes", action="store_true")
     s.add_argument("--no-copy", action="store_true")

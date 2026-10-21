@@ -65,7 +65,7 @@ tokens, estimated API cost and score.
 
 ```sh
 python workshop.py new s1                 # stage 1: checks this computer (doctor), then a clean folder + the prompt
-python workshop.py done                   # the agent is done: measure, (grade), results form
+python workshop.py done                   # the agent is done: measure and save (grade)
 python workshop.py skill                  # stage 2: the prompt that asks the SAME agent to write a skill
 python workshop.py harvest                # stage 2 is done: take the skill out and check it
 python workshop.py new s3 --task all      # stage 3, four runs (T3 and T6, each with and without the skill): the default way
@@ -76,7 +76,8 @@ python workshop.py done <run_id>          # end one stage-3 run (plain `done` as
 python workshop.py unlock 4 <password>    # the grader - only after your agents are done
 python workshop.py grade                  # scores the stages that are not graded yet
 python workshop.py show                   # your table and the active runs
-python workshop.py form                   # open the results form again (last stage; or: form <run_id> <stage>)
+python workshop.py submit                 # LAST STEP: send all results to the form, one by one
+python workshop.py form                   # open the form again for one stage (last stage; or: form <run_id> <stage>)
 python workshop.py cleanup                # removes everything workshop.py made
 python workshop.py doctor                 # the setup check alone (new s1 runs it for you)
 ```
@@ -103,8 +104,8 @@ Paste that prompt into any LLM (an agent opened in this folder can read the file
 
 **What workshop.py does:** copies the kit into run folders under `%LOCALAPPDATA%\vesper-runs`
 (Windows) or `~/vesper-runs`, runs `git init` there, runs the emulator and the grader, reads your agent's
-local session logs to count tokens (it finds them by the `Workshop run:` line in the prompt), and opens the
-results form in your browser.
+local session logs to count tokens (it finds them by the `Workshop run:` line in the prompt). At the end,
+`submit` opens the results form in your browser.
 **What it does not do:** it never starts or talks to an agent (you paste every prompt; the optional
 `shadow` command is the only exception), it sends nothing over the network, and it changes nothing
 outside its own folder unless you confirm.
@@ -113,8 +114,9 @@ outside its own folder unless you confirm.
 - Cost is an estimate at API list prices (table at the top of `measure.py`); subscription users do not pay
   per token. For Cursor, type the numbers from Cursor's usage screen when `done` asks.
 - **Results form:** https://forms.cloud.microsoft/r/xdtPcwF24a (Mobileye sign-in). `done`, `harvest` and
-  `grade` open it with your values filled in and also print the values with their question numbers; if the
-  browser does not open, open the link and type them.
+  `grade` only save the numbers. At the end run `python workshop.py submit`: for each result it opens the form
+  with your values filled in, prints the values with their question numbers, and waits for you to click Submit
+  and press Enter. If the browser does not open, open the link and type the values.
 - If `doctor` shows RED, follow [MANUAL.md](MANUAL.md). More exercises: [HOMEWORK.md](HOMEWORK.md).
 
 ## Rules for the exercise
