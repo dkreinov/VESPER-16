@@ -30,6 +30,7 @@ class EffortTest(unittest.TestCase):
             for dt, eff in ((0.001, "low"), (0.002, "high"), (0.003, "medium")):
                 fh.write(json.dumps({"timestamp": fakes.iso(t0 + dt), "type": "turn_context",
                                      "payload": {"cwd": folder, "model": "gpt-6.1-sol", "effort": eff}}) + "\n")
+        time.sleep(0.1)       # the log events are at t0 + 20 ms; done must come after them (was flaky)
         out = capture(run, w, "done", "--no-form")
         row = w.Registry.load().row(rid, "1")
         self.assertEqual(row["effort"], "medium")
@@ -109,15 +110,17 @@ class TaskAllTest(unittest.TestCase):
         self.assertEqual(by["n6"][1]["task"], "T6")
         with open(os.path.join(by["n6"][1]["folder"], "tasks", "T6.md"), encoding="utf-8") as fh:
             self.assertIn("MIRA", fh.read())
-        for h in ("RUN 1 of 4  T3 WITH the skill",
-                  "RUN 2 of 4  T3 WITHOUT the skill (control: stop it at 10 min)",
-                  "RUN 3 of 4  T6 WITH the skill (a new task: the real test)",
-                  "RUN 4 of 4  T6 WITHOUT the skill (control: stop it at 10 min)",
-                  "Time box 10 min: stop any agent still working at 10 min, then run its done line."):
-            self.assertIn(h, out)
+        keys = self.w.start_order_keys(self.s1)        # pages follow the randomised start order (seed = stage-1 run)
+        for i, k in enumerate(keys, 1):
+            self.assertIn("RUN %d of 4  %s" % (i, self.w.ALL_DESC[k]), out)
+        self.assertIn("RUN %d of 4  T6 WITH the skill (a different task that shares components with T3)"
+                      % (keys.index("t6") + 1), out)
+        self.assertNotIn("real test", out)
+        self.assertIn("Time box 10 min: stop any agent still working at 10 min, then run its done line.", out)
+        self.assertLess(out.index("Start in this order"), out.index("RUN 1 of 4"))
         for i in runs:
             self.assertIn("python workshop.py done " + i, out)
-        for n in ("2", "4"):       # the control prompts: no skill sentences, same budget
+        for n in (str(keys.index("n3") + 1), str(keys.index("n6") + 1)):   # the control prompts: no skill sentences
             cp = out.split("PROMPT %s " % n, 1)[1].split("END OF PROMPT %s" % n, 1)[0]
             self.assertNotIn("vesper16 skill", cp)
             self.assertNotIn("SKILL NOT FOUND", cp)

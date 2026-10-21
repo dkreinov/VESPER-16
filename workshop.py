@@ -419,7 +419,7 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
         ask("\n  Press Enter for the next run: ", "")
 
 
-def s3_show(reg, rid, n, total, task, folder, prompt, desc=None):
+def s3_show(reg, rid, n, total, task, folder, prompt, desc=None, extra=None):
     """Show one stage-3 run: its own page in a terminal, else the plain block."""
     if not gate_on():
         return s3_run_block(n, total, task, folder, prompt, desc=desc)
@@ -428,7 +428,7 @@ def s3_show(reg, rid, n, total, task, folder, prompt, desc=None):
     desc = desc or {"T6": "T6 (new task)", "T3": "T3 (same task as stage 1)"}.get(task, task)
     nm = reg.data["runs"][rid].get("name", "")
     head = "STAGE 3 - RUN %d of %d  %s%s" % (n, total, desc, ("   name on T6: " + nm) if nm and task == "T6" else "")
-    run_page(reg, rid, head, folder, prompt, model, n >= total,
+    run_page(reg, rid, head, folder, prompt, model, n >= total, extra=extra,
              mem=codex_memories_on(reg) and agent in ("codex", ""))
 
 
@@ -862,7 +862,7 @@ def new_s3_both(reg, a):
 
 ALL_DESC = {"t3": "T3 WITH the skill",
             "n3": "T3 WITHOUT the skill (control: stop it at 10 min)",
-            "t6": "T6 WITH the skill (a new task: the real test)",
+            "t6": "T6 WITH the skill (a different task that shares components with T3)",
             "n6": "T6 WITHOUT the skill (control: stop it at 10 min)"}
 ALL_LABEL = {"t3": "(T3 with skill)", "n3": "(T3 without skill)", "t6": "(T6 with skill)", "n6": "(T6 without skill)"}
 ALL_ORDER = ("t3", "n3", "t6", "n6")
@@ -900,6 +900,14 @@ def start_order(seed):
     return order
 
 
+ORDER_KEY = {"T3 with skill": "t3", "T3 without skill": "n3", "T6 with skill": "t6", "T6 without skill": "n6"}
+
+
+def start_order_keys(seed):
+    """start_order as ALL_ORDER keys (t3, n3, t6, n6)."""
+    return [ORDER_KEY[x] for x in start_order(seed)]
+
+
 def start_order_line(seed):
     return "  Start in this order: " + " ".join("%d. %s" % (i, x) for i, x in enumerate(start_order(seed), 1))
 
@@ -920,15 +928,15 @@ def new_s3_all(reg, a):
         return 1
     a.s3_first = made["t6"][0] if "t6" in made else next(iter(made.values()))[0]
     seed = reg.data["runs"][next(iter(made.values()))[0]].get("parent", "")
+    line = start_order_line(seed)
     if not gate_on():
         s3_header(reg, a, True, total=4)
-        print(start_order_line(seed))
-    order = [k for k in ALL_ORDER if k in made]
+    print(line)                          # before the pages: the pages follow this order
+    order = [k for k in start_order_keys(seed) if k in made]
     for i, k in enumerate(order, 1):
         rid, f, p = made[k]
-        s3_show(reg, rid, i, 4, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k])
-    if gate_on():
-        print(start_order_line(seed))
+        s3_show(reg, rid, i, 4, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k],
+                extra=(lambda: print(line)) if gate_on() else None)
     next_box(["python workshop.py done %s   %s" % (made[k][0], ALL_LABEL[k]) for k in order],
              "when an agent is done (or at 10 min), run its line:")
     return 0 if len(made) == 4 else 1
