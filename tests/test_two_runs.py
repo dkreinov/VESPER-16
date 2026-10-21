@@ -180,9 +180,9 @@ class TwoRunsTest(unittest.TestCase):
         run(self.w, "done", t6, "--no-form")
         run(self.w, "done", t3, "--no-form")
         out = capture(self.w.show_compare, self.w.Registry.load())
-        self.assertEqual(out.count("YOUR RESULT"), 2)
-        self.assertIn("different task: compare with the measured baseline", out)
-        self.assertIn("0/12 pass in 5 min", out)
+        self.assertNotIn("YOUR RESULT", out)
+        self.assertNotIn("WITH vs WITHOUT", out)
+        self.assertEqual(out.count("No control runs: run python workshop.py new s3 --task all"), 1)
 
 
 if __name__ == "__main__":

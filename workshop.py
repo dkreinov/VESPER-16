@@ -11,7 +11,7 @@
   python workshop.py new s3 --task both     stage 3, two runs (T6, then T3) in one command
   python workshop.py new s3 --task T6       stage 3, run 1: T6 with your name, a NEW agent thread
   python workshop.py new s3 --task T3       stage 3, run 2: T3 again, a SECOND new agent thread
-  python workshop.py unlock 4 <password>    grader (only after the agent is done)
+  python workshop.py unlock 4 <password from the slide>    grader (only after the agent is done)
   python workshop.py grade | show | cleanup
 
 The tool never talks to an agent: you paste every prompt. It sends nothing over the network; it only
@@ -761,11 +761,12 @@ def prompt_block(prompt):
 
 def next_box(cmd, when):
     cmds = [cmd] if isinstance(cmd, str) else list(cmd)
-    print("\n" + c_next("+" + "-" * 70 + "+"))
-    print(c_next("|  NEXT: " + when.ljust(62) + "|"))
+    w = max([70] + [len(x) + 10 for x in cmds] + [len(when) + 10])
+    print("\n" + c_next("+" + "-" * w + "+"))
+    print(c_next("|  NEXT: " + when.ljust(w - 8) + "|"))
     for c in cmds:
-        print(c_next("|        " + c.ljust(62) + "|"))
-    print(c_next("+" + "-" * 70 + "+") + "\n")
+        print(c_next("|        " + c.ljust(w - 8) + "|"))
+    print(c_next("+" + "-" * w + "+") + "\n")
 
 
 def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False):
@@ -1326,6 +1327,19 @@ SUBMIT_CMD = "python workshop.py submit"
 SAVED_LINE = "Saved. You submit all results at the end:  python workshop.py submit"
 
 
+def all_done_box(reg, show=True):
+    """The ordered last steps when no agent is working: unlock (once), grade, show, submit."""
+    steps = []
+    if not os.path.exists(grader_path()):
+        steps.append("python workshop.py unlock 4 <password from the slide>   (once)")
+    if any(r["stage"] in ("1", "3") and r["grading"] == "ungraded" for r in reg.data["rows"].values()):
+        steps.append("python workshop.py grade")
+    if show:
+        steps.append("python workshop.py show")
+    steps.append(SUBMIT_CMD)
+    next_box(["%d. %s" % (i, x) for i, x in enumerate(steps, 1)], "all agents are done. Now:")
+
+
 def mark_submitted(reg, row):
     r = reg.row(row["run_id"], row["stage"])
     r["submitted_rev"] = int(r.get("revision") or 1)
@@ -1408,6 +1422,20 @@ def grade_snapshot(task, path, name=""):
         return "", "ungraded"
 
 
+def _half_ok():
+    """Half blocks need a console that can encode them; a TTY is switched to utf-8 when it cannot."""
+    try:
+        if sys.stdout.isatty() and "utf" not in (sys.stdout.encoding or "").lower():
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        "█▀▄".encode(sys.stdout.encoding or "ascii")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def ascii_frame(path, frame=300):
     if not path or not os.path.exists(path):
         return ""
@@ -1420,8 +1448,13 @@ def ascii_frame(path, frame=300):
             fr = f.read()[-3072:]
         if len(fr) < 3072:
             return ""
-        rows = ["".join("#" if (fr[y * 64 + x] or fr[(y + 1) * 64 + x]) else " " for x in range(64))
-                for y in range(0, 48, 2)]
+        on = lambda x, y: bool(fr[y * 64 + x])
+        if _half_ok():
+            ch = {(1, 1): "█", (1, 0): "▀", (0, 1): "▄", (0, 0): " "}
+            rows = ["".join(ch[(on(x, y), on(x, y + 1))] for x in range(64)) for y in range(0, 48, 2)]
+        else:
+            rows = ["".join("#" if (on(x, y) or on(x, y + 1)) else " " for x in range(64))
+                    for y in range(0, 48, 2)]
         return "Frame %d of your game:\n+%s+\n%s\n+%s+" % (
             frame, "-" * 64, "\n".join("|" + r + "|" for r in rows), "-" * 64)
     except Exception:  # noqa: BLE001
@@ -1494,7 +1527,7 @@ def compare_control(reg, rw, rc, task="T3", note=""):
         ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" else ""
         print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), color_change(ch)))
     if _val(rc, "score") is None or _val(rw, "score") is None:
-        print("\n  Score not graded yet.  python workshop.py unlock 4 <password>  then  python workshop.py grade")
+        print("\n  Score not graded yet.  python workshop.py unlock 4 <password from the slide>  then  python workshop.py grade")
 
 
 T6_NOTE = " - a new task, no leakage possible"
@@ -1542,63 +1575,56 @@ def payback(reg, r1, r2, r3, t6=False, shown_table=False):
     if s1s is not None and s3s_ is not None and not t6 and not ok:
         print("  The skill run scored lower (%d vs %d): no saving is counted." % (s3s_, s1s))
     if (s1s is None or s3s_ is None) and shown_table:
-        print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password>  then  python workshop.py grade"
+        print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password from the slide>  then  python workshop.py grade"
               % (AFTER_ALL if reg.actives("3") else "Now"))
 
 
 def show_compare(reg, s3_id=None):
-    """Each stage-3 row vs its stage-1 parent (no skill), plus what writing the skill cost.
-    A control row (T3 without the skill) is compared with the T3-with-skill row of the same parent."""
-    s3s = [r for r in reg.data["rows"].values() if r["stage"] == "3" and (not s3_id or r["run_id"] == s3_id)]
+    """Real pairs only: the same task on the same model, WITH vs WITHOUT the skill (T3 and T6).
+    The stage-1 writer (large model) is never put in a table; it appears in one cost line."""
     rows3 = [r for r in reg.data["rows"].values() if r["stage"] == "3"]
-    for r3 in sorted(s3s, key=lambda r: float(r["start"] or 0)):
-        run3 = reg.data["runs"].get(r3["run_id"], {})
-        parent = run3.get("parent", "")
-        sib = [r for r in rows3 if r is not r3 and reg.data["runs"].get(r["run_id"], {}).get("parent") == parent
-               and r["task"] == r3["task"]]
-        note = T6_NOTE if r3["task"] == "T6" else ""
-        if is_control(run3) or r3.get("method") == "none":
-            if s3_id:
-                w = [r for r in sib if not is_control(reg.data["runs"].get(r["run_id"], {}))]
-                if w:
-                    compare_control(reg, w[0], r3, r3["task"], note)
-                    ll = leakage_line(reg, parent)
-                    if ll:
-                        print("\n" + ll)
+    runs = reg.data["runs"]
+    pick = [r for r in rows3 if not s3_id or r["run_id"] == s3_id]
+    parents = []
+    for r in sorted(pick, key=lambda r: float(r["start"] or 0)):
+        p = runs.get(r["run_id"], {}).get("parent", "")
+        if p not in parents:
+            parents.append(p)
+    want_task = {r["task"] for r in pick} if s3_id else {"T3", "T6"}
+    for parent in parents:
+        mine = [r for r in rows3 if runs.get(r["run_id"], {}).get("parent") == parent]
+        g = {}
+        for r in mine:
+            run = runs.get(r["run_id"], {})
+            g.setdefault((r["task"], is_control(run) or r.get("method") == "none"), r)
+        reg_ctl = {run["task"] for run in runs.values()
+                   if run.get("parent") == parent and is_control(run)}
+        if not any(k[1] for k in g) and not reg_ctl:
+            show_rows(mine)
+            print("\n  No control runs: run python workshop.py new s3 --task all for a fair comparison.")
+            continue
+        shown_t3 = None
+        for t in ("T3", "T6"):
+            if t not in want_task:
+                continue
+            w, ctl = g.get((t, False)), g.get((t, True))
+            if w and ctl:
+                compare_control(reg, w, ctl, t, T6_NOTE if t == "T6" else "")
+                if t == "T3":
+                    shown_t3 = w
+            elif w:
+                if t in reg_ctl:
+                    print("\n  %s: waiting for its control run (%s without skill)" % (t, t))
                 else:
-                    print("\n  The %s run WITH the skill is not finished yet: no comparison with the control."
-                          % r3["task"])
-            continue
+                    print("\n  %s: no control run" % t)
+            elif ctl:
+                print("\n  %s: waiting for the run WITH the skill (%s with skill)" % (t, t))
+        ll = leakage_line(reg, parent)
+        if ll:
+            print("\n" + ll)
         r1, r2 = reg.row(parent, "1"), reg.row(parent, "2")
-        ctl = [r for r in sib if is_control(reg.data["runs"].get(r["run_id"], {}))]
-        if ctl:          # a control pair exists: WITH vs WITHOUT (same model) replaces stage 1 vs stage 3
-            compare_control(reg, r3, ctl[0], r3["task"], note)
-            if r1 and r3["task"] == "T3":
-                payback(reg, r1, r2, r3)
-            ll = leakage_line(reg, parent)
-            if ll:
-                print("\n" + ll)
-            continue
-        if not r1:
-            continue
-        t6 = r3["task"] == "T6"
-        banner("YOUR RESULT: no skill (stage 1, %s) vs WITH the skill (stage 3, %s)" % (r1["task"], r3["task"]))
-        if t6:
-            print("\n  Note: different task: compare with the measured baseline.")
-            print("  T6 baseline: %s." % T6_BASELINE)
-        elif r1["task"] != r3["task"]:
-            print("\n  Note: different tasks (%s vs %s)." % (r1["task"], r3["task"]))
-        print("\n" + c_bold("  %-15s %16s %16s %10s" % ("", "no skill", "with skill", "change")))
-        print("  %-15s %16s %16s %10s" % ("", r1["run_id"], r3["run_id"], ""))
-        print("  " + "-" * 60)
-        for name, keys, f in COMPARE:
-            a, b = _val(r1, *keys), _val(r3, *keys)
-            fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
-            ch = ("%+d%%" % round((b - a) / a * 100)
-                  if a and b is not None and name != "Score" and not t6 else "")
-            chc = color_change(ch)
-            print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), chc))
-        payback(reg, r1, r2, r3, t6, shown_table=True)
+        if r1 and r2:
+            payback(reg, r1, r2, shown_t3 or {}, t6=shown_t3 is None)
 
 
 def finish_stage(reg, rid, stage, a, grade=True):
@@ -1697,7 +1723,7 @@ def cmd_done(a):
     print(memory_line(row))
     if row["grading"] == "ungraded":
         who = AFTER_ALL if stage == "3" and reg.actives("3") else "After the agent is done"
-        print("\nNot graded yet. %s:  python workshop.py unlock 4 <password>  "
+        print("\nNot graded yet. %s:  python workshop.py unlock 4 <password from the slide>  "
               "then  python workshop.py grade" % who)
     print("\n" + SAVED_LINE)
     if stage == "1":
@@ -1708,7 +1734,7 @@ def cmd_done(a):
         if left:
             still_working_box(reg, left)
         else:
-            next_box(SUBMIT_CMD, "the last step: send all results to the form. Run:")
+            all_done_box(reg)
     return 0
 
 
@@ -1719,7 +1745,7 @@ def cmd_grade(a):
         print("Nothing to grade.")
         return 0
     if not os.path.exists(grader_path()):
-        sys.exit("The grader is locked:  python workshop.py unlock 4 <password>")
+        sys.exit("The grader is locked:  python workshop.py unlock 4 <password from the slide>")
     clear_screen()
     for r in todo:
         snap = snap_path(r["run_id"], r["stage"])
@@ -1732,7 +1758,7 @@ def cmd_grade(a):
         print("%s stage %s: score %s" % (r["run_id"], r["stage"], score))
     print("\n" + SAVED_LINE)
     show_compare(reg)
-    next_box(SUBMIT_CMD, "the last step: send all results to the form. Run:")
+    all_done_box(reg)
     return 0
 
 
@@ -1912,7 +1938,7 @@ def resolve_skill(reg, name):
     if name == "wiki":
         d = os.path.join(ws_home(), ".prebuilt", "skills", "M4-distill")
         if not os.path.isdir(d):
-            sys.exit("The wiki skill is in locked part 3:  python workshop.py unlock 3 <password>")
+            sys.exit("The wiki skill is in locked part 3:  python workshop.py unlock 3 <password from the slide>")
         return d, "", skill_hash(d), "no"
     if not os.path.exists(os.path.join(name, "SKILL.md")):
         sys.exit("No SKILL.md in " + name)
@@ -1958,7 +1984,7 @@ def cmd_show(a):
         show_rows(rows)
         show_compare(reg)
         if not reg.actives() and any(needs_submit(r) for r in rows):
-            next_box(SUBMIT_CMD, "the last step: send all results to the form. Run:")
+            all_done_box(reg, show=False)
     for x in reg.actives():
         print("\nActive: stage %s of %s (%s). Next:  %s"
               % (x["stage"], x["run_id"], reg.data["runs"].get(x["run_id"], {}).get("task", ""), next_cmd(x)))

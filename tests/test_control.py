@@ -45,9 +45,13 @@ class PayBackTest(unittest.TestCase):
         reg = w.Registry.load()
         reg.data["runs"]["s1-aaaa"] = dict(folder="", task="T3", method="plain", stage="1", parent="")
         reg.data["runs"]["s3-aaaa-t3-bbbb"] = dict(folder="", task="T3", method="plain", stage="3", parent="s1-aaaa")
+        reg.data["runs"]["s3-aaaa-n3-cccc"] = dict(folder="", task="T3", method="none", stage="3", parent="s1-aaaa",
+                                                   skill_source="none")
         reg.set_row("s1-aaaa", "1", dict(task="T3", cost_usd="1.00", score=s1, start="1"))
         reg.set_row("s1-aaaa", "2", dict(task="T3", cost_usd="0.20", elapsed_min="3", start="2"))
         reg.set_row("s3-aaaa-t3-bbbb", "3", dict(task="T3", cost_usd="0.10", score=s3, start="3"))
+        reg.set_row("s3-aaaa-n3-cccc", "3", dict(task="T3", cost_usd="0.30", score="50" if s3 else "", start="4",
+                                                 method="none"))
         return capture(w.show_compare, reg)
 
     def test_shown_when_not_lower(self):
@@ -62,6 +66,7 @@ class PayBackTest(unittest.TestCase):
         out = self._compare("", "")
         self.assertNotIn("pays for itself", out)
         self.assertIn("Score not graded yet", out)
+        self.assertNotIn("YOUR RESULT", out)
 
 
 class TaskAllTest(unittest.TestCase):
@@ -126,6 +131,26 @@ class TaskAllTest(unittest.TestCase):
         self.assertNotIn("YOUR RESULT", out)
         self.assertIn("Skill gain on T3: +60 points / +60% time; on T6: +40 points / +50% time.", out)
         self.assertIn("points to leakage (the skill holds parts of the T3 answer)", out)
+
+    def test_only_real_pairs_never_stage1_or_t3_vs_t6(self):
+        reg, ids = self._graded("100", "40", "90", "50")
+        reg.set_row("s1-x", "1", dict(task="T3", model="big", cost_usd="2.00", score="100", start="1"))
+        out = capture(self.w.show_compare, reg)
+        self.assertNotIn("YOUR RESULT", out)
+        self.assertNotIn("no skill (stage 1", out)
+        self.assertEqual(out.count("WITH vs WITHOUT the skill"), 2)
+        self.assertNotIn("T3 vs T6", out)
+        self.assertNotIn("different task", out)
+
+    def test_waiting_line_for_incomplete_pair(self):
+        reg, ids = self._graded("100", "40", "90", "50")
+        for k in [k for k, r in reg.data["rows"].items() if r["run_id"] == ids["n6"]]:
+            del reg.data["rows"][k]
+        out = capture(self.w.show_compare, reg)
+        self.assertIn("T6: waiting for its control run (T6 without skill)", out)
+        self.assertIn("T3: WITH vs WITHOUT the skill", out)
+        self.assertNotIn("T6: WITH vs WITHOUT", out)
+        self.assertNotIn("Leakage check", out)
 
     def test_no_leakage_line_when_t6_ungraded(self):
         reg, ids = self._graded("100", "40", "", "")
