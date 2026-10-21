@@ -319,7 +319,7 @@ def memories_card(reg):
         print(c_next("  " + l))
 
 
-SMALL_SHORT = {"claude": "Haiku (/model haiku)", "codex": "gpt-6-luna, effort medium",
+SMALL_SHORT = {"claude": "Haiku (/model haiku)", "codex": "gpt-6-luna, effort high",
                "cursor": "its cheapest model"}
 
 
