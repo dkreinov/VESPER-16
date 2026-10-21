@@ -283,6 +283,13 @@ SMALL_MODEL = {"claude": "Claude Code: Haiku (type /model haiku in the new threa
                "codex": "Codex: gpt-6-luna (choose it in the model menu of the new thread)",
                "cursor": "Cursor: its cheapest model (model menu of the new chat)"}
 TIME_BOX_MIN = 10
+
+
+def overrun_flag(stage, t0, t1):
+    """'yes'/'no' for a stage-3 run over the time box; '' for stages 1 and 2 (the writer has 20 minutes)."""
+    if str(stage) != "3":
+        return ""
+    return "yes" if t1 - t0 > TIME_BOX_MIN * 60 else "no"
 S3_RUN_BUDGET = 6      # also written in prompts/stage3.md
 
 
@@ -2071,7 +2078,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
     iso, iso_note = detect_outside_reads(session_paths(run.get("session")), t0, t1, run["folder"],
                                          writer=stage in ("1", "2"))
     fields["isolation"], fields["isolation_note"] = iso, iso_note
-    fields["overrun"] = "yes" if t1 - t0 > TIME_BOX_MIN * 60 else "no"
+    fields["overrun"] = overrun_flag(stage, t0, t1)
     fields["settings_confirmed"] = run.get("settings_confirmed", "")
     reg.set_row(rid, stage, fields)
     reg.save()
