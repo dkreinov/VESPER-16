@@ -1359,7 +1359,7 @@ def needs_submit(r):
 RESULTS_HEADER = "vesper-results v1"
 # Microsoft sign-in copies the whole link (base64) into its redirect; a 5,500-character link failed with
 # AADSTS90015 "query string is too long". Keep each link short enough to survive that redirect.
-MAX_LINK = 2500
+MAX_LINK = 1800               # measured: Microsoft rejects links above ~2,300 (tested 2026-10-21)
 LINE_SKIP = ("alias",)             # the alias has its own form field
 SHA_LEN = 12
 LOCKED_MSG = "Unlock the grader first:  python workshop.py unlock 4 <password from the slide>  (then run submit again)"
