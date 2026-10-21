@@ -36,7 +36,7 @@ class EffortTest(unittest.TestCase):
         self.assertEqual(row["model"], "gpt-6.1-sol")
         self.assertIn("gpt-6.1-sol/medium", out)
         with open(os.path.join(w.ws_home(), "results.csv"), encoding="utf-8") as f:
-            self.assertEqual(f.readline().strip().split(",")[-3], "effort")
+            self.assertIn("effort", f.readline().strip().split(","))
 
 
 class PayBackTest(unittest.TestCase):
@@ -54,13 +54,25 @@ class PayBackTest(unittest.TestCase):
                                                  method="none"))
         return capture(w.show_compare, reg)
 
-    def test_shown_when_not_lower(self):
-        self.assertIn("pays for itself after 1 task", self._compare("100", "100"))
+    def test_no_breakeven_number(self):
+        out = self._compare("100", "100")
+        self.assertNotIn("pays for itself", out)
+        self.assertIn("Skill creation: 3.0 min, $0.20 estimated. Break-even not established.", out)
+        self.assertIn("Estimated cost under the kit's price assumptions.", out)
 
-    def test_hidden_when_lower(self):
+    def test_same_line_when_lower(self):
         out = self._compare("100", "40")
         self.assertNotIn("pays for itself", out)
-        self.assertIn("The skill run scored lower (40 vs 100): no saving is counted.", out)
+        self.assertNotIn("no saving is counted", out)
+        self.assertIn("Break-even not established.", out)
+
+    def test_payback_unknown_values(self):
+        w, _ = fresh_ws()
+        reg = w.Registry.load()
+        out = capture(w.payback, reg, {}, {"elapsed_min": "", "cost_usd": ""}, {})
+        self.assertIn("  Skill creation: unknown min, unknown estimated. Break-even not established.", out)
+        out = capture(w.payback, reg, {}, {"elapsed_min": "2.5", "cost_usd": "0.5"}, {})
+        self.assertIn("  Skill creation: 2.5 min, $0.50 estimated. Break-even not established.", out)
 
     def test_hidden_when_ungraded(self):
         out = self._compare("", "")
@@ -125,21 +137,24 @@ class TaskAllTest(unittest.TestCase):
     def test_control_compare_blocks_and_leakage(self):
         reg, ids = self._graded("100", "40", "90", "50")
         out = capture(self.w.show_compare, reg, ids["n3"])
-        self.assertIn("T3: WITH vs WITHOUT the skill (same model)", out)
+        self.assertIn("T3: WITH vs WITHOUT the skill", out)
         out = capture(self.w.show_compare, reg)
-        self.assertIn("T6: WITH vs WITHOUT the skill (same model) - a new task, no leakage possible", out)
+        self.assertIn("T6: WITH vs WITHOUT the skill - different task; shares components with T3", out)
         self.assertNotIn("YOUR RESULT", out)
-        self.assertIn("Skill gain on T3: +60 points; on T6: +40 points.", out)
-        self.assertIn("The T3 gain is much larger: part of it is leakage (the skill holds parts of the T3 answer).", out)
+        self.assertIn("  Leakage check: Observed score gains: T3 +60; T6 +40. "
+                      "These results neither identify nor rule out answer reuse.", out)
+        self.assertNotIn("much larger", out)
         self.assertEqual(out.count("Leakage check"), 1)
 
     def test_failed_control_no_change_column_and_score_only_gains(self):
         reg, ids = self._graded("85", "10", "70", "5", tm=(3, 0.8, 4, 0.5))
         out = capture(self.w.show_compare, reg)
-        self.assertIn("Control failed (score 10): time and cost are not comparable; compare the scores.", out)
-        self.assertIn("Control failed (score 5)", out)
+        self.assertIn("At least one attempt failed. Costs describe attempts, not equal-quality savings.", out)
+        self.assertNotIn("Control failed", out)
+        self.assertIn("85 FAIL", out)
+        self.assertIn("10 FAIL", out)
         self.assertNotIn("%", out.split("Leakage check")[0].split("Time (min)")[1].split("\n")[0])
-        self.assertIn("Skill gain on T3: +75 points; on T6: +65 points. Similar gains: little leakage - the skill carries real knowledge.", out)
+        self.assertIn("Observed score gains: T3 +75; T6 +65.", out)
         self.assertEqual(out.count("Leakage check"), 1)
 
     def _concl(self, scores):
@@ -147,15 +162,65 @@ class TaskAllTest(unittest.TestCase):
         return capture(self.w.show_compare, reg)
 
     def test_conclusion_similar_with_time_when_controls_pass(self):
-        out = self._concl(("100", "95", "100", "90"))
-        self.assertNotIn("Control failed", out)
-        self.assertIn("Skill gain on T3: +5 points / +60% time; on T6: +10 points / +50% time. Similar gains", out)
+        out = self._concl(("100", "100", "100", "90"))
+        self.assertNotIn("At least one attempt failed", out)
+        self.assertIn("100 PASS", out)
+        self.assertIn("T3 +0; T6 +10.", out)
 
-    def test_conclusion_t3_larger(self):
-        self.assertIn("The T3 gain is much larger", self._concl(("100", "40", "95", "93")))
+    def test_leakage_gain_pairs(self):
+        for (g3, g6), sc in (((0, 0), ("100", "100", "95", "95")), ((90, 85), ("100", "10", "95", "10")),
+                             ((75, 10), ("100", "25", "95", "85"))):
+            reg, ids = self._graded(*sc)
+            line = self.w.leakage_line(reg, reg.data["runs"][ids["t3"]]["parent"])
+            self.assertEqual(line, "  Leakage check: Observed score gains: T3 %+d; T6 %+d. "
+                             "These results neither identify nor rule out answer reuse." % (g3, g6))
+            self.assertNotIn("%", line)
+            self.setUp()
 
-    def test_conclusion_t6_larger(self):
-        self.assertIn("The skill transfers well to the new task.", self._concl(("95", "93", "100", "40")))
+    def test_observed_note_once_and_settings_differ(self):
+        reg, ids = self._graded("100", "40", "90", "50")
+        out = capture(self.w.show_compare, reg)
+        self.assertEqual(out.count("Observed results: one attempt per condition. Check pass/fail before time or cost; reliability is unknown."), 1)
+        self.assertEqual(out.count("Estimated cost under the kit's price assumptions."), 1)
+        self.assertEqual(out.count("Settings differ: this is not a matched comparison."), 2)
+        self.assertNotIn("(same model)", out)
+        self.assertIn("100 PASS", out)
+        self.assertIn("40 FAIL", out)
+
+    def test_same_model_needs_same_effort(self):
+        reg, ids = self._graded("100", "100", "95", "95")
+        for r in reg.data["rows"].values():
+            r["model"], r["effort"] = "m1", "high"
+        out = capture(self.w.show_compare, reg)
+        self.assertEqual(out.count("(same model)"), 2)
+        self.assertNotIn("Settings differ", out)
+        reg.data["rows"]["%s|3" % ids["n3"]]["effort"] = "low"
+        out = capture(self.w.show_compare, reg)
+        self.assertEqual(out.count("(same model)"), 1)
+        self.assertEqual(out.count("Settings differ"), 1)
+        reg.data["rows"]["%s|3" % ids["n3"]]["effort"] = ""         # empty effort = unknown = not the same
+        reg.data["rows"]["%s|3" % ids["t3"]]["effort"] = ""
+        out = capture(self.w.show_compare, reg)
+        self.assertEqual(out.count("Settings differ"), 1)
+
+    def test_passed_rule(self):
+        p = self.w.passed
+        self.assertTrue(p({"task": "T6", "score": "90"}))
+        self.assertFalse(p({"task": "T6", "score": "89"}))
+        self.assertTrue(p({"task": "T3", "score": "100"}))
+        self.assertFalse(p({"task": "T3", "score": "95"}))
+        self.assertFalse(p({"task": "T3", "score": ""}))
+
+    def test_start_order_per_run_and_stable(self):
+        self.assertEqual(self.w.start_order("s1-aaaa"), self.w.start_order("s1-aaaa"))
+        seen = {tuple(self.w.start_order("s1-%04x" % i)) for i in range(40)}
+        self.assertGreater(len(seen), 1)
+        for o in seen:
+            self.assertEqual(sorted(o), ["T3 with skill", "T3 without skill", "T6 with skill", "T6 without skill"])
+            self.assertEqual(o[0][:2], "T3")
+        out = capture(run, self.w, "new", "s3", "--task", "all", "--name", "MIRA")
+        self.assertIn("  Start in this order: 1. ", out)
+        self.assertIn(" 4. T6 ", out)
 
     def test_only_real_pairs_never_stage1_or_t3_vs_t6(self):
         reg, ids = self._graded("100", "40", "90", "50")
@@ -165,7 +230,7 @@ class TaskAllTest(unittest.TestCase):
         self.assertNotIn("no skill (stage 1", out)
         self.assertEqual(out.count("WITH vs WITHOUT the skill"), 2)
         self.assertNotIn("T3 vs T6", out)
-        self.assertNotIn("different task", out)
+        self.assertEqual(out.count("different task; shares components with T3"), 1)
 
     def test_waiting_line_for_incomplete_pair(self):
         reg, ids = self._graded("100", "40", "90", "50")

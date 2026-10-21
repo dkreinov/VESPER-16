@@ -64,6 +64,7 @@ With the tool, `python workshop.py new s3 --task all` is the default way. It mak
    Open each folder as a new project, each in a new thread, with the small model (Claude Code: Haiku; Codex:
    gpt-6-luna; Cursor: its cheapest). Paste `prompts/stage3.md` into each (replace `{run_id}` and `{task}`: T6 and T3).
 5. Measure each run as in stage 1. Time box: 10 minutes. Budget: 6 emulator runs.
+6. Read the results with care. Each condition has one attempt, so reliability is unknown. Check PASS or FAIL before time or cost. The gain line (T3 and T6) shows observed score gains only; it neither identifies nor rules out answer reuse. The pay-back line shows only what the skill cost to write; break-even is not established. Costs are estimates under the kit's price assumptions. The comparison is matched only when both runs have the same model and the same effort.
 
 ## Grade
 

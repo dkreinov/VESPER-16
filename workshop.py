@@ -86,8 +86,20 @@ ROW_FIELDS = ["alias", "run_id", "stage", "revision", "parent_run_id", "task", "
               "skill_source", "skill_hash", "skill_has_solution", "elapsed_min", "wall_min", "emulator_runs",
               "tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd", "price_table",
               "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used", "memory_used", "effort",
-              "model_switched", "settings_confirmed"]
+              "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun"]
 LINE = "-" * 72
+T6_PASS = 90
+
+
+def passed(row):
+    """Pass mark: T6 passes with a score of 90 or more; T3 (and every other task) needs 100.
+    No score (empty or not a number) is not a pass.
+    charts.py has its own copy of this rule: keep both in sync."""
+    try:
+        sc = float(str((row or {}).get("score", "")).strip())
+    except ValueError:
+        return False
+    return sc >= (T6_PASS if (row or {}).get("task") == "T6" else 100)
 
 
 # ------------------------------------------------------------------ paths and registry
@@ -869,6 +881,22 @@ def still_working_box(reg, left):
     next_box(lines, head)
 
 
+def start_order(seed):
+    """Order to start the four stage-3 threads. Per task, WITH or WITHOUT goes first; random per stage-1 run."""
+    rng = random.Random(str(seed))
+    order = []
+    for t in ("T3", "T6"):
+        pair = ["%s with skill" % t, "%s without skill" % t]
+        if rng.random() < 0.5:
+            pair.reverse()
+        order += pair
+    return order
+
+
+def start_order_line(seed):
+    return "  Start in this order: " + " ".join("%d. %s" % (i, x) for i, x in enumerate(start_order(seed), 1))
+
+
 def new_s3_all(reg, a):
     """new s3 --task all: T3 and T6, each with the skill and without it (control); one terminal."""
     made = {}
@@ -884,12 +912,16 @@ def new_s3_all(reg, a):
     if not made:
         return 1
     a.s3_first = made["t6"][0] if "t6" in made else next(iter(made.values()))[0]
+    seed = reg.data["runs"][next(iter(made.values()))[0]].get("parent", "")
     if not gate_on():
         s3_header(reg, a, True, total=4)
+        print(start_order_line(seed))
     order = [k for k in ALL_ORDER if k in made]
     for i, k in enumerate(order, 1):
         rid, f, p = made[k]
         s3_show(reg, rid, i, 4, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k])
+    if gate_on():
+        print(start_order_line(seed))
     next_box(["python workshop.py done %s   %s" % (made[k][0], ALL_LABEL[k]) for k in order],
              "when an agent is done (or at 10 min), run its line:")
     return 0 if len(made) == 4 else 1
@@ -1191,6 +1223,163 @@ def _memory_used_one(path, t0, t1):
 
 def memory_line(row):
     return "  Agent memory in context: %s (Codex Memories; see the debrief)" % (row.get("memory_used") or "unknown")
+
+
+_SKIP_KEYS = ("content", "new_string", "old_string", "text", "new_source")
+_WIN_PATH = re.compile(r"(?<![\w])[A-Za-z]:[\\/][^\s\"'<>|;&(){}\[\],`]*")
+_POSIX_PATH = re.compile(r"(?<![\w.:/\\~$)\]-])/[A-Za-z0-9_.~@%+-][^\s\"'<>|;&(){}\[\],`]*")
+_HOME_PATH = re.compile(r"(?<![\w])(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%|%LOCALAPPDATA%|%APPDATA%)(?:[\\/][^\s\"'<>|;&(){}\[\],`]*)?")
+_TOKEN = re.compile(r"[^\s\"'|;&()<>=,`]+")
+_RUN_ID = re.compile(r"(?<![\w-])s[123]-[0-9a-f]{4}(?:-[tn][36]-[0-9a-f]{4})?(?![\w-])")
+_PYTHON = re.compile(r"(?:^|[\\/])python[\d.]*(?:\.exe)?$", re.I)
+_SYS_PREFIX = ("/tmp", "/dev/", "/usr/", "/bin/", "/proc/self", "/sys/")
+
+
+def _strings(v, out):
+    if isinstance(v, str):
+        out.append(v)
+    elif isinstance(v, dict):
+        for k, x in v.items():
+            if k not in _SKIP_KEYS:
+                _strings(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            _strings(x, out)
+
+
+def _call_text(d):
+    """The arguments of one agent tool call (Codex function_call / custom_tool_call, Claude tool_use), else ''."""
+    parts = []
+    p = d.get("payload")
+    if d.get("type") == "response_item" and isinstance(p, dict) and p.get("type") in ("function_call", "custom_tool_call"):
+        raw = p.get("arguments") if p.get("type") == "function_call" else p.get("input")
+        if p.get("name") == "apply_patch" and isinstance(raw, str):
+            return "\n".join(l for l in raw.splitlines() if l.startswith("*** "))
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except ValueError:
+                pass
+        _strings(raw, parts)
+    elif d.get("type") == "assistant":
+        c = (d.get("message") or {}).get("content")
+        if isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    _strings(b.get("input"), parts)
+    return "\n".join(parts)
+
+
+def _norm(p):
+    return os.path.normcase(os.path.normpath(p))
+
+
+def _inside(p, folder):
+    f, q = _norm(folder), _norm(p)
+    return q == f or q.startswith(f + os.sep)
+
+
+def _gitbash(p):
+    m = re.match(r"^/([A-Za-z])(/.*)?$", p)
+    return "%s:%s" % (m.group(1).upper(), m.group(2) or "/") if m else p
+
+
+def _ignored(p):
+    pl = p.replace("\\", "/").lower().rstrip("/.")
+    if _PYTHON.search(p) or pl.startswith(_SYS_PREFIX) or pl == "/dev/null" or pl in ("/tmp", "/dev"):
+        return True
+    if _inside(p, ws_home()):                 # other run folders and .skills live here: never ignored
+        return False
+    tmp = _norm(tempfile.gettempdir())
+    if _norm(p).startswith(tmp):
+        return True
+    if re.match(r"^[a-z]:/(windows|program files)", pl):
+        return True
+    if os.environ.get("TEMP") and _norm(p).startswith(_norm(os.environ["TEMP"])):
+        return True
+    for home in (M.codex_home(), M.claude_home()):         # the agent's own config: not ignored for memories and skills
+        if home and _norm(p).startswith(_norm(home)) and "memories" not in pl and "skills" not in pl:
+            return True
+    return False
+
+
+def _scan_text(text, folder, writer):
+    """Hits (short strings) for outside reads in the text of one tool call."""
+    hits = []
+    own = os.path.basename(folder.rstrip("\\/"))
+    ph = "RUNFOLDER"
+    for variant in {folder, folder.replace("\\", "/"), folder.replace("/", "\\"), _gitbash_rev(folder)}:
+        if variant:
+            text = re.sub(re.escape(variant), ph, text, flags=re.I)
+    for rx in (_WIN_PATH, _POSIX_PATH, _HOME_PATH):
+        for m in rx.finditer(text):
+            p = m.group(0).rstrip(".:")
+            if p.startswith(ph):
+                continue
+            q = _gitbash(p) if rx is _POSIX_PATH else p
+            if not _ignored(q):
+                hits.append("outside path " + p)
+    for tok in _TOKEN.findall(text):
+        if re.match(r"^[A-Za-z]:[\\/]", tok) or tok.startswith(("/", "~", "$", "%")):
+            continue
+        segs = re.split(r"[\\/]", tok)
+        if ".." in segs:
+            rel = tok.replace(ph, folder)
+            if not _inside(os.path.join(folder, rel), folder):
+                hits.append("path leaves the run folder: " + tok)
+    for m in _RUN_ID.finditer(text):
+        if m.group(0) != own and not own.startswith(m.group(0) + "-"):
+            hits.append("other run folder " + m.group(0))
+    if ".skills" in text and not any("skills" in h for h in hits):
+        hits.append(".skills outside the run folder")
+    if writer and re.search(r"T6\.md|t6font", text, re.I):
+        hits.append("writer reads T6 files")
+    return hits
+
+
+def _gitbash_rev(p):
+    m = re.match(r"^([A-Za-z]):[\\/](.*)$", p)
+    return "/%s/%s" % (m.group(1).lower(), m.group(2).replace("\\", "/")) if m else ""
+
+
+def detect_outside_reads(paths, t0, t1, folder, writer=False):
+    """Scan the agent's tool calls in [t0, t1] for reads outside the run folder.
+    Returns (status, note): 'detected' (note = first 3 hits), 'not_detected', or 'unknown' (no log).
+    A scan finds some outside reads; it is not proof."""
+    if isinstance(paths, str):
+        paths = [paths]
+    paths = [p for p in (paths or []) if p and os.path.exists(p)]
+    if not paths:
+        return "unknown", ""
+    hits = []
+    for path in paths:
+        calls = []
+        try:
+            for d in M.jsonl(path):
+                if isinstance(d, dict):
+                    calls.append((M.parse_ts(d.get("timestamp")), _call_text(d)))
+        except Exception:
+            continue
+        if any(ts is not None for ts, _ in calls):
+            calls = [x for x in calls if x[0] is not None and t0 - 1 <= x[0] <= t1 + 1]
+        for _, text in calls:
+            if text:
+                for h in _scan_text(text, folder, writer):
+                    if h not in hits:
+                        hits.append(h)
+    if not hits:
+        return "not_detected", ""
+    return "detected", "; ".join(hits[:3])[:200]
+
+
+def isolation_lines(row):
+    st = row.get("isolation") or "unknown"
+    out = "  Isolation check: %s." % st
+    if st == "not_detected":
+        out += " (A scan finds some outside reads; not proof.)"
+    if st == "detected" and row.get("isolation_note"):
+        out += "\n  " + row["isolation_note"]
+    return out
 
 
 def count_runs(folder, t0, t1):
@@ -1590,7 +1779,13 @@ def ascii_frame(path, frame=300):
         shutil.rmtree(d, ignore_errors=True)
 
 
-def show_rows(rows):
+COST_NOTE = "  Estimated cost under the kit's price assumptions."
+OBSERVED_NOTE = "  Observed results: one attempt per condition. Check pass/fail before time or cost; reliability is unknown."
+UNMATCHED_NOTE = "  Settings differ: this is not a matched comparison."
+FAILED_NOTE = "  At least one attempt failed. Costs describe attempts, not equal-quality savings."
+
+
+def show_rows(rows, note=True):
     cols = [("run_id", 16), ("stage", 5), ("task", 4), ("model", 20), ("elapsed_min", 7), ("emulator_runs", 6),
             ("tok_in", 9), ("tok_out", 8), ("cost_usd", 7), ("score", 6), ("grading", 9)]
     print("  ".join(n.ljust(w) for n, w in cols))
@@ -1602,6 +1797,8 @@ def show_rows(rows):
             mdl = "%s/%s" % (mdl, r["effort"])
         v = dict(r, model=mdl, tok_in=M.fmt_k(tin) if tin else "", tok_out=M.fmt_k(int(r["tok_out"])) if str(r.get("tok_out", "")).isdigit() else "")
         print("  ".join(str(v.get(n, ""))[:w].ljust(w) for n, w in cols))
+    if note and any(str(r.get("cost_usd", "")).strip() for r in rows):
+        print(COST_NOTE)
 
 
 def _val(r, *keys):
@@ -1642,88 +1839,80 @@ def tasks_word(n):
     return "task" if n == 1 else "tasks"
 
 
-CONTROL_PASS = 90
+def same_settings(rw, rc):
+    """True only when both rows have the same model AND the same effort. An empty value is unknown, so not the same."""
+    for k in ("model", "effort"):
+        a, b = str((rw or {}).get(k, "")).strip(), str((rc or {}).get(k, "")).strip()
+        if not a or a != b:
+            return False
+    return True
 
 
-def control_failed(rc):
-    sc = _val(rc, "score")
-    return sc is not None and sc < CONTROL_PASS
+def verdict(row):
+    """'PASS' or 'FAIL' next to a score; '' while the row has no score."""
+    if _val(row, "score") is None:
+        return ""
+    return "PASS" if passed(row) else "FAIL"
 
 
 def compare_control(reg, rw, rc, task="T3", note=""):
-    """Task WITH the skill (rw) vs WITHOUT the skill (rc, control), same parent and model."""
-    banner("%s: WITH vs WITHOUT the skill (same model)%s" % (task, note))
+    """Task WITH the skill (rw) vs WITHOUT the skill (rc, control), same parent."""
+    if same_settings(rw, rc):
+        banner("%s: WITH vs WITHOUT the skill (same model)%s" % (task, note))
+    else:
+        banner("%s: WITH vs WITHOUT the skill%s" % (task, note))
+        print(UNMATCHED_NOTE)
     print("\n" + c_bold("  %-15s %16s %16s %10s" % ("", "without", "with skill", "change")))
     print("  %-15s %16s %16s %10s" % ("", rc["run_id"], rw["run_id"], ""))
     print("  " + "-" * 60)
-    failed = control_failed(rc)
+    failed = "FAIL" in (verdict(rc), verdict(rw))
     for name, keys, f in COMPARE:
         a, b = _val(rc, *keys), _val(rw, *keys)
         fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
+        ca, cb = fmt(a), fmt(b)
+        if name == "Score":
+            ca, cb = ("%s %s" % (ca, verdict(rc))).strip(), ("%s %s" % (cb, verdict(rw))).strip()
         ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" and not failed else ""
-        print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), color_change(ch)))
+        print("  %-15s %16s %16s %s" % (name, ca, cb, color_change(ch)))
     if failed:
-        print("\n  Control failed (score %d): time and cost are not comparable; compare the scores." % _val(rc, "score"))
+        print("\n" + FAILED_NOTE)
     if _val(rc, "score") is None or _val(rw, "score") is None:
         print("\n  Score not graded yet.  python workshop.py unlock 4 <password from the slide>  then  python workshop.py grade")
 
 
-T6_NOTE = " - a new task, no leakage possible"
+T6_NOTE = " - different task; shares components with T3"
 
 
 def _gain(rw, rc):
-    """(score points, time %) of the skill run over its control; None when a value is missing."""
+    """Score points of the skill run over its control; None when a score is missing."""
     sw, sc = _val(rw, "score"), _val(rc, "score")
-    tw, tc = _val(rw, "elapsed_min"), _val(rc, "elapsed_min")
-    if sw is None or sc is None or tw is None or not tc:
+    if sw is None or sc is None:
         return None
-    return sw - sc, (tc - tw) / tc * 100
+    return sw - sc
 
 
 def leakage_line(reg, parent):
-    """The leakage check, when both pairs (T3 and T6, skill vs control) are graded."""
+    """Observed score gains, when both pairs (T3 and T6, skill vs control) are graded. No verdict."""
     g = {}
     for r in reg.data["rows"].values():
         run = reg.data["runs"].get(r["run_id"], {})
         if r["stage"] == "3" and run.get("parent") == parent:
             g[(r["task"], is_control(run) or r.get("method") == "none")] = r
-    pairs = [_gain(g.get((t, False)), g.get((t, True))) if (t, False) in g and (t, True) in g else None
+    gains = [_gain(g.get((t, False)), g.get((t, True))) if (t, False) in g and (t, True) in g else None
              for t in ("T3", "T6")]
-    if None in pairs:
+    if None in gains:
         return ""
-    failed = any(control_failed(g[(t, True)]) for t in ("T3", "T6"))
-    if failed:
-        head = ("  Leakage check: Skill gain on T3: %+d points; on T6: %+d points. "
-                % (round(pairs[0][0]), round(pairs[1][0])))
-    else:
-        head = ("  Leakage check: Skill gain on T3: %+d points / %+d%% time; on T6: %+d points / %+d%% time. "
-                % (round(pairs[0][0]), round(pairs[0][1]), round(pairs[1][0]), round(pairs[1][1])))
-    d = pairs[0][0] - pairs[1][0]
-    if abs(d) <= 15:
-        end = "Similar gains: little leakage - the skill carries real knowledge."
-    elif d > 0:
-        end = "The T3 gain is much larger: part of it is leakage (the skill holds parts of the T3 answer)."
-    else:
-        end = "The skill transfers well to the new task."
-    return head + end
+    return ("  Leakage check: Observed score gains: T3 %+d; T6 %+d. "
+            "These results neither identify nor rule out answer reuse." % (round(gains[0]), round(gains[1])))
 
 
 def payback(reg, r1, r2, r3, t6=False, shown_table=False):
-    """What writing the skill cost, and the pay-back rule (only when the score holds)."""
-    c1, c2, c3 = _val(r1, "cost_usd"), _val(r2, "cost_usd"), _val(r3, "cost_usd")
+    """What writing the skill cost (stage-2 row). No break-even number."""
     s1s, s3s_ = _val(r1, "score"), _val(r3, "score")
-    ok = s1s is not None and s3s_ is not None and not t6 and (s3s_ >= s1s or (s3s_ >= 90 and s1s >= 90))
-    if c2 is not None:
-        print("\n  Writing the skill (stage 2): %s min, $%.2f." % (r2.get("elapsed_min", "?"), c2))
-        if ok and c1 is not None and c3 is not None:
-            if c1 > c3:
-                n = max(1, math.ceil(c2 / (c1 - c3)))
-                print("  The skill pays for itself after %d %s like this one (stage-2 cost / saving per task)."
-                      % (n, tasks_word(n)))
-            else:
-                print("  The skill did not save money on this task.")
-    if s1s is not None and s3s_ is not None and not t6 and not ok:
-        print("  The skill run scored lower (%d vs %d): no saving is counted." % (s3s_, s1s))
+    if r2:
+        mins, cost = _val(r2, "elapsed_min"), _val(r2, "cost_usd")
+        print("\n  Skill creation: %s min, %s estimated. Break-even not established."
+              % ("unknown" if mins is None else "%.1f" % mins, "unknown" if cost is None else "$%.2f" % cost))
     if (s1s is None or s3s_ is None) and shown_table:
         print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password from the slide>  then  python workshop.py grade"
               % (AFTER_ALL if reg.actives("3") else "Now"))
@@ -1742,6 +1931,11 @@ def show_compare(reg, s3_id=None):
             parents.append(p)
     want_task = {r["task"] for r in pick} if s3_id else {"T3", "T6"}
     printed_ll = set()
+    if not pick:
+        return
+    print("\n" + OBSERVED_NOTE)
+    if any(str(r.get("cost_usd", "")).strip() for r in rows3):
+        print(COST_NOTE)
     for parent in parents:
         mine = [r for r in rows3 if runs.get(r["run_id"], {}).get("parent") == parent]
         g = {}
@@ -1751,7 +1945,7 @@ def show_compare(reg, s3_id=None):
         reg_ctl = {run["task"] for run in runs.values()
                    if run.get("parent") == parent and is_control(run)}
         if not any(k[1] for k in g) and not reg_ctl:
-            show_rows(mine)
+            show_rows(mine, note=False)
             print("\n  No control runs: run python workshop.py new s3 --task all for a fair comparison.")
             continue
         shown_t3 = None
@@ -1829,6 +2023,10 @@ def finish_stage(reg, rid, stage, a, grade=True):
     else:
         fields["revision"] = int(row.get("revision") or 1) + 1
     fields["memory_used"] = detect_memory_used(session_paths(run.get("session")), t0, t1)
+    iso, iso_note = detect_outside_reads(session_paths(run.get("session")), t0, t1, run["folder"],
+                                         writer=stage in ("1", "2"))
+    fields["isolation"], fields["isolation_note"] = iso, iso_note
+    fields["overrun"] = "yes" if t1 - t0 > TIME_BOX_MIN * 60 else "no"
     fields["settings_confirmed"] = run.get("settings_confirmed", "")
     reg.set_row(rid, stage, fields)
     reg.save()
@@ -1873,6 +2071,9 @@ def cmd_done(a):
     show_rows([row])
     print(ascii_frame(snap_path(rid, stage)))
     print(memory_line(row))
+    print(isolation_lines(row))
+    if row.get("overrun") == "yes":
+        print("  Over the 10-minute time box: flagged in the results.")
     if row["grading"] == "ungraded":
         who = AFTER_ALL if stage == "3" and reg.actives("3") else "After the agent is done"
         print("\nNot graded yet. %s:  python workshop.py unlock 4 <password from the slide>  "
@@ -2063,8 +2264,11 @@ def cmd_harvest(a):
     print("  Stage-1 game code in skill: %s  (recorded for the debrief, nothing to do)" % status)
     print("  Skill help the agent used: %s (drawn method: %s)" % (used or "unknown", run["method"]))
     print(memory_line(row))
+    print(isolation_lines(row))
     memories_card(reg)
     print("\n" + SAVED_LINE)
+    print("\n  Before stage 3 (2 minutes): open %s and find one verified rule, one reusable code part, "
+          "and one uncertainty." % os.path.join(dst, "SKILL.md"))
     next_box(["python workshop.py new s3 --task all",
               "(cmd/PowerShell: one command; it starts all four runs)"],
              "stage 3: FOUR new agent threads (T3, T3 control, T6, T6 control). Run:")

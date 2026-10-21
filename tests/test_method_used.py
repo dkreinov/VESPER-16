@@ -67,7 +67,7 @@ class HarvestMethodUsed(unittest.TestCase):
         self.assertEqual(row["method_used"], "skill-creator")
         self.assertIn("Skill help the agent used: skill-creator (drawn method: plain)", out)
         with open(os.path.join(self.w.ws_home(), "results.csv"), encoding="utf-8") as f:
-            self.assertEqual(f.readline().strip().split(",")[-5:], ["method_used", "memory_used", "effort", "model_switched", "settings_confirmed"])
+            self.assertEqual(f.readline().strip().split(",")[-8:], ["method_used", "memory_used", "effort", "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun"])
 
     def test_none_when_not_mentioned(self):
         rid, out = self._harvest(False)
