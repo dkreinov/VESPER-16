@@ -79,7 +79,7 @@ folder in an agent again.
 
 ## Results and cleanup
 
-- With the tool, the last step is `python workshop.py submit`: it opens the form for every result that is not yet submitted.
+- With the tool, the last step is `python workshop.py submit`: it grades first if needed, then sends every result that is not yet submitted in ONE form window.
 - By hand, type your numbers into the results form: https://forms.cloud.microsoft/r/xdtPcwF24a
   (alias, run_id such as `s1-<s1code>` or `s3-<s1code>-t6-<code>`, stage 1/2/3, revision 1, task T3 or T6, agent, model, method,
   skill_has_solution (the part of your stage-1 game in the skill, for example 27%; write 0% if none), elapsed_min, emulator_runs, the token numbers, cost_usd if you know it, score,

@@ -81,7 +81,7 @@ def map_columns(header, extra=None):
     names = [norm_header(h) for h in header]
     for i, n in enumerate(names):
         f = extra.get(n) or (n if n in FIELDS else re.split(r"[\s:(]", n, 1)[0])
-        if f in FIELDS:
+        if f in FIELDS or f == "all_results":
             out.setdefault(f, i)
     for d in DATE_HEADERS:
         if d in names:
@@ -118,6 +118,24 @@ def num(v):
         return None
 
 
+def expand_all_results(text):
+    """Decode the all_results text (vesper-results v1) into a list of row dicts."""
+    from urllib.parse import unquote
+    out = []
+    for line in str(text).replace("\r\n", "\n").split("\n"):
+        line = line.strip()
+        if not line or line.startswith("vesper-results"):
+            continue
+        d = {}
+        for part in line.split(";"):
+            k, eq, v = part.partition("=")
+            if eq and k.strip():
+                d[k.strip()] = unquote(v).strip()
+        if d:
+            out.append(d)
+    return out
+
+
 def load_rows(paths, extra=None, date_format=None):
     rows = []
     for p in paths:
@@ -130,6 +148,14 @@ def load_rows(paths, extra=None, date_format=None):
                 continue
             r = {f: (raw[i].strip() if i < len(raw) else "") for f, i in cols.items() if f != "_date"}
             r["_date"] = parse_date(raw[cols["_date"]], date_format) if "_date" in cols and cols["_date"] < len(raw) else None
+            blob = r.pop("all_results", "")
+            if blob:
+                for d in expand_all_results(blob):
+                    x = {f: d.get(f, "") for f in FIELDS}
+                    x["alias"] = r.get("alias", "")
+                    x["_date"] = r["_date"]
+                    rows.append(x)
+                continue
             rows.append(r)
     return rows
 

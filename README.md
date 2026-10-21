@@ -76,7 +76,7 @@ python workshop.py done <run_id>          # end one stage-3 run (plain `done` as
 python workshop.py unlock 4 <password>    # the grader - only after your agents are done
 python workshop.py grade                  # scores the stages that are not graded yet
 python workshop.py show                   # your table and the active runs
-python workshop.py submit                 # LAST STEP: send all results to the form, one by one
+python workshop.py submit                 # LAST STEP: grades if needed, then sends all results in ONE form window
 python workshop.py form                   # open the form again for one stage (last stage; or: form <run_id> <stage>)
 python workshop.py cleanup                # removes everything workshop.py made
 python workshop.py doctor                 # the setup check alone (new s1 runs it for you)
@@ -114,9 +114,9 @@ outside its own folder unless you confirm.
 - Cost is an estimate at API list prices (table at the top of `measure.py`); subscription users do not pay
   per token. For Cursor, type the numbers from Cursor's usage screen when `done` asks.
 - **Results form:** https://forms.cloud.microsoft/r/xdtPcwF24a (Mobileye sign-in). `done`, `harvest` and
-  `grade` only save the numbers. At the end run `python workshop.py submit`: for each result it opens the form
-  with your values filled in, prints the values with their question numbers, and waits for you to click Submit
-  and press Enter. If the browser does not open, open the link and type the values.
+  `grade` only save the numbers. At the end run `python workshop.py submit`: it grades any ungraded result first
+  (the grader must be unlocked), then opens ONE browser window with the form and all your results filled in.
+  Check it, click Submit, and press Enter. If the browser does not open, open the printed link.
 - If `doctor` shows RED, follow [MANUAL.md](MANUAL.md). More exercises: [HOMEWORK.md](HOMEWORK.md).
 
 ## Rules for the exercise

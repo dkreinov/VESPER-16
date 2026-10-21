@@ -1351,20 +1351,89 @@ def needs_submit(r):
     return sr in (None, "") or int(r.get("revision") or 1) > int(sr)
 
 
+RESULTS_HEADER = "vesper-results v1"
+MAX_LINK = 7000
+LOCKED_MSG = "Unlock the grader first:  python workshop.py unlock 4 <password from the slide>  (then run submit again)"
+
+
+def esc_value(v):
+    v = str(v)
+    for ch, code in (("%", "%25"), (";", "%3B"), ("=", "%3D"), ("\r", "%0D"), ("\n", "%0A")):
+        v = v.replace(ch, code)
+    return v
+
+
+def all_results_text(rows):
+    lines = [RESULTS_HEADER]
+    for r in rows:
+        lines.append(";".join("%s=%s" % (k, esc_value(r.get(k, ""))) for k in ROW_FIELDS))
+    return "\n".join(lines)
+
+
+def all_link(rows, cfg=None):
+    """One prefilled link for every row, or None when there is no form, no all_results field, or it is too long."""
+    cfg = cfg or load_config()
+    fid = cfg.get("all_results_field")
+    if not cfg.get("form_url") or not fid:
+        return None
+    alias = rows[0].get("alias", "") if rows else ""
+    vals = {cfg["fields"]["alias"]: alias, cfg["fields"]["run_id"]: "ALL", cfg["fields"]["stage"]: "all",
+            fid: all_results_text(rows)}
+    link = cfg["form_url"] + ("&" if "?" in cfg["form_url"] else "?") + urlencode(vals)
+    return link if len(link) <= MAX_LINK else None
+
+
+def grade_ungraded(reg):
+    """Grade every ungraded row (the code of `grade`, short lines)."""
+    for r in [r for r in reg.data["rows"].values() if r["grading"] == "ungraded"]:
+        snap = snap_path(r["run_id"], r["stage"])
+        name = reg.data["runs"].get(r["run_id"], {}).get("name", "")
+        score, status = grade_snapshot(r["task"], snap if os.path.exists(snap) else None, name)
+        reg.set_row(r["run_id"], r["stage"], {"score": score, "grading": status,
+                                              "revision": int(r["revision"] or 1) + 1})
+        reg.save()
+        reg.write_csv()
+        print("%s stage %s: score %s" % (r["run_id"], r["stage"], score))
+
+
 def cmd_submit(a):
     reg = Registry.load()
-    rows = sorted([r for r in reg.data["rows"].values() if needs_submit(r)],
-                  key=lambda r: (str(r["stage"]), float(r["start"] or 0)))
-    if not rows:
+    if not [r for r in reg.data["rows"].values() if needs_submit(r)]:
         print("Nothing to submit. All results are submitted.")
         return 0
+    if any(r["stage"] in ("1", "3") and r["grading"] == "ungraded" for r in reg.data["rows"].values()):
+        if not os.path.exists(grader_path()):
+            print(LOCKED_MSG)
+            return 1
+        print("Grading first:")
+        grade_ungraded(reg)
+        reg = Registry.load()
+    rows = sorted([r for r in reg.data["rows"].values() if needs_submit(r)],
+                  key=lambda r: (str(r["stage"]), float(r["start"] or 0)))
     tty = sys.stdout.isatty() and bool(sys.stdin) and sys.stdin.isatty() and not getattr(a, "no_form", False)
     if not tty:
         a.no_form = True               # print only: no browser, nothing marked
-    elif os.path.exists(grader_path()) and any(r["stage"] in ("1", "3") and r["grading"] == "ungraded" for r in rows):
-        print("Run python workshop.py grade first")
-        if ask("Submit anyway? [y/N] ", "n").lower() != "y":
+    cfg = load_config()
+    link = all_link(rows, cfg)
+    if link:
+        print("\n  RESULTS FORM:  %s" % c_link(cfg.get("short_url") or cfg["form_url"]))
+        print("  %d results are in this link." % len(rows))
+        if not tty:
+            print("\n  Link:\n%s" % link)
             return 0
+        if webbrowser.open(link):
+            print("\n  The form opens in ONE browser window. Check it and click Submit, then press Enter here.")
+        else:
+            print("\n  The browser did not open. Open this link, check it and click Submit, then press Enter here:\n%s" % link)
+        if ask("\n  Press Enter when submitted (s = skip, mark nothing): ", "").lower() == "s":
+            print("\nNothing marked. Run submit again when you are ready.")
+            return 0
+        for r in rows:
+            mark_submitted(reg, r)
+        print("\nAll %d results submitted" % len(rows))
+        return 0
+    if cfg.get("form_url") and cfg.get("all_results_field"):
+        print("\nThe results are too long for one window. Using one window per result.")
     n, skipped = len(rows), 0
     for i, r in enumerate(rows, 1):
         if tty:
@@ -1515,17 +1584,28 @@ def tasks_word(n):
     return "task" if n == 1 else "tasks"
 
 
+CONTROL_PASS = 90
+
+
+def control_failed(rc):
+    sc = _val(rc, "score")
+    return sc is not None and sc < CONTROL_PASS
+
+
 def compare_control(reg, rw, rc, task="T3", note=""):
     """Task WITH the skill (rw) vs WITHOUT the skill (rc, control), same parent and model."""
     banner("%s: WITH vs WITHOUT the skill (same model)%s" % (task, note))
     print("\n" + c_bold("  %-15s %16s %16s %10s" % ("", "without", "with skill", "change")))
     print("  %-15s %16s %16s %10s" % ("", rc["run_id"], rw["run_id"], ""))
     print("  " + "-" * 60)
+    failed = control_failed(rc)
     for name, keys, f in COMPARE:
         a, b = _val(rc, *keys), _val(rw, *keys)
         fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
-        ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" else ""
+        ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" and not failed else ""
         print("  %-15s %16s %16s %s" % (name, fmt(a), fmt(b), color_change(ch)))
+    if failed:
+        print("\n  Control failed (score %d): time and cost are not comparable; compare the scores." % _val(rc, "score"))
     if _val(rc, "score") is None or _val(rw, "score") is None:
         print("\n  Score not graded yet.  python workshop.py unlock 4 <password from the slide>  then  python workshop.py grade")
 
@@ -1553,9 +1633,21 @@ def leakage_line(reg, parent):
              for t in ("T3", "T6")]
     if None in pairs:
         return ""
-    return ("  Leakage check: Skill gain on T3: %+d points / %+d%% time; on T6: %+d points / %+d%% time. "
-            "A much larger gain on T3 than on T6 points to leakage (the skill holds parts of the T3 answer)."
-            % (round(pairs[0][0]), round(pairs[0][1]), round(pairs[1][0]), round(pairs[1][1])))
+    failed = any(control_failed(g[(t, True)]) for t in ("T3", "T6"))
+    if failed:
+        head = ("  Leakage check: Skill gain on T3: %+d points; on T6: %+d points. "
+                % (round(pairs[0][0]), round(pairs[1][0])))
+    else:
+        head = ("  Leakage check: Skill gain on T3: %+d points / %+d%% time; on T6: %+d points / %+d%% time. "
+                % (round(pairs[0][0]), round(pairs[0][1]), round(pairs[1][0]), round(pairs[1][1])))
+    d = pairs[0][0] - pairs[1][0]
+    if abs(d) <= 15:
+        end = "Similar gains: little leakage - the skill carries real knowledge."
+    elif d > 0:
+        end = "The T3 gain is much larger: part of it is leakage (the skill holds parts of the T3 answer)."
+    else:
+        end = "The skill transfers well to the new task."
+    return head + end
 
 
 def payback(reg, r1, r2, r3, t6=False, shown_table=False):
@@ -1591,6 +1683,7 @@ def show_compare(reg, s3_id=None):
         if p not in parents:
             parents.append(p)
     want_task = {r["task"] for r in pick} if s3_id else {"T3", "T6"}
+    printed_ll = set()
     for parent in parents:
         mine = [r for r in rows3 if runs.get(r["run_id"], {}).get("parent") == parent]
         g = {}
@@ -1620,7 +1713,8 @@ def show_compare(reg, s3_id=None):
             elif ctl:
                 print("\n  %s: waiting for the run WITH the skill (%s with skill)" % (t, t))
         ll = leakage_line(reg, parent)
-        if ll:
+        if ll and ll not in printed_ll:
+            printed_ll.add(ll)
             print("\n" + ll)
         r1, r2 = reg.row(parent, "1"), reg.row(parent, "2")
         if r1 and r2:
@@ -1747,15 +1841,7 @@ def cmd_grade(a):
     if not os.path.exists(grader_path()):
         sys.exit("The grader is locked:  python workshop.py unlock 4 <password from the slide>")
     clear_screen()
-    for r in todo:
-        snap = snap_path(r["run_id"], r["stage"])
-        name = reg.data["runs"].get(r["run_id"], {}).get("name", "")
-        score, status = grade_snapshot(r["task"], snap if os.path.exists(snap) else None, name)
-        reg.set_row(r["run_id"], r["stage"], {"score": score, "grading": status,
-                                              "revision": int(r["revision"] or 1) + 1})
-        reg.save()
-        reg.write_csv()
-        print("%s stage %s: score %s" % (r["run_id"], r["stage"], score))
+    grade_ungraded(reg)
     print("\n" + SAVED_LINE)
     show_compare(reg)
     all_done_box(reg)

@@ -56,6 +56,39 @@ def write_xlsx(path, rows):
         z.writestr("xl/worksheets/sheet1.xml", '<worksheet xmlns="%s"><sheetData>%s</sheetData></worksheet>' % (m, data))
 
 
+class AllResultsTest(unittest.TestCase):
+    def test_round_trip(self):
+        sys.path.insert(0, ROOT)
+        import workshop
+        rows = []
+        for i, (rid, st, rev) in enumerate([("s1-aaaa", "1", "1"), ("s1-aaaa", "1", "2"), ("s3-aaaa-t6-1111", "3", "1")]):
+            r = {k: "" for k in workshop.ROW_FIELDS}
+            r.update(alias="ann", run_id=rid, stage=st, revision=rev, task="T3", method="plain", score="100",
+                     grading="graded", measurement="log", cost_usd="0.5", agent="a;b=c")
+            rows.append(r)
+        text = workshop.all_results_text(rows)
+        form = {f: "" for f in charts.FIELDS}
+        form.update(alias="ann", run_id="ALL", stage="all", all_results=text)
+        tmp = tempfile.mkdtemp(prefix="charts_ar_")
+        p = os.path.join(tmp, "e.csv")
+        old = ["x"] + [f for f in charts.FIELDS]
+        oldrow = {f: "" for f in charts.FIELDS}
+        oldrow.update(alias="bob", run_id="s1-bbbb", stage="1", revision="1", score="9")
+        with open(p, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["Start time"] + charts.FIELDS + ["all_results"])
+            w.writerow([serial(DAY_A)] + [form[k] for k in charts.FIELDS] + [text])
+            w.writerow([serial(DAY_A)] + [oldrow[k] for k in charts.FIELDS] + [""])
+        got = charts.dedup(charts.load_rows([p]))
+        self.assertEqual(len(got), 3)           # 2 expanded (dup collapsed to rev 2) + 1 old single row
+        by = {(r["run_id"], r["stage"]): r for r in got}
+        self.assertNotIn(("ALL", "all"), by)
+        self.assertEqual(by[("s1-aaaa", "1")]["revision"], "2")
+        self.assertEqual(by[("s1-aaaa", "1")]["agent"], "a;b=c")
+        self.assertEqual(by[("s1-aaaa", "1")]["alias"], "ann")
+        self.assertEqual(by[("s1-bbbb", "1")]["score"], "9")
+
+
 class ChartsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="charts_")

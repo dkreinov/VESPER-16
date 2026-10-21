@@ -129,8 +129,33 @@ class TaskAllTest(unittest.TestCase):
         out = capture(self.w.show_compare, reg)
         self.assertIn("T6: WITH vs WITHOUT the skill (same model) - a new task, no leakage possible", out)
         self.assertNotIn("YOUR RESULT", out)
-        self.assertIn("Skill gain on T3: +60 points / +60% time; on T6: +40 points / +50% time.", out)
-        self.assertIn("points to leakage (the skill holds parts of the T3 answer)", out)
+        self.assertIn("Skill gain on T3: +60 points; on T6: +40 points.", out)
+        self.assertIn("The T3 gain is much larger: part of it is leakage (the skill holds parts of the T3 answer).", out)
+        self.assertEqual(out.count("Leakage check"), 1)
+
+    def test_failed_control_no_change_column_and_score_only_gains(self):
+        reg, ids = self._graded("85", "10", "70", "5", tm=(3, 0.8, 4, 0.5))
+        out = capture(self.w.show_compare, reg)
+        self.assertIn("Control failed (score 10): time and cost are not comparable; compare the scores.", out)
+        self.assertIn("Control failed (score 5)", out)
+        self.assertNotIn("%", out.split("Leakage check")[0].split("Time (min)")[1].split("\n")[0])
+        self.assertIn("Skill gain on T3: +75 points; on T6: +65 points. Similar gains: little leakage - the skill carries real knowledge.", out)
+        self.assertEqual(out.count("Leakage check"), 1)
+
+    def _concl(self, scores):
+        reg, ids = self._graded(*scores)
+        return capture(self.w.show_compare, reg)
+
+    def test_conclusion_similar_with_time_when_controls_pass(self):
+        out = self._concl(("100", "95", "100", "90"))
+        self.assertNotIn("Control failed", out)
+        self.assertIn("Skill gain on T3: +5 points / +60% time; on T6: +10 points / +50% time. Similar gains", out)
+
+    def test_conclusion_t3_larger(self):
+        self.assertIn("The T3 gain is much larger", self._concl(("100", "40", "95", "93")))
+
+    def test_conclusion_t6_larger(self):
+        self.assertIn("The skill transfers well to the new task.", self._concl(("95", "93", "100", "40")))
 
     def test_only_real_pairs_never_stage1_or_t3_vs_t6(self):
         reg, ids = self._graded("100", "40", "90", "50")
