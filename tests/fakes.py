@@ -1,6 +1,7 @@
 import datetime as dt, importlib, io, json, os, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.environ["VESPER_NO_CLIPBOARD"] = "1"      # tests never write the real clipboard
 
 
 def fresh_ws():

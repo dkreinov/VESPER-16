@@ -115,9 +115,10 @@ outside its own folder unless you confirm.
   per token. For Cursor, type the numbers from Cursor's usage screen when `done` asks.
 - **Results form:** https://forms.cloud.microsoft/r/xdtPcwF24a (Mobileye sign-in). `done`, `harvest` and
   `grade` only save the numbers. At the end run `python workshop.py submit`: it grades any ungraded result first
-  (the grader must be unlocked), then opens ONE browser window with the form and all your results filled in.
-  Check it, click Submit, and press Enter. If the browser does not open, open the printed link.
-  The form has only two fields, `alias` and `all_results` (one `vesper-results v1` line per run); a very long list opens in several windows.
+  (the grader must be unlocked), then opens ONE browser window with the form and your alias filled in, and
+  copies all your results to the clipboard. Click the `all_results` field, press Ctrl+V (Cmd+V on a Mac),
+  click Submit, and press Enter. If the paste is empty, copy the printed lines by hand.
+  The form has only two fields, `alias` and `all_results` (one `vesper-results v1` line per run).
 - If `doctor` shows RED, follow [MANUAL.md](MANUAL.md). More exercises: [HOMEWORK.md](HOMEWORK.md).
 
 ## Rules for the exercise

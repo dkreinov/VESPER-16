@@ -79,7 +79,7 @@ folder in an agent again.
 
 ## Results and cleanup
 
-- With the tool, the last step is `python workshop.py submit`: it grades first if needed, then sends every result that is not yet submitted in ONE form window.
+- With the tool, the last step is `python workshop.py submit`: it grades first if needed, then opens ONE form window (alias filled in) and copies every result that is not yet submitted to the clipboard; paste it into all_results and click Submit.
 - By hand, fill the results form: https://forms.cloud.microsoft/r/xdtPcwF24a
   The form has TWO fields. Field 1 `alias`: your alias. Field 2 `all_results` (long answer): the lines below, one line per run.
   The first line is exactly `vesper-results v1`. Then write one line per run (stage 1, 2, 3), with no spaces around `;` and `=`:

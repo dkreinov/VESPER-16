@@ -1303,6 +1303,40 @@ def form_link(rows, cfg=None):
     return cfg["form_url"] + ("&" if "?" in cfg["form_url"] else "?") + urlencode(vals)
 
 
+def alias_link(alias, cfg=None):
+    """Form link with only the alias filled in. It is always short, so the Microsoft sign-in redirect accepts it."""
+    cfg = cfg or load_config()
+    fid = cfg.get("fields", {}).get("alias")
+    if not cfg.get("form_url"):
+        return None
+    if not fid:
+        return cfg["form_url"]
+    return cfg["form_url"] + ("&" if "?" in cfg["form_url"] else "?") + urlencode({fid: alias})
+
+
+def copy_to_clipboard(text):
+    """Put text on the system clipboard. Returns True on success. VESPER_NO_CLIPBOARD=1 turns it off (tests)."""
+    if os.environ.get("VESPER_NO_CLIPBOARD"):
+        return False
+    if os.name == "nt":
+        cmds = [["clip"]]
+    elif sys.platform == "darwin":
+        cmds = [["pbcopy"]]
+    else:
+        cmds = [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
+    for c in cmds:
+        if not shutil.which(c[0]):
+            continue
+        try:
+            # clip.exe reads UTF-16-LE (no BOM: a BOM is pasted as an extra character)
+            data = text.encode("utf-16-le") if c[0] == "clip" else text.encode("utf-8")
+            if subprocess.run(c, input=data, timeout=10).returncode == 0:
+                return True
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return False
+
+
 def submit(row, a, confirm=False):
     """Show one row for the form: short URL, the v1 line that is sent, and (unless --no-form) open the link.
     With confirm=True on a TTY, ask for Enter after the browser step; returns True when the learner confirmed."""
@@ -1357,9 +1391,10 @@ def needs_submit(r):
 
 
 RESULTS_HEADER = "vesper-results v1"
-# Microsoft sign-in copies the whole link (base64) into its redirect; a 5,500-character link failed with
-# AADSTS90015 "query string is too long". Keep each link short enough to survive that redirect.
-MAX_LINK = 1800               # measured: Microsoft rejects links above ~2,300 (tested 2026-10-21)
+# `submit` never puts results in the link: Microsoft sign-in copies the whole link (base64) into its redirect
+# and rejects form links above ~2,300 characters (AADSTS90015, measured 2026-10-21). The results go to the
+# clipboard and the learner pastes them into all_results: ONE window and ONE response.
+MAX_TEXT = 3800                    # a Forms long answer holds 4,000 characters; about 8 results fit
 LINE_SKIP = ("alias",)             # the alias has its own form field
 SHA_LEN = 12
 LOCKED_MSG = "Unlock the grader first:  python workshop.py unlock 4 <password from the slide>  (then run submit again)"
@@ -1386,20 +1421,6 @@ def all_results_text(rows):
             parts.append("%s=%s" % (k, esc_value(v)))
         lines.append(";".join(parts))
     return "\n".join(lines)
-
-
-def split_windows(rows, cfg=None):
-    """Split rows into the fewest consecutive groups whose prefilled link fits MAX_LINK (one row per group at least)."""
-    cfg = cfg or load_config()
-    groups, cur = [], []
-    for r in rows:
-        if cur and len(form_link(cur + [r], cfg)) > MAX_LINK:
-            groups.append(cur)
-            cur = []
-        cur.append(r)
-    if cur:
-        groups.append(cur)
-    return groups
 
 
 def grade_ungraded(reg):
@@ -1437,26 +1458,32 @@ def cmd_submit(a):
         for r in rows:
             submit(r, a)
         return 0
-    groups = split_windows(rows, cfg)
-    n = len(groups)
+    link = alias_link(rows[0].get("alias", ""), cfg)
+    paste = "Cmd+V" if sys.platform == "darwin" else "Ctrl+V"
+    parts = split_text(rows)
+    n = len(parts)
     print("\n  RESULTS FORM:  %s" % c_link(cfg.get("short_url") or cfg["form_url"]))
-    print("  %d results to submit%s." % (len(rows), "" if n == 1 else ", in %d windows" % n))
+    print("  %d results to submit, in %s." % (len(rows), "ONE form response" if n == 1 else "%d form responses" % n))
     done = 0
-    for i, g in enumerate(groups, 1):
-        link = form_link(g, cfg)
-        label = "" if n == 1 else "window %d of %d" % (i, n)
+    for i, g in enumerate(parts, 1):
+        text = all_results_text(g)
+        part = "" if n == 1 else " (response %d of %d)" % (i, n)
         if not tty:
-            print("\n  %sLink (%d results):\n%s" % (label + "  " if label else "", len(g), link))
+            print("\n  Form link (alias filled in)%s:\n%s\n\n  Paste these lines into all_results:\n%s" % (part, link, text))
             continue
-        if webbrowser.open(link):
-            print("\n  The form opens in ONE browser window%s. Check it and click Submit, then press Enter here."
-                  % (" (%s)" % label if label else ""))
+        copied = copy_to_clipboard(text)
+        opened = webbrowser.open(link)
+        print("\n  1. %s" % ("The form opens in your browser, with your alias filled in%s." % part if opened else
+                             "Open this link%s (the browser did not open):\n     %s" % (part, link)))
+        print("     If Forms asks 'Use previous draft or New draft?', click New draft.")
+        if copied:
+            print("  2. Click the all_results field and press %s. Your results are on the clipboard." % paste)
         else:
-            print("\n  The browser did not open%s. Open this link, check it and click Submit, then press Enter here:\n%s"
-                  % (" (%s)" % label if label else "", link))
-            print("  Or open the form URL, type the alias, and paste these lines into all_results:\n" + all_results_text(g))
+            print("  2. Copy ALL the lines between the two marks below and paste them into the all_results field.")
+        print("  3. Click Submit, then press Enter here.")
+        print("\n  ----- all_results (%d lines) -----\n%s\n  ----- end -----" % (len(g) + 1, text))
         if ask("\n  Press Enter when submitted (s = skip, mark nothing): ", "").lower() == "s":
-            print("\nNothing marked for this window. Run submit again when you are ready.")
+            print("\nNothing marked%s. Run submit again when you are ready." % part)
             continue
         for r in g:
             mark_submitted(reg, r)
@@ -1465,6 +1492,19 @@ def cmd_submit(a):
         print("\nAll %d results submitted" % done if done == len(rows) else
               "\n%d of %d results submitted (run submit again for the rest)" % (done, len(rows)))
     return 0
+
+
+def split_text(rows):
+    """Groups of rows whose all_results text fits one Forms answer (MAX_TEXT). Nearly always one group."""
+    groups, cur = [], []
+    for r in rows:
+        if cur and len(all_results_text(cur + [r])) > MAX_TEXT:
+            groups.append(cur)
+            cur = []
+        cur.append(r)
+    if cur:
+        groups.append(cur)
+    return groups
 
 
 def sha256_file(p):

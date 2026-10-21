@@ -16,13 +16,16 @@ class TTYIn(io.StringIO):
         return True
 
 
-def cap(w, *argv, tty_in=None):
+def cap(w, *argv, tty_in=None, clip_ok=True, clips=None):
+    """Run a command with a fake browser and a fake clipboard (texts copied go to `clips`)."""
     out = TTYOut() if tty_in is not None else io.StringIO()
     old = sys.stdin
+    clips = clips if clips is not None else []
     if tty_in is not None:
         sys.stdin = TTYIn(tty_in)
     try:
-        with contextlib.redirect_stdout(out), mock.patch.object(w.webbrowser, "open", return_value=True) as wb:
+        with contextlib.redirect_stdout(out), mock.patch.object(w.webbrowser, "open", return_value=True) as wb, \
+                mock.patch.object(w, "copy_to_clipboard", side_effect=lambda t: clips.append(t) or clip_ok):
             run(w, *argv)
     finally:
         sys.stdin = old
@@ -55,19 +58,23 @@ class Submit(unittest.TestCase):
 
     def test_auto_grades_then_one_link(self):
         install_fake_grader(self.w)
-        out, wb = cap(self.w, "submit", tty_in="\n")
+        clips = []
+        out, wb = cap(self.w, "submit", tty_in="\n", clips=clips)
         self.assertIn("Grading first:", out)
         self.assertTrue(all(r["grading"] == "graded" for r in self.rows().values() if r["stage"] in ("1", "3")))
         self.assertEqual(wb.call_count, 1)
-        self.assertIn("The form opens in ONE browser window. Check it and click Submit, then press Enter here.", out)
-        self.assertIn("2 results to submit.", out)
-        self.assertNotIn("window 1 of", out)
+        self.assertIn("2 results to submit, in ONE form response.", out)
+        self.assertIn("The form opens in your browser, with your alias filled in.", out)
+        self.assertIn("Click the all_results field and press Ctrl+V", out)
         link = wb.call_args[0][0]
         cfg = self.w.load_config()
         q = parse_qs(urlparse(link).query)
-        self.assertEqual(set(q) - {"id"}, {cfg["fields"]["alias"], cfg["all_results_field"]})
+        self.assertEqual(set(q) - {"id"}, {cfg["fields"]["alias"]})      # no results in the link
         self.assertEqual(q[cfg["fields"]["alias"]], ["t"])
-        lines = q[cfg["all_results_field"]][0].split("\n")
+        self.assertLess(len(link), 300)
+        self.assertEqual(len(clips), 1)
+        self.assertIn(clips[0], out)                                     # also printed, for a manual copy
+        lines = clips[0].split("\n")
         self.assertEqual(lines[0], "vesper-results v1")
         self.assertEqual(len(lines), 3)
         for ln in lines[1:]:
@@ -75,7 +82,6 @@ class Submit(unittest.TestCase):
             self.assertNotIn("alias", keys)                       # alias has its own field
             self.assertEqual(keys, [k for k in self.w.ROW_FIELDS if k in keys])   # order kept
             self.assertTrue({"run_id", "stage", "revision"} <= set(keys))
-        self.assertLess(len(link), self.w.MAX_LINK)
         self.assertTrue(all(r["submitted_rev"] == r["revision"] for r in self.rows().values()))
         out, wb = cap(self.w, "submit", tty_in="")
         self.assertIn("Nothing to submit", out)
@@ -88,26 +94,43 @@ class Submit(unittest.TestCase):
         cap(self.w, "submit", tty_in="\n")
         cap(self.w, "done", self.rid)            # new revision of stage 1
         out, wb = cap(self.w, "submit", tty_in="\n")
-        self.assertIn("1 results to submit.", out)
+        self.assertIn("1 results to submit, in ONE form response.", out)
 
-    def test_long_data_splits_into_windows(self):
+    def test_long_data_still_one_window(self):
+        """Long results never make the link long (AADSTS90015): one window, one response."""
         install_fake_grader(self.w)
         reg = self.w.Registry.load()
         for r in reg.data["rows"].values():
-            r["task"] = "x" * 4000
+            r["task"] = "x" * 1000
         reg.save()
-        out, wb = cap(self.w, "submit", tty_in="\n\n")
-        self.assertIn("in 2 windows", out)
-        self.assertIn("window 1 of 2", out)
-        self.assertIn("window 2 of 2", out)
-        self.assertEqual(wb.call_count, 2)
-        cfg = self.w.load_config()
-        for c in wb.call_args_list:
-            q = parse_qs(urlparse(c[0][0]).query)
-            self.assertEqual(set(q) - {"id"}, {cfg["fields"]["alias"], cfg["all_results_field"]})
-            self.assertEqual(len(q[cfg["all_results_field"]][0].split("\n")), 2)
+        clips = []
+        out, wb = cap(self.w, "submit", tty_in="\n", clips=clips)
+        self.assertEqual(wb.call_count, 1)
+        self.assertLess(len(wb.call_args[0][0]), 300)
+        self.assertIn("x" * 1000, clips[0])
         self.assertIn("All 2 results submitted", out)
         self.assertTrue(all(r["submitted_rev"] == r["revision"] for r in self.rows().values()))
+
+    def test_more_than_4000_characters_makes_two_responses(self):
+        install_fake_grader(self.w)
+        reg = self.w.Registry.load()
+        for r in reg.data["rows"].values():
+            r["task"] = "x" * 3000
+        reg.save()
+        clips = []
+        out, wb = cap(self.w, "submit", tty_in="\n\n", clips=clips)
+        self.assertIn("2 results to submit, in 2 form responses.", out)
+        self.assertIn("(response 2 of 2)", out)
+        self.assertEqual(len(clips), 2)
+        self.assertTrue(all(len(c) <= 4000 for c in clips))
+        self.assertIn("All 2 results submitted", out)
+
+    def test_clipboard_fails_tells_to_copy(self):
+        install_fake_grader(self.w)
+        out, wb = cap(self.w, "submit", tty_in="\n", clip_ok=False)
+        self.assertIn("Copy ALL the lines between the two marks below", out)
+        self.assertIn("----- all_results (3 lines) -----", out)
+        self.assertNotIn("Ctrl+V", out)
 
     def test_escaping(self):
         t = self.w.all_results_text([{"run_id": "a;b=c\nd%"}])
