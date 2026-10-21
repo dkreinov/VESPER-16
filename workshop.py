@@ -68,6 +68,17 @@ def c_bold(t): return _sgr("1", t)
 def c_good(t): return _sgr("1;32", t)
 
 
+def clear_screen():
+    """Clear terminal when sys.stdout.isatty() is true and VESPER_NO_CLEAR is not set."""
+    if not sys.stdout.isatty() or os.environ.get("VESPER_NO_CLEAR"):
+        return
+    if _vt_ok():
+        sys.stdout.write("\x1b[2J\x1b[H")
+        sys.stdout.flush()
+    else:
+        os.system("cls")
+
+
 PRICE_TABLE = "2026-10-14"
 METHODS = ["builtin", "superpowers", "plain"]
 PART_DEST = {"2": ".wiki", "3": ".prebuilt", "4": ".grader"}
@@ -820,6 +831,7 @@ def new_s3_all(reg, a):
 
 def cmd_new(a):
     ws_home(check=True)
+    clear_screen()
     reg = Registry.load()
     d = reg.data.get("doctor")
     if not d or (a.stage == "s1" and d.get("level") == 2):
@@ -1468,6 +1480,7 @@ def cmd_done(a):
             rid, stage = last["run_id"], last["stage"]
             print("Updating the finished stage %s of %s (same cutoff, same frozen solution)." % (stage, rid))
     row = finish_stage(reg, rid, stage, a)
+    clear_screen()
     banner("STAGE %s FINISHED        run %s" % (stage, rid))
     print()
     show_rows([row])
@@ -1497,6 +1510,7 @@ def cmd_grade(a):
         return 0
     if not os.path.exists(grader_path()):
         sys.exit("The grader is locked:  python workshop.py unlock 4 <password>")
+    clear_screen()
     for r in todo:
         snap = snap_path(r["run_id"], r["stage"])
         name = reg.data["runs"].get(r["run_id"], {}).get("name", "")
@@ -1580,6 +1594,7 @@ def cmd_skill(a):
     if reg.row(rid, "2"):
         sys.exit("Stage 2 of %s is already done. Next:  python workshop.py new s3 --task all" % rid)
     run = reg.data["runs"][rid]
+    clear_screen()
     if again:
         print("\n  Stage 2 is already running (the clock started at the first 'skill'). Here is the prompt again.")
     else:
@@ -1628,6 +1643,7 @@ def cmd_harvest(a):
     if os.path.exists(dst):
         rmtree(dst)
     shutil.copytree(src, dst)
+    clear_screen()
     found, share = detect_solution(dst, snap_path(rid, "1"))
     # Record only: line overlap cannot tell a helper from a cached answer, so the learner is not asked.
     # The percentage goes to the form for the debrief; --move-aside is for the instructor.
@@ -1724,6 +1740,7 @@ def cmd_unlock(a):
 def cmd_show(a):
     reg = Registry.load()
     rows = sorted(reg.data["rows"].values(), key=lambda r: (float(r["start"] or 0), r["stage"]))
+    clear_screen()
     if not rows:
         print("No results yet.")
     else:
