@@ -17,7 +17,7 @@
 The tool never talks to an agent: you paste every prompt. It sends nothing over the network; it only
 opens the results form in your browser. See README.md (Workshop), MANUAL.md and HOMEWORK.md.
 """
-import argparse, csv, glob, hashlib, io, json, math, os, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
+import argparse, csv, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
 from urllib.parse import urlencode
 
 KIT = os.path.dirname(os.path.abspath(__file__))
@@ -1226,13 +1226,13 @@ def memory_line(row):
 
 
 _SKIP_KEYS = ("content", "new_string", "old_string", "text", "new_source")
-_WIN_PATH = re.compile(r"(?<![\w])[A-Za-z]:[\\/][^\s\"'<>|;&(){}\[\],`]*")
-_POSIX_PATH = re.compile(r"(?<![\w.:/\\~$)\]-])/[A-Za-z0-9_.~@%+-][^\s\"'<>|;&(){}\[\],`]*")
-_HOME_PATH = re.compile(r"(?<![\w])(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%|%LOCALAPPDATA%|%APPDATA%)(?:[\\/][^\s\"'<>|;&(){}\[\],`]*)?")
-_TOKEN = re.compile(r"[^\s\"'|;&()<>=,`]+")
-_RUN_ID = re.compile(r"(?<![\w-])s[123]-[0-9a-f]{4}(?:-[tn][36]-[0-9a-f]{4})?(?![\w-])")
-_PYTHON = re.compile(r"(?:^|[\\/])python[\d.]*(?:\.exe)?$", re.I)
-_SYS_PREFIX = ("/tmp", "/dev/", "/usr/", "/bin/", "/proc/self", "/sys/")
+_PATH_END = r"\s\"'`|;&()<>,{}\[\]="                 # characters that end a path token
+_TOKEN = re.compile(r"[^%s]+" % _PATH_END)
+_RUN_ID = re.compile(r"^s[123]-[0-9a-f]{4}(?:-[tn][36]-[0-9a-f]{4})?$")
+_HOME_STORES = (".skills", ".grader", ".snapshots", ".prebuilt", ".guides")   # in the runs home, never for a run
+_PATCH = re.compile(r"\*\*\* begin patch(.*?)(?:\*\*\* end patch|$)", re.I | re.S)
+_WORKDIR = re.compile(r"[\"']?(?:workdir|cwd)[\"']?\s*:\s*[\"']([^\"']+)[\"']", re.I)
+_WRITER_T6 = re.compile(r"t6\.md|t6font", re.I)
 
 
 def _strings(v, out):
@@ -1270,80 +1270,124 @@ def _call_text(d):
     return "\n".join(parts)
 
 
-def _norm(p):
-    return os.path.normcase(os.path.normpath(p))
+_WIN = os.name == "nt"
 
 
-def _inside(p, folder):
-    f, q = _norm(folder), _norm(p)
-    return q == f or q.startswith(f + os.sep)
+def _fold(s):
+    """One spelling for path text: '/' separators, lower case on Windows."""
+    s = re.sub(r"\\+", "/", s)
+    return s.lower() if _WIN else s
 
 
-def _gitbash(p):
-    m = re.match(r"^/([A-Za-z])(/.*)?$", p)
-    return "%s:%s" % (m.group(1).upper(), m.group(2) or "/") if m else p
+def _npath(p):
+    """A normalised absolute or relative path ('/' separators, Git Bash /c/ -> c:/, no '..')."""
+    p = _fold(p)
+    if _WIN:
+        p = re.sub(r"^/([a-z])(?=/|$)", r"\1:", p)
+    p = posixpath.normpath(p) if p else p
+    return p + "/" if re.match(r"^[a-z]:$", p, re.I) else p
 
 
-def _ignored(p):
-    pl = p.replace("\\", "/").lower().rstrip("/.")
-    if _PYTHON.search(p) or pl.startswith(_SYS_PREFIX) or pl == "/dev/null" or pl in ("/tmp", "/dev"):
-        return True
-    if _inside(p, ws_home()):                 # other run folders and .skills live here: never ignored
-        return False
-    tmp = _norm(tempfile.gettempdir())
-    if _norm(p).startswith(tmp):
-        return True
-    if re.match(r"^[a-z]:/(windows|program files)", pl):
-        return True
-    if os.environ.get("TEMP") and _norm(p).startswith(_norm(os.environ["TEMP"])):
-        return True
-    for home in (M.codex_home(), M.claude_home()):         # the agent's own config: not ignored for memories and skills
-        if home and _norm(p).startswith(_norm(home)) and "memories" not in pl and "skills" not in pl:
-            return True
-    return False
+def _within(q, root):
+    return bool(root) and (q == root or q.startswith(root.rstrip("/") + "/"))
 
 
-def _scan_text(text, folder, writer):
-    """Hits (short strings) for outside reads in the text of one tool call."""
-    hits = []
-    own = os.path.basename(folder.rstrip("\\/"))
-    ph = "RUNFOLDER"
-    for variant in {folder, folder.replace("\\", "/"), folder.replace("/", "\\"), _gitbash_rev(folder)}:
-        if variant:
-            text = re.sub(re.escape(variant), ph, text, flags=re.I)
-    for rx in (_WIN_PATH, _POSIX_PATH, _HOME_PATH):
-        for m in rx.finditer(text):
-            p = m.group(0).rstrip(".:")
-            if p.startswith(ph):
-                continue
-            q = _gitbash(p) if rx is _POSIX_PATH else p
-            if not _ignored(q):
-                hits.append("outside path " + p)
+def _kit_roots():
+    """The kit folder; also the current folder if it is a kit copy (a learner may run another clone)."""
+    roots = [KIT]
+    cwd = os.getcwd()
+    if os.path.isfile(os.path.join(cwd, "workshop.py")) and os.path.isdir(os.path.join(cwd, "tasks")):
+        roots.append(cwd)
+    return list(dict.fromkeys(_npath(os.path.abspath(r)) for r in roots))
+
+
+def _iso_roots(folder):
+    own = _npath(os.path.abspath(folder))
+    runs = list(dict.fromkeys([_npath(os.path.abspath(ws_home())), posixpath.dirname(own.rstrip("/"))]))
+    return {"own": own, "runs": runs, "kits": _kit_roots(),
+            "codex_mem": _npath(os.path.join(os.path.abspath(M.codex_home()), "memories")),
+            "claude": _npath(os.path.abspath(M.claude_home()))}
+
+
+def _norm_call_text(text):
+    """Unescape JSON/JS string text, drop patch bodies (written text, not reads), fold case,
+    expand home variables, and turn Git Bash drive paths into c:/ paths."""
+    if "\\\\" in text:                     # escaped strings: \\ is a separator, \n a line break
+        text = re.sub(r"\\{2,}", "/", text)
+        text = re.sub(r"\\[nr]", "\n", text)
+        text = re.sub(r"\\t", " ", text)
+        text = re.sub(r"\\([\"'])", r"\1", text)
+    text = _PATCH.sub(lambda m: "\n".join(l for l in m.group(1).splitlines() if l.lstrip().startswith("*** ")), text)
+    text = _fold(text)
+    home = _npath(os.path.abspath(user_home()))
+    subs = [(r"\$env:userprofile|%userprofile%|\$\{home\}|\$home(?!\w)", home),
+            (r"(?<![\w~.$-])~(?=/|$|[%s])" % _PATH_END, home)]
+    for var in ("localappdata", "appdata"):
+        if os.environ.get(var.upper()):
+            subs.append((r"\$env:%s(?!\w)|%%%s%%" % (var, var), _npath(os.path.abspath(os.environ[var.upper()]))))
+    for rx, val in subs:
+        text = re.sub(rx, lambda m, v=val: v, text, flags=re.I)
+    if _WIN:
+        text = re.sub(r"(?<![\w/.:~-])/([a-z])(?=/)", r"\1:", text)
+    return text
+
+
+def _classify(q, roots):
+    """A short hit for one normalised path, or None when the path is allowed or not of interest."""
+    if _within(q, roots["own"]):
+        return None
+    if _within(q, roots["codex_mem"]) or re.search(r"(^|/)\.codex/memories(/|$)", q):
+        return "memory " + q[q.find("memories"):][:60]
+    if (_within(q, roots["claude"]) or "/.claude/" in q) and re.search(r"/projects/[^/]+/memory(/|$)", q):
+        return "memory " + q[q.find("/projects/") + 1:][:60]
+    for r in roots["runs"]:
+        if _within(q, r):
+            rel = q[len(r):].strip("/")
+            first = rel.split("/")[0]
+            if not rel:
+                return "runs home listed"
+            if _RUN_ID.match(first):
+                return "other run " + rel
+            if first in _HOME_STORES:
+                return "runs home " + rel
+            return "runs home " + rel if os.path.exists(q) else None
+    for r in roots["kits"]:
+        if _within(q, r):
+            return "kit " + (q[len(r):].strip("/") or "folder")
+    return None
+
+
+def _scan_text(text, roots, writer):
+    """Hits (short strings) for reads of guarded knowledge in the text of one tool call."""
+    text = _norm_call_text(text)
+    found = []
+    for r in sorted(set(roots["runs"] + roots["kits"] + [roots["codex_mem"]]), key=len, reverse=True):
+        rx = r"(?<![\w.-])%s(?=$|/|[%s])[^%s]*" % (re.escape(r.rstrip("/")), _PATH_END, _PATH_END)
+        found += [_npath(m.group(0).rstrip(".:")) for m in re.finditer(rx, text)]
+    found += [_npath(m.group(0)) for m in re.finditer(r"[^%s]*(?:\.codex/memories|/projects/[^/%s]+/memory)(?=/|$|[%s])[^%s]*"
+                                                     % ((_PATH_END,) * 4), text)]
+    cwds = []
+    for m in _WORKDIR.finditer(text):
+        w = _npath(m.group(1))
+        cwds.append(w if w.startswith("/") or re.match(r"^[a-z]:", w, re.I) else posixpath.join(roots["own"], w))
     for tok in _TOKEN.findall(text):
-        if re.match(r"^[A-Za-z]:[\\/]", tok) or tok.startswith(("/", "~", "$", "%")):
-            continue
-        segs = re.split(r"[\\/]", tok)
-        if ".." in segs:
-            rel = tok.replace(ph, folder)
-            if not _inside(os.path.join(folder, rel), folder):
-                hits.append("path leaves the run folder: " + tok)
-    for m in _RUN_ID.finditer(text):
-        if m.group(0) != own and not own.startswith(m.group(0) + "-"):
-            hits.append("other run folder " + m.group(0))
-    if ".skills" in text and not any("skills" in h for h in hits):
-        hits.append(".skills outside the run folder")
-    if writer and re.search(r"T6\.md|t6font", text, re.I):
-        hits.append("writer reads T6 files")
+        if ".." in tok.split("/") and not tok.startswith("/") and not re.match(r"^[a-z]:", tok, re.I):
+            found += [posixpath.normpath(posixpath.join(c, tok)) for c in (cwds or [roots["own"]])]
+    hits = []
+    for q in found:
+        h = _classify(q, roots)
+        if h and h not in hits:
+            hits.append(h)
+    if writer and _WRITER_T6.search(text):
+        hits.append("writer reads T6 (%s)" % _WRITER_T6.search(text).group(0))
     return hits
 
 
-def _gitbash_rev(p):
-    m = re.match(r"^([A-Za-z]):[\\/](.*)$", p)
-    return "/%s/%s" % (m.group(1).lower(), m.group(2).replace("\\", "/")) if m else ""
-
-
 def detect_outside_reads(paths, t0, t1, folder, writer=False):
-    """Scan the agent's tool calls in [t0, t1] for reads outside the run folder.
+    """Targeted scan of the agent's tool calls in [t0, t1] for reads of knowledge a run must not have:
+    another run folder or a store in the runs home (.skills, .grader, ...), the kit folder (tasks,
+    solutions, guides, ...: a run folder has its own copies), agent memory files, and for the
+    stage-1/2 writer (writer=True) any T6.md / t6font reference. Other paths are ignored.
     Returns (status, note): 'detected' (note = first 3 hits), 'not_detected', or 'unknown' (no log).
     A scan finds some outside reads; it is not proof."""
     if isinstance(paths, str):
@@ -1351,6 +1395,7 @@ def detect_outside_reads(paths, t0, t1, folder, writer=False):
     paths = [p for p in (paths or []) if p and os.path.exists(p)]
     if not paths:
         return "unknown", ""
+    roots = _iso_roots(folder)
     hits = []
     for path in paths:
         calls = []
@@ -1364,7 +1409,7 @@ def detect_outside_reads(paths, t0, t1, folder, writer=False):
             calls = [x for x in calls if x[0] is not None and t0 - 1 <= x[0] <= t1 + 1]
         for _, text in calls:
             if text:
-                for h in _scan_text(text, folder, writer):
+                for h in _scan_text(text, roots, writer):
                     if h not in hits:
                         hits.append(h)
     if not hits:

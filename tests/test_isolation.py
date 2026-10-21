@@ -20,10 +20,25 @@ def write_log(path, t, calls, claude=False):
     return path
 
 
+def write_exec(path, t, codes):
+    """Codex 'exec' tool calls: JavaScript code with JSON-escaped strings (two-backslash separators)."""
+    with open(path, "w") as f:
+        for i, code in enumerate(codes):
+            f.write(json.dumps({"timestamp": iso(t + i), "type": "response_item", "payload": {
+                "type": "custom_tool_call", "name": "exec", "input": code}}) + "\n")
+    return path
+
+
+def esc(p):
+    """A path as Codex writes it in exec code: each separator is two backslash characters."""
+    return p.replace("\\", "/").replace("/", "\\\\")
+
+
 class OutsideReadsTest(unittest.TestCase):
     def setUp(self):
         self.w, self.home = fresh_ws()
-        self.folder = os.path.join(self.w.ws_home(), "s1-aaaa")
+        self.runs = self.w.ws_home()
+        self.folder = os.path.join(self.runs, "s1-aaaa")
         os.makedirs(self.folder)
         self.t = time.time()
         self.log = os.path.join(self.home, "log.jsonl")
@@ -32,36 +47,100 @@ class OutsideReadsTest(unittest.TestCase):
         write_log(self.log, self.t, [cmd], claude=claude)
         return self.w.detect_outside_reads([self.log], self.t - 5, self.t + 5, self.folder, writer=writer)
 
+    def scan_exec(self, code, writer=False, folder=None):
+        write_exec(self.log, self.t, [code])
+        return self.w.detect_outside_reads([self.log], self.t - 5, self.t + 5, folder or self.folder, writer=writer)
+
+    # ---------------------------------------------------------------- allowed, or not of interest
     def test_inside_path(self):
         st, note = self.scan("cat %s/tasks/T3.md && ls bin examples" % self.folder)
         self.assertEqual((st, note), ("not_detected", ""))
         st, _ = self.scan("python bin/vesper run game.vsp 2>/dev/null; cat /tmp/x")
         self.assertEqual(st, "not_detected")
-
-    def test_absolute_outside_path(self):
-        st, note = self.scan("cat /home/other/secret.txt")
-        self.assertEqual(st, "detected")
-        self.assertIn("/home/other/secret.txt", note)
-        st, note = self.scan("type C:\\Users\\other\\notes.txt")
-        self.assertEqual(st, "detected")
-
-    def test_dotdot_escape(self):
-        st, note = self.scan("cat ../notes.txt")
-        self.assertEqual(st, "detected")
         st, _ = self.scan("cat examples/../tasks/T3.md")
         self.assertEqual(st, "not_detected")
 
-    def test_other_run_folder_name(self):
-        st, note = self.scan("ls s3-bbbb-t3-cccc")
+    def test_paths_outside_the_guarded_places_are_ignored(self):
+        for cmd in ("cat /home/other/secret.txt", "type C:\\Users\\other\\notes.txt", "ls /usr/lib /etc",
+                    "curl https://example.com/a/../b", "ls -la ~", "cat ~/notes.txt", "dir %USERPROFILE%"):
+            self.assertEqual(self.scan(cmd), ("not_detected", ""), cmd)
+
+    def test_own_folder_with_escaped_backslashes(self):
+        code = ('const r = await tools.exec_command({cmd:"Get-Content tasks/T3.md",workdir:"%s"});\n'
+                'text(await tools.view_image({path:"%s"}));'
+                % (esc(self.folder), esc(os.path.join(self.folder, "out", "a.png"))))
+        self.assertEqual(self.scan_exec(code), ("not_detected", ""))
+
+    def test_non_path_tokens(self):
+        code = ('const ok = /skill/i.test(name) && !/extra/.test(x); for (const f of files) { f: 1 };\n'
+                'const r = await tools.exec_command({cmd:"ls ~; Get-ChildItem f:",workdir:"%s"});' % esc(self.folder))
+        self.assertEqual(self.scan_exec(code), ("not_detected", ""))
+
+    def test_agent_plugin_cache(self):
+        cache = os.path.join(self.w.M.codex_home(), "plugins", "cache", "curated", "superpowers", "6.4.2", "skills",
+                             "using-superpowers", "SKILL.md")
+        self.assertEqual(self.scan("cat %s" % cache), ("not_detected", ""))
+        code = 'await tools.exec_command({cmd:"Get-Content %s"});' % esc("C:/Users/x/.codex/plugins/cache/a/SKILL.md")
+        self.assertEqual(self.scan_exec(code), ("not_detected", ""))
+
+    def test_dotdot_in_written_or_quoted_text(self):
+        st, _ = self.scan('echo "Copy the helpers from ../templates/ before you start" > notes.txt')
+        self.assertEqual(st, "not_detected")
+        code = ('await tools.apply_patch("*** Begin Patch\\n*** Add File: %s\\n+Copy ../templates/. and read '
+                '../s1-dddd/x and T6.md\\n*** End Patch\\n");' % esc(os.path.join(self.folder, "skill-out", "SKILL.md")))
+        self.assertEqual(self.scan_exec(code, writer=True), ("not_detected", ""))
+
+    def test_with_skill_run_reads_its_own_installed_skill(self):
+        f = os.path.join(self.runs, "s3-aaaa-t3-bbbb")
+        os.makedirs(f)
+        code = 'await tools.exec_command({cmd:"Get-Content .agents/skills/vesper16/SKILL.md",workdir:"%s"});' % esc(f)
+        self.assertEqual(self.scan_exec(code, folder=f), ("not_detected", ""))
+
+    # ---------------------------------------------------------------- guarded places
+    def test_other_run_folder(self):
+        st, note = self.scan("ls %s" % os.path.join(self.runs, "s1-dddd", "solutions"))
+        self.assertEqual(st, "detected")
+        self.assertIn("other run s1-dddd/solutions", note)
+        st, note = self.scan("ls ../s3-bbbb-t3-cccc")
         self.assertEqual(st, "detected")
         self.assertIn("s3-bbbb-t3-cccc", note)
-        other = os.path.join(self.w.ws_home(), "s1-dddd", "solutions")
-        st, _ = self.scan("ls %s" % other)
+
+    def test_other_run_folder_with_escaped_backslashes(self):
+        other = os.path.join(self.runs, "s3-bbbb-n3-cccc")
+        code = 'await tools.exec_command({cmd:"Get-Content solutions/T3.vsa",workdir:"%s"});' % esc(other)
+        st, note = self.scan_exec(code)
+        self.assertEqual(st, "detected")
+        self.assertIn("other run s3-bbbb-n3-cccc", note)
+
+    def test_dotdot_escape(self):
+        st, _ = self.scan("cat ../notes.txt")             # no such file in the runs home: nothing to read
+        self.assertEqual(st, "not_detected")
+        open(os.path.join(self.runs, "notes.txt"), "w").close()
+        st, note = self.scan("cat ../notes.txt")
+        self.assertEqual(st, "detected")
+        self.assertIn("runs home notes.txt", note)
+        st, _ = self.scan("cd .. && ls")
         self.assertEqual(st, "detected")
 
-    def test_skills_folder(self):
-        st, note = self.scan("ls ~/.skills/s1-aaaa")
+    def test_skills_store(self):
+        st, note = self.scan("cat %s" % os.path.join(self.runs, ".skills", "s1-aaaa", "vesper16", "SKILL.md"))
         self.assertEqual(st, "detected")
+        self.assertIn("runs home .skills/s1-aaaa", note)
+        st, _ = self.scan("cat ../.skills/s1-aaaa/vesper16/SKILL.md")
+        self.assertEqual(st, "detected")
+
+    def test_kit_files(self):
+        kit = self.w.KIT
+        st, note = self.scan("cat %s" % os.path.join(kit, "solutions", "T3.vsa"))
+        self.assertEqual(st, "detected")
+        self.assertIn("kit solutions/t3.vsa", note.lower())
+        code = 'await tools.exec_command({cmd:"Get-Content MANUAL.md",workdir:"%s"});' % esc(kit)
+        st, _ = self.scan_exec(code)
+        self.assertEqual(st, "detected")
+        if os.name == "nt":                                 # the Git Bash spelling of the same folder
+            gb = "/" + kit[0].lower() + kit[2:].replace("\\", "/")
+            st, _ = self.scan("cat %s/guides/x.md" % gb)
+            self.assertEqual(st, "detected")
 
     def test_writer_reads_t6(self):
         st, _ = self.scan("cat tasks/T6.md", writer=False)
@@ -70,27 +149,40 @@ class OutsideReadsTest(unittest.TestCase):
         self.assertEqual(st, "detected")
         st, _ = self.scan("python t6font.py", writer=True)
         self.assertEqual(st, "detected")
+        st, note = self.scan("cat %s" % os.path.join(self.w.KIT, "tasks", "T6.md"), writer=True)
+        self.assertEqual(st, "detected")
+        self.assertIn("kit tasks/t6.md", note.lower())
+
+    def test_memory_files(self):
+        st, note = self.scan("cat ~/.codex/memories/MEMORY.md")
+        self.assertEqual(st, "detected")
+        self.assertIn("memory", note)
+        st, _ = self.scan("ls %s" % os.path.join(self.w.M.codex_home(), "memories"))
+        self.assertEqual(st, "detected")
+        st, _ = self.scan("cat %s" % os.path.join(self.w.M.claude_home(), "projects", "p", "memory", "MEMORY.md"))
+        self.assertEqual(st, "detected")
 
     def test_claude_tool_use(self):
-        st, _ = self.scan("cat /home/other/x", claude=True)
+        st, _ = self.scan("cat ../s1-dddd/x", claude=True)
         self.assertEqual(st, "detected")
 
     def test_only_tool_calls_and_window(self):
+        bad = os.path.join(self.runs, "s1-dddd", "x")
         with open(self.log, "w") as f:      # prose mentioning a path is not a tool call
             f.write(json.dumps({"timestamp": iso(self.t), "type": "response_item", "payload": {
-                "type": "message", "content": [{"type": "output_text", "text": "see /home/other/x"}]}}) + "\n")
+                "type": "message", "content": [{"type": "output_text", "text": "see %s" % bad}]}}) + "\n")
         st, _ = self.w.detect_outside_reads([self.log], self.t - 5, self.t + 5, self.folder)
         self.assertEqual(st, "not_detected")
-        write_log(self.log, self.t - 500, ["cat /home/other/x"])      # outside [t0, t1]
+        write_log(self.log, self.t - 500, ["cat %s" % bad])      # outside [t0, t1]
         st, _ = self.w.detect_outside_reads([self.log], self.t - 5, self.t + 5, self.folder)
         self.assertEqual(st, "not_detected")
 
     def test_note_limits(self):
-        cmd = " ".join("/home/o/%s%s" % (c, "x" * 80) for c in "abcdef")
+        cmd = " ".join(os.path.join(self.runs, "s1-%s" % (c * 4), "x" * 80) for c in "bcdef0")
         st, note = self.scan(cmd)
         self.assertEqual(st, "detected")
         self.assertLessEqual(len(note), 200)
-        self.assertLessEqual(note.count("outside path"), 3)
+        self.assertLessEqual(note.count("other run"), 3)
 
     def test_no_log(self):
         self.assertEqual(self.w.detect_outside_reads([], 0, 1, self.folder), ("unknown", ""))
