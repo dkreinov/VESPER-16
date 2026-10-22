@@ -2442,6 +2442,25 @@ def detect_solution(skill_dir, snapshot):
     return [(rel, "%d lines in blocks of your T3 solution" % k) for rel, k in per.items()], share
 
 
+REPEAT_NOTE = [
+    "  Why stage 3 also runs a DIFFERENT task (T6):",
+    "  A new agent can pass T3 again with your skill for a reason that is not real knowledge:",
+    "    1. Memory: the agent remembers the earlier session. (This is why memory is off in stage 3.)",
+    "    2. The skill holds parts of the T3 answer itself.",
+    "  So a T3 pass alone proves little. T6 is a different task: a gain there shows knowledge that transfers.",
+]
+
+
+def harvest_note(share):
+    """What the learner reads after harvest: no code, only the measured share and why T6 exists."""
+    if share:
+        head = ("  Your skill shares %d%% of its code with your T3 solution (a line match: it cannot tell "
+                "a useful helper from the answer)." % round(share * 100))
+    else:
+        head = "  No copied block of your T3 solution was found in your skill (a line match; it cannot see the answer in other words)."
+    return [head] + REPEAT_NOTE
+
+
 def block_lines(skill_dir, blocks):
     """The lines harvest prints for the blocks (see the W8 step)."""
     if not blocks:
@@ -2566,14 +2585,17 @@ def cmd_harvest(a):
     print()
     show_rows([row])
     print("\n  Skill:                    %s" % dst)
-    print("  Stage-1 game code in skill: %s  (recorded for the debrief, nothing to do)" % status)
+    if status == "removed":
+        print("  Shared T3 code: moved aside by the instructor (--move-aside)")
     print("  Skill help the agent used: %s (drawn method: %s)" % (used or "unknown", run["method"]))
     print(memory_line(row))
     print(isolation_lines(row))
     memories_card(reg)
     print("\n" + SAVED_LINE)
     print()
-    print("\n".join(block_lines(dst, blocks)))
+    print("\n".join(harvest_note(share)))
+    if getattr(a, "blocks", False):      # instructor view: where the shared code is
+        print("\n".join(block_lines(dst, blocks)))
     next_box(["python workshop.py new s3 --task all",
               "(cmd/PowerShell: one command; it starts all four runs)"],
              "stage 3: FOUR new agent threads (T3, T3 control, T6, T6 control). Run:")
@@ -2768,6 +2790,7 @@ def parse(argv):
     s = sub.add_parser("harvest")
     s.add_argument("--no-form", action="store_true")
     s.add_argument("--move-aside", action="store_true")
+    s.add_argument("--blocks", action="store_true", help="instructor: list where the shared T3 code is in the skill")
     s.add_argument("--remove-global", action="store_true")
     s.set_defaults(func=cmd_harvest)
     s = sub.add_parser("grade")

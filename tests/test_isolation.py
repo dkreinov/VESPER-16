@@ -371,10 +371,19 @@ class HarvestStepTest(unittest.TestCase):
         w, _ = fresh_ws()
         rid, out = fakes.ready_for_s3(w)
         self.assertNotIn("Before stage 3 (2 minutes)", out)
-        self.assertIn("  No block of your T3 solution was found in your skill "
-                      "(line match; it cannot see knowledge in your own words).", out)
-        self.assertLess(out.index("No block of your T3"), out.index("NEXT:"))
+        self.assertIn("  No copied block of your T3 solution was found in your skill", out)
+        self.assertIn("  Why stage 3 also runs a DIFFERENT task (T6):", out)
+        self.assertIn("    1. Memory: the agent remembers the earlier session.", out)
+        self.assertIn("    2. The skill holds parts of the T3 answer itself.", out)
+        self.assertLess(out.index("Why stage 3 also runs"), out.index("NEXT:"))
+        self.assertNotIn("Knowledge or the answer?", out)      # learners see no code blocks
         self.assertIn("Isolation check:", out)
+
+    def test_harvest_note_with_share(self):
+        w, _ = fresh_ws()
+        lines = w.harvest_note(0.13)
+        self.assertIn("shares 13% of its code with your T3 solution", lines[0])
+        self.assertTrue(any("DIFFERENT task (T6)" in x for x in lines))
 
 
 if __name__ == "__main__":
