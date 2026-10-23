@@ -2,7 +2,7 @@
 import contextlib, io, json, os, sys, tempfile, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
-from fakes import fresh_ws, run  # noqa: E402
+from fakes import fresh_ws, run, flat  # noqa: E402
 
 MEMORY = "The skill will be used later, on other tasks, by agents that do not have the memory of this session."
 NO_GUIDE = "Do not use a skill-creator or skill-writing skill or guide. Write the skill from your own knowledge."
@@ -65,14 +65,12 @@ class HarvestMethodUsed(unittest.TestCase):
         rid, out = self._harvest(True)
         row = self.w.Registry.load().row(rid, "2")
         self.assertEqual(row["method_used"], "skill-creator")
-        self.assertIn("Skill help the agent used: skill-creator (drawn method: plain)", out)
         with open(os.path.join(self.w.ws_home(), "results.csv"), encoding="utf-8") as f:
             self.assertEqual(f.readline().strip().split(",")[-8:], ["method_used", "memory_used", "effort", "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun"])
 
     def test_none_when_not_mentioned(self):
         rid, out = self._harvest(False)
         self.assertEqual(self.w.Registry.load().row(rid, "2")["method_used"], "none")
-        self.assertIn("Skill help the agent used: none (drawn method: plain)", out)
 
     def _detect(self, *blocks):
         """blocks: (role, content-block) pairs written as Claude-style log lines inside the window."""

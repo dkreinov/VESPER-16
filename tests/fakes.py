@@ -1,4 +1,4 @@
-import datetime as dt, importlib, io, json, os, sys, tempfile
+import datetime as dt, importlib, io, json, os, re, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.environ["VESPER_NO_CLIPBOARD"] = "1"      # tests never write the real clipboard
@@ -99,3 +99,8 @@ def ready_for_s3(w, method="plain"):
     with contextlib.redirect_stdout(out):
         run(w, "harvest", "--no-form")
     return rid, out.getvalue()
+
+
+def flat(text):
+    """Text with each wrapped line joined to the previous one: long lines are wrapped at 72 characters."""
+    return re.sub(r"(?<=\S)\n\s*", " ", str(text))

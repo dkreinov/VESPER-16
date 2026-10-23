@@ -3,7 +3,7 @@ import contextlib, io, os, sys, unittest
 from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from urllib.parse import parse_qs, urlparse  # noqa: E402
-from fakes import fresh_ws, run, ready_for_s3, install_fake_grader  # noqa: E402
+from fakes import fresh_ws, run, ready_for_s3, install_fake_grader, flat  # noqa: E402
 
 
 class TTYOut(io.StringIO):
@@ -41,7 +41,6 @@ class Submit(unittest.TestCase):
         return self.w.Registry.load().data["rows"]
 
     def test_done_and_harvest_no_browser_no_answers(self):
-        self.assertIn("python workshop.py submit", self.harvest_out)
         self.assertNotIn("RESULTS FORM", self.harvest_out)
         out, wb = cap(self.w, "done")           # updates the finished stage 1
         self.assertFalse(wb.called)
@@ -51,7 +50,7 @@ class Submit(unittest.TestCase):
     def test_refuses_when_locked_and_ungraded(self):
         self.assertFalse(os.path.exists(self.w.grader_path()))
         out, wb = cap(self.w, "submit", tty_in="\n")
-        self.assertIn("Unlock the grader first:  python workshop.py unlock 4 <password from the slide>  (then run submit again)", out)
+        self.assertIn("Unlock the grader first:  python workshop.py unlock 4 <password from the slide>  (then run submit again)", flat(out))
         self.assertNotIn("Submit anyway", out)
         self.assertFalse(wb.called)
         self.assertFalse(any(r.get("submitted_rev") for r in self.rows().values()))
@@ -120,7 +119,7 @@ class Submit(unittest.TestCase):
         clips = []
         out, wb = cap(self.w, "submit", tty_in="\n\n", clips=clips)
         self.assertIn("2 results to submit, in 2 form responses.", out)
-        self.assertIn("(response 2 of 2)", out)
+        self.assertIn("(response 2 of 2)", flat(out))
         self.assertEqual(len(clips), 2)
         self.assertTrue(all(len(c) <= 4000 for c in clips))
         self.assertIn("All 2 results submitted", out)

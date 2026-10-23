@@ -2,7 +2,7 @@
 import contextlib, io, json, os, sys, tempfile, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
-from fakes import fresh_ws, run, iso  # noqa: E402
+from fakes import fresh_ws, run, iso, flat  # noqa: E402
 
 
 def write_log(path, t, calls, claude=False):
@@ -306,7 +306,8 @@ class DoneFieldsTest(unittest.TestCase):
         w, rid, out = self._s1(60, ["ls"])
         row = w.Registry.load().row(rid, "1")
         self.assertEqual((row["isolation"], row["overrun"]), ("not_detected", ""))   # no time box in stage 1
-        self.assertIn("  Isolation check: not_detected. (A scan finds some outside reads; not proof.)", out)
+        self.assertIn("Isolation OK", out)
+        self.assertNotIn("not proof", out)
         self.assertNotIn("time box: flagged", out)
 
     def test_detected_and_overrun(self):
@@ -314,7 +315,8 @@ class DoneFieldsTest(unittest.TestCase):
         row = w.Registry.load().row(rid, "1")
         self.assertEqual((row["isolation"], row["overrun"]), ("detected", ""))      # 700 s in stage 1: not an overrun
         self.assertTrue(row["isolation_note"])
-        self.assertIn("  Isolation check: detected.", out)
+        self.assertIn("Isolation CHECK (detected)", out)
+        self.assertIn(row["isolation_note"][:20], flat(out))
         self.assertNotIn("time box: flagged", out)
 
     def _s3(self, setup_s, prompt_before_cutoff, log=True):
@@ -377,7 +379,7 @@ class HarvestStepTest(unittest.TestCase):
         self.assertIn("    2. The skill holds parts of the T3 answer itself.", out)
         self.assertLess(out.index("Why stage 3 also runs"), out.index("NEXT:"))
         self.assertNotIn("Knowledge or the answer?", out)      # learners see no code blocks
-        self.assertIn("Isolation check:", out)
+        self.assertIn("Isolation ", out)
 
     def test_harvest_note_with_share(self):
         w, _ = fresh_ws()

@@ -2,7 +2,7 @@
 import contextlib, io, json, os, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
-from fakes import fresh_ws, run  # noqa: E402
+from fakes import fresh_ws, run, flat  # noqa: E402
 
 
 def capture(fn, *a):
@@ -175,8 +175,8 @@ class TwoRunsTest(unittest.TestCase):
         t6, _ = self._new("T6", "--name", "mira")
         t3, _ = self._new("T3")
         out = capture(run, self.w, "show")
-        self.assertIn("Active: stage 3 of %s (T6). Next:  python workshop.py done %s" % (t6, t6), out)
-        self.assertIn("Active: stage 3 of %s (T3)" % t3, out)
+        self.assertIn("Active: stage 3 of %s (T6). Next:  python workshop.py done %s" % (t6, t6), flat(out))
+        self.assertIn("Active: stage 3 of %s (T3)" % t3, flat(out))
         run(self.w, "done", t6, "--no-form")
         run(self.w, "done", t3, "--no-form")
         out = capture(self.w.show_compare, self.w.Registry.load())
@@ -203,7 +203,8 @@ class FourRunsTest(unittest.TestCase):
         self.assertEqual(sorted(lab.values()), sorted(["(T3 with skill)", "(T3 without skill)",
                                                        "(T6 with skill)", "(T6 without skill)"]))
         out = capture(run, self.w, "done", ids[0], "--no-form")
-        self.assertIn("NEXT: 3 agents are still working. When each one is done (or at 15 min), run its line:", out)
+        self.assertIn("NEXT: 3 agents are still working.", out)
+        self.assertIn("run its line:", out)
         self.assertNotIn("BOTH", out)
         self.assertIn("After ALL your stage-3 agents are done", out)
         for i in ids[1:]:

@@ -79,7 +79,7 @@ class AllDoneBoxTest(unittest.TestCase):
         self.reg.set_row("s1-a", "1", dict(task="T3", grading="ungraded", start="1"))
         out = self.box()
         self.assertIn("NEXT: all agents are done. Now:", out)
-        for n, t in enumerate(("unlock 4 <password from the slide>   (once)", "grade", "show", "submit"), 1):
+        for n, t in enumerate(("unlock 4 <password from the slide>", "grade", "show", "submit"), 1):
             self.assertIn("%d. python workshop.py %s" % (n, t), out)
 
     def test_unlocked_ungraded(self):

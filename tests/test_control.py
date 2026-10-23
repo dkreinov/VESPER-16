@@ -2,7 +2,7 @@
 import contextlib, io, json, os, sys, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
-from fakes import fresh_ws, run  # noqa: E402
+from fakes import fresh_ws, run, flat  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -35,7 +35,6 @@ class EffortTest(unittest.TestCase):
         row = w.Registry.load().row(rid, "1")
         self.assertEqual(row["effort"], "medium")
         self.assertEqual(row["model"], "gpt-6.1-sol")
-        self.assertIn("gpt-6.1-sol/medium", out)
         with open(os.path.join(w.ws_home(), "results.csv"), encoding="utf-8") as f:
             self.assertIn("effort", f.readline().strip().split(","))
 
@@ -71,9 +70,9 @@ class PayBackTest(unittest.TestCase):
         w, _ = fresh_ws()
         reg = w.Registry.load()
         out = capture(w.payback, reg, {}, {"elapsed_min": "", "cost_usd": ""}, {})
-        self.assertIn("  Skill creation: unknown min, unknown estimated. Break-even not established.", out)
+        self.assertIn("  Skill creation: unknown min, unknown estimated. Break-even not established.", flat(out))
         out = capture(w.payback, reg, {}, {"elapsed_min": "2.5", "cost_usd": "0.5"}, {})
-        self.assertIn("  Skill creation: 2.5 min, $0.50 estimated. Break-even not established.", out)
+        self.assertIn("  Skill creation: 2.5 min, $0.50 estimated. Break-even not established.", flat(out))
 
     def test_hidden_when_ungraded(self):
         out = self._compare("", "")
@@ -112,22 +111,22 @@ class TaskAllTest(unittest.TestCase):
             self.assertIn("MIRA", fh.read())
         keys = self.w.start_order_keys(self.s1)        # pages follow the randomised start order (seed = stage-1 run)
         for i, k in enumerate(keys, 1):
-            self.assertIn("RUN %d of 4  %s" % (i, self.w.ALL_DESC[k]), out)
+            self.assertIn("RUN %d of 4  %s" % (i, self.w.ALL_DESC[k]), flat(out))
         self.assertIn("RUN %d of 4  T6 WITH the skill (a different task that shares components with T3)"
-                      % (keys.index("t6") + 1), out)
+                      % (keys.index("t6") + 1), flat(out))
         self.assertNotIn("real test", out)
-        self.assertIn("Time box 10 min: stop any agent still working at 10 min, then run its done line.", out)
+        self.assertIn("Time box 10 min: stop any agent still working at 10 min, then run its done line.", flat(out))
         self.assertLess(out.index("Start in this order"), out.index("RUN 1 of 4"))
         self.assertIn("Together, these 4 runs are a small benchmark of your skill", out)
         for i in runs:
             self.assertIn("python workshop.py done " + i, out)
         for n in (str(keys.index("n3") + 1), str(keys.index("n6") + 1)):   # the control prompts: no skill sentences
             cp = out.split("PROMPT %s " % n, 1)[1].split("END OF PROMPT %s" % n, 1)[0]
-            self.assertNotIn("vesper16 skill", cp)
-            self.assertNotIn("SKILL NOT FOUND", cp)
-            self.assertNotIn("Load the skill", cp)
-            self.assertIn("You have 6 runs", cp)
-        self.assertIn("Use the vesper16 skill", out)       # the other two prompts keep it
+            self.assertNotIn("vesper16 skill", flat(cp))
+            self.assertNotIn("SKILL NOT FOUND", flat(cp))
+            self.assertNotIn("Load the skill", flat(cp))
+            self.assertIn("You have 6 runs", flat(cp))
+        self.assertIn("Use the vesper16 skill", flat(out))       # the other two prompts keep it
 
     def _graded(self, t3, n3, t6, n6, tm=(2, 5, 3, 6)):
         capture(run, self.w, "new", "s3", "--task", "all", "--name", "MIRA")
@@ -143,17 +142,17 @@ class TaskAllTest(unittest.TestCase):
         out = capture(self.w.show_compare, reg, ids["n3"])
         self.assertIn("T3: WITH vs WITHOUT the skill", out)
         out = capture(self.w.show_compare, reg)
-        self.assertIn("T6: WITH vs WITHOUT the skill - different task; shares components with T3", out)
+        self.assertIn("T6: WITH vs WITHOUT the skill - different task; shares components with T3", flat(out))
         self.assertNotIn("YOUR RESULT", out)
-        self.assertIn("  Leakage check: Observed score gains: T3 +60; T6 +40. "
-                      "These results neither identify nor rule out answer reuse.", out)
+        self.assertIn("Leakage check: Observed score gains: T3 +60; T6 +40. "
+                      "These results neither identify nor rule out answer reuse.", flat(out))
         self.assertNotIn("much larger", out)
         self.assertEqual(out.count("Leakage check"), 1)
 
     def test_failed_control_no_change_column_and_score_only_gains(self):
         reg, ids = self._graded("85", "10", "70", "5", tm=(3, 0.8, 4, 0.5))
         out = capture(self.w.show_compare, reg)
-        self.assertIn("At least one attempt failed. Costs describe attempts, not equal-quality savings.", out)
+        self.assertIn("At least one attempt failed. Costs describe attempts, not equal-quality savings.", flat(out))
         self.assertNotIn("Control failed", out)
         self.assertIn("85 FAIL", out)
         self.assertIn("10 FAIL", out)
@@ -184,8 +183,8 @@ class TaskAllTest(unittest.TestCase):
     def test_observed_note_once_and_settings_differ(self):
         reg, ids = self._graded("100", "40", "90", "50")
         out = capture(self.w.show_compare, reg)
-        self.assertEqual(out.count("Observed results: one attempt per condition. Check pass/fail before time or cost; reliability is unknown."), 1)
-        self.assertEqual(out.count("Estimated cost under the kit's price assumptions."), 1)
+        self.assertEqual(flat(out).count("Observed results: one attempt per condition. Check pass/fail before time or cost; reliability is unknown."), 1)
+        self.assertEqual(flat(out).count("Estimated cost under the kit's price assumptions."), 1)
         self.assertEqual(out.count("Settings differ: this is not a matched comparison."), 2)
         self.assertNotIn("(same model)", out)
         self.assertIn("100 PASS", out)
@@ -260,7 +259,7 @@ class TaskAllTest(unittest.TestCase):
         self.assertNotIn("no skill (stage 1", out)
         self.assertEqual(out.count("WITH vs WITHOUT the skill"), 2)
         self.assertNotIn("T3 vs T6", out)
-        self.assertEqual(out.count("different task; shares components with T3"), 1)
+        self.assertEqual(flat(out).count("different task; shares components with T3"), 1)
 
     def test_waiting_line_for_incomplete_pair(self):
         reg, ids = self._graded("100", "40", "90", "50")

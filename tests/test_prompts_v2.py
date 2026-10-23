@@ -2,7 +2,7 @@
 import contextlib, io, os, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
-from fakes import fresh_ws, run  # noqa: E402
+from fakes import fresh_ws, run, flat  # noqa: E402
 
 WORK_ALONE = "Work on your own until the task is done. Do not stop to ask for approval or a design review."
 
@@ -34,7 +34,7 @@ class PromptsV2(unittest.TestCase):
             run(self.w, "new", "s3", "--task", "T6", "--name", "mira")
         text = out.getvalue()
         for s in ("model gpt-6-luna", "Time box 10 min: stop any agent still working at 10 min, then run its done line.", "6 runs each", "RUN  T6 (new task)", "name on T6: MIRA"):
-            self.assertIn(s, text)
+            self.assertIn(s, flat(text))
         self.assertNotIn("Haiku", text)
 
 

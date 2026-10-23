@@ -3,7 +3,7 @@ import os, sys, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes
-from fakes import fresh_ws, run
+from fakes import fresh_ws, run, flat
 from test_submit import cap
 
 
@@ -21,7 +21,7 @@ class Judge(unittest.TestCase):
 
     def test_harvest_prints_hint(self):
         _, out = self._ready()
-        self.assertIn("Want a better check (2 minutes, optional)?  python workshop.py judge", out)
+        self.assertIn("Optional (2 min): python workshop.py judge", out)
 
     def test_error_without_skill(self):
         with self.assertRaises(SystemExit) as cm:
@@ -44,7 +44,7 @@ class Judge(unittest.TestCase):
             self.assertIn("KNOWLEDGE", t)
             self.assertIn("ANSWER", t)
         self.assertIn("Open a NEW thread (any model; memory off)", out)
-        self.assertIn("Nothing is graded or sent.", out)
+        self.assertIn("Nothing is graded or sent.", flat(out))
         run(w, "cleanup", "--yes", "--no-copy")
         self.assertFalse(os.path.exists(folder))
 

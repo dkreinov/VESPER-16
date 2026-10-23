@@ -17,7 +17,7 @@
 The tool never talks to an agent: you paste every prompt. It sends nothing over the network; it only
 opens the results form in your browser. See README.md (Workshop), MANUAL.md and HOMEWORK.md.
 """
-import argparse, csv, difflib, fnmatch, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
+import argparse, csv, difflib, fnmatch, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, textwrap, time, webbrowser, zipfile
 from urllib.parse import urlencode
 import urllib.parse
 
@@ -67,6 +67,61 @@ def c_prompt(t): return _sgr("35", t)
 def c_link(t): return _sgr("4", t)
 def c_bold(t): return _sgr("1", t)
 def c_good(t): return _sgr("1;32", t)
+
+
+MAXW = 72                                          # no learner line is longer than this
+_ESC_LINE = re.compile(r"^(\x1b\[[0-9;]*m)(.*)(\x1b\[0m)$")
+_ATOM = re.compile(r"^\s*(?:[A-Za-z]:[\/]|/|~|\.{1,2}[\/]|python |bin/|https?:)")
+import builtins  # noqa: E402
+_builtin_print = builtins.print
+_WRAP = [True]                                     # doctor text is copied into help prompts: not wrapped
+
+
+def wrap_line(line, width=MAXW):
+    """Wrap one line at word boundaries, same indent. Boxes, paths and commands stay as they are."""
+    m = _ESC_LINE.match(line)
+    if m:
+        return [m.group(1) + x + m.group(3) for x in wrap_line(m.group(2), width)]
+    if len(line) <= width or "\x1b" in line:
+        return [line]
+    body = line.lstrip(" ")
+    if not body or body[0] in "|+=" or " " not in body or _ATOM.match(line):
+        return [line]
+    ind = line[:len(line) - len(body)]
+    out, cur = [], ind
+    for word in body.split(" "):
+        if cur.strip() and len(cur) + 1 + len(word) > width:
+            out.append(cur.rstrip())
+            cur = ind + word
+        else:
+            cur = (cur + " " + word) if cur.strip() else cur + word
+    out.append(cur.rstrip())
+    return out
+
+
+def print(*args, sep=" ", end="\n", file=None, flush=False):   # noqa: A001  (every learner line goes through here)
+    text = sep.join(str(x) for x in args)
+    if file is None and sep == " " and _WRAP[0]:
+        text = "\n".join(y for x in text.split("\n") for y in wrap_line(x))
+    _builtin_print(text, end=end, file=file, flush=flush)
+
+
+def term_cols():
+    return shutil.get_terminal_size().columns
+
+
+def chunk_lines(chunks, indent=2, gap=3, width=MAXW):
+    """Join short chunks with gaps into lines no longer than width."""
+    lines, cur = [], ""
+    for c in chunks:
+        if cur and indent + len(cur) + gap + len(c) > width:
+            lines.append(" " * indent + cur)
+            cur = c
+        else:
+            cur = (cur + " " * gap + c) if cur else c
+    if cur:
+        lines.append(" " * indent + cur)
+    return lines
 
 
 def clear_screen():
@@ -356,7 +411,12 @@ def s3_header(reg, a, both, total=None):
     first = reg.data["runs"][a.s3_first]
     right = ("name on T6: " + first["name"]) if first.get("task") == "T6" and first.get("name") else ""
     print("\n" + c_banner(WIDE))
-    print(c_banner(("  " + title).ljust(70 - len(right)) + right))
+    if right and len(title) + 4 + len(right) <= 70:
+        print(c_banner(("  " + title).ljust(70 - len(right)) + right))
+    else:
+        print("\n".join(c_banner(x) for x in wrap_line("  " + title, MAXW - 2)))
+        if right:
+            print(c_banner("  " + right))
     print(c_banner(WIDE))
     model = SMALL_SHORT.get(agent) or "; ".join("%s %s" % (k, v) for k, v in SMALL_SHORT.items())
     mem = codex_memories_on(reg) and agent in ("codex", "")
@@ -386,7 +446,7 @@ def s3_run_block(n, total, task, folder, prompt, desc=None):
     desc = desc or {"T6": "T6 (new task)", "T3": "T3 (same task as stage 1)"}.get(task, task)
     of = " %d of %d" % (n, total) if total > 1 else ""
     num = " %d" % n if total > 1 else ""
-    print("\n" + c_bold("  RUN%s  %s   folder: %s" % (of, desc, folder)))
+    print("\n" + c_bold("  RUN%s  %s" % (of, desc)) + "\n  Folder:\n       " + folder)
     print(c_prompt((" PROMPT%s " % num).center(72, "-")))
     print(prompt.rstrip("\n"))
     print(c_prompt((" END OF PROMPT%s " % num).center(72, "-")))
@@ -646,6 +706,14 @@ def codex_memories_have_vesper():
 
 
 def cmd_doctor(a):
+    _WRAP[0] = False
+    try:
+        return _cmd_doctor(a)
+    finally:
+        _WRAP[0] = True
+
+
+def _cmd_doctor(a):
     reg = Registry.load()
     level, lines = 0, []
 
@@ -774,7 +842,8 @@ WIDE = "=" * 72
 
 
 def banner(title):
-    print("\n" + c_banner(WIDE) + "\n" + c_banner("  " + title) + "\n" + c_banner(WIDE))
+    lines = wrap_line("  " + title, MAXW - 2) if len(title) > MAXW - 4 else ["  " + title]
+    print("\n" + c_banner(WIDE) + "\n" + "\n".join(c_banner(x) for x in lines) + "\n" + c_banner(WIDE))
 
 
 def prompt_block(prompt):
@@ -785,9 +854,12 @@ def prompt_block(prompt):
 
 def next_box(cmd, when):
     cmds = [cmd] if isinstance(cmd, str) else list(cmd)
-    w = max([70] + [len(x) + 10 for x in cmds] + [len(when) + 10])
+    w = max([70] + [len(x) + 10 for x in cmds])
+    wl = textwrap.wrap(when, w - 10) or [""]
     print("\n" + c_next("+" + "-" * w + "+"))
-    print(c_next("|  NEXT: " + when.ljust(w - 8) + "|"))
+    print(c_next("|  NEXT: " + wl[0].ljust(w - 8) + "|"))
+    for extra in wl[1:]:
+        print(c_next("|        " + extra.ljust(w - 8) + "|"))
     for c in cmds:
         print(c_next("|        " + c.ljust(w - 8) + "|"))
     print(c_next("+" + "-" * w + "+") + "\n")
@@ -1901,7 +1973,7 @@ def all_done_box(reg, show=True):
     """The ordered last steps when no agent is working: unlock (once), grade, show, submit."""
     steps = []
     if not os.path.exists(grader_path()):
-        steps.append("python workshop.py unlock 4 <password from the slide>   (once)")
+        steps.append("python workshop.py unlock 4 <password from the slide>")
     if any(r["stage"] in ("1", "3") and r["grading"] == "ungraded" for r in reg.data["rows"].values()):
         steps.append("python workshop.py grade")
     if show:
@@ -2127,10 +2199,51 @@ UNMATCHED_NOTE = "  Settings differ: this is not a matched comparison."
 FAILED_NOTE = "  At least one attempt failed. Costs describe attempts, not equal-quality savings."
 
 
+SHOW_COLS = [("run_id", 16), ("stage", 5), ("task", 4), ("model", 20), ("elapsed_min", 7), ("emulator_runs", 6),
+             ("tok_in", 9), ("tok_out", 8), ("cost_usd", 7), ("score", 9), ("grading", 9)]
+SHOW_NAMES = {"elapsed_min": "time min", "emulator_runs": "runs", "tok_in": "tokens in", "tok_out": "tokens out",
+              "cost_usd": "cost USD", "run_id": "run"}
+
+
+def run_summary(row, stage=None):
+    """One summary line per run (wrapped to the width), plus a score line for graded stages."""
+    el, cost = _val(row, "elapsed_min"), _val(row, "cost_usd")
+    mem = {"yes": "ON", "no": "off"}.get(row.get("memory_used") or "", "unknown")
+    iso = {"not_detected": "OK", "detected": "CHECK (detected)"}.get(row.get("isolation") or "", "unknown")
+    chunks = ["Time %s" % ("unknown" if el is None else "%.1f min" % el),
+              "Cost %s" % ("unknown" if cost is None else "$%.2f (estimate)" % cost),
+              "Memory " + mem, "Isolation " + iso]
+    out = chunk_lines(chunks)
+    stage = stage or row.get("stage")
+    if stage in ("1", "3"):
+        sc = ("%s %s" % (row.get("score", ""), verdict(row))).strip() if _val(row, "score") is not None else "not graded"
+        sl = ["Score " + sc]
+        if str(row.get("emulator_runs", "")).strip() not in ("", "unknown"):
+            sl.append("Runs %s" % row["emulator_runs"])
+        out += chunk_lines(sl)
+    return "\n".join(out)
+
+
+def run_warnings(row):
+    """Lines only when something is wrong: memory ON, isolation detected, overrun."""
+    out = []
+    if row.get("memory_used") == "yes":
+        out.append("  WARNING: memory was ON. The agent could read earlier sessions (see the debrief).")
+    if row.get("isolation") == "detected":
+        out.append("  CHECK: the agent may have read outside the run folder.")
+        if row.get("isolation_note"):
+            out.append("    " + row["isolation_note"])
+    if row.get("overrun") == "yes":
+        out.append("  Over the 10-minute time box: flagged in the results.")
+    return out
+
+
 def show_rows(rows, note=True):
-    cols = [("run_id", 16), ("stage", 5), ("task", 4), ("model", 20), ("elapsed_min", 7), ("emulator_runs", 6),
-            ("tok_in", 9), ("tok_out", 8), ("cost_usd", 7), ("score", 9), ("grading", 9)]
-    print("  ".join(n.ljust(w) for n, w in cols))
+    """Results: a table when the terminal fits it, else one short key: value block per row."""
+    cols = SHOW_COLS
+    table = sum(w for _, w in cols) + 2 * (len(cols) - 1) <= min(term_cols(), MAXW)
+    if table:
+        print("  ".join(n.ljust(w) for n, w in cols))
     for r in rows:
         tin = sum(int(r.get(k) or 0) for k in ("tok_uncached", "tok_cache_read", "tok_cache_write")
                   if str(r.get(k, "")).isdigit())
@@ -2139,7 +2252,13 @@ def show_rows(rows, note=True):
             mdl = "%s/%s" % (mdl, r["effort"])
         sc = ("%s %s" % (r.get("score", ""), verdict(r))).strip()
         v = dict(r, model=mdl, score=sc, tok_in=M.fmt_k(tin) if tin else "", tok_out=M.fmt_k(int(r["tok_out"])) if str(r.get("tok_out", "")).isdigit() else "")
-        print("  ".join(str(v.get(n, ""))[:w].ljust(w) for n, w in cols))
+        if table:
+            print("  ".join(str(v.get(n, ""))[:w].ljust(w) for n, w in cols))
+            continue
+        print("\n  %s" % v.get("run_id", ""))
+        for n, _ in cols[1:]:
+            if str(v.get(n, "")).strip():
+                print("    %s: %s" % (SHOW_NAMES.get(n, n), v[n]))
     if note and any(str(r.get("cost_usd", "")).strip() for r in rows):
         print(COST_NOTE)
 
@@ -2233,7 +2352,8 @@ def compare_control(reg, rw, rc, task="T3", note=""):
     if failed:
         print("\n" + FAILED_NOTE)
     if _val(rc, "score") is None or _val(rw, "score") is None:
-        print("\n  Score not graded yet.  python workshop.py unlock 4 <password from the slide>  then  python workshop.py grade")
+        print("\n  Score not graded yet. Run:\n  python workshop.py unlock 4 <password from the slide>\n"
+              "  python workshop.py grade")
 
 
 T6_NOTE = " - different task; shares components with T3"
@@ -2270,8 +2390,8 @@ def payback(reg, r1, r2, r3, t6=False, shown_table=False):
         print("\n  Skill creation: %s min, %s estimated. Break-even not established."
               % ("unknown" if mins is None else "%.1f" % mins, "unknown" if cost is None else "$%.2f" % cost))
     if (s1s is None or s3s_ is None) and shown_table:
-        print("\n  Score not graded yet. %s:  python workshop.py unlock 4 <password from the slide>  then  python workshop.py grade"
-              % (AFTER_ALL if reg.actives("3") else "Now"))
+        print("\n  Score not graded yet. %s, run:\n  python workshop.py unlock 4 <password from the slide>\n"
+              "  python workshop.py grade" % (AFTER_ALL if reg.actives("3") else "Now"))
 
 
 def show_compare(reg, s3_id=None, cost_note=True):
@@ -2425,18 +2545,19 @@ def cmd_done(a):
     row = finish_stage(reg, rid, stage, a)
     clear_screen()
     print_wrong_folder(reg.data["runs"][rid], row)
-    banner("STAGE %s FINISHED        run %s" % (stage, rid))
+    banner("STAGE %s FINISHED   run %s" % (stage, rid))
     print()
-    show_rows([row], note=stage != "3")          # stage 3: show_compare prints the cost note once
-    print(ascii_frame(snap_path(rid, stage)))
-    print(memory_line(row))
-    print(isolation_lines(row))
-    if row.get("overrun") == "yes":
-        print("  Over the 10-minute time box: flagged in the results.")
+    print(run_summary(row, stage))
+    warn = run_warnings(row)
+    if warn:
+        print("\n" + "\n".join(warn))
+    fr = ascii_frame(snap_path(rid, stage))
+    if fr:
+        print("\n" + fr)
     if row["grading"] == "ungraded" and stage == "3":   # stages 1-2: grading is at the end (the last NEXT box says how)
         who = AFTER_ALL if stage == "3" and reg.actives("3") else "After the agent is done"
-        print("\nNot graded yet. %s:  python workshop.py unlock 4 <password from the slide>  "
-              "then  python workshop.py grade" % who)
+        print("\nNot graded yet. %s, run:\n  python workshop.py unlock 4 <password from the slide>\n"
+              "  python workshop.py grade" % who)
     print("\n" + SAVED_LINE)
     if stage == "1":
         next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
@@ -2569,20 +2690,23 @@ def detect_solution(skill_dir, snapshot):
 
 REPEAT_NOTE = [
     "  Why stage 3 also runs a DIFFERENT task (T6):",
-    "  A new agent can pass T3 again with your skill for a reason that is not real knowledge:",
-    "    1. Memory: the agent remembers the earlier session. (This is why memory is off in stage 3.)",
+    "  A new agent can pass T3 again with your skill without real knowledge:",
+    "    1. Memory: the agent remembers the earlier session.",
+    "       (This is why memory is off in stage 3.)",
     "    2. The skill holds parts of the T3 answer itself.",
-    "  So a T3 pass alone proves little. T6 is a different task: a gain there shows knowledge that transfers.",
+    "  So a T3 pass alone proves little. T6 is a different task: a gain",
+    "  there shows knowledge that transfers.",
 ]
 
 
 def harvest_note(share):
     """What the learner reads after harvest: no code, only the measured share and why T6 exists."""
     if share:
-        head = ("  Your skill shares %d%% of its code with your T3 solution (a line match: it cannot tell "
-                "a useful helper from the answer)." % round(share * 100))
+        head = ("  Your skill shares %d%% of its code with your T3 solution (a line match: "
+                "it cannot tell a useful helper from the answer)." % round(share * 100))
     else:
-        head = "  No copied block of your T3 solution was found in your skill (a line match; it cannot see the answer in other words)."
+        head = ("  No copied block of your T3 solution was found in your skill "
+                "(a line match; it cannot see the answer in other words).")
     return [head] + REPEAT_NOTE
 
 
@@ -2716,20 +2840,17 @@ def cmd_harvest(a):
                 if not os.path.islink(p):
                     rmtree(p)
     print_wrong_folder(run, row, True)
-    banner("STAGE 2 FINISHED - skill harvested        run %s" % rid)
+    banner("STAGE 2 DONE: skill saved   run %s" % rid)
     print()
-    show_rows([row])
-    print("\n  Skill:                    %s" % dst)
+    print(run_summary(row, "2"))
+    warn = run_warnings(row)
+    if warn:
+        print("\n" + "\n".join(warn))
     if status == "removed":
         print("  Shared T3 code: moved aside by the instructor (--move-aside)")
-    print("  Skill help the agent used: %s (drawn method: %s)" % (used or "unknown", run["method"]))
-    print(memory_line(row))
-    print(isolation_lines(row))
-    memories_card(reg)
-    print("\n" + SAVED_LINE)
     print()
     print("\n".join(harvest_note(share)))
-    print("  Want a better check (2 minutes, optional)?  python workshop.py judge")
+    print("\n  Optional (2 min): python workshop.py judge")
     if getattr(a, "blocks", False):      # instructor view: where the shared code is
         print("\n".join(block_lines(dst, blocks)))
     next_box(["python workshop.py new s3 --task all",

@@ -2,7 +2,7 @@
 import contextlib, io, json, os, sys, tempfile, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
-from fakes import fresh_ws, run  # noqa: E402
+from fakes import fresh_ws, run, flat  # noqa: E402
 
 SENT = ("Do not read memory files or notes from earlier sessions. Work only inside this folder: "
         "do not read or change files outside it.\n\nWork on your own")
@@ -64,7 +64,7 @@ class MemoryUsed(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             run(w, "done", "--no-form")
         self.assertEqual(w.Registry.load().row(rid, "1")["memory_used"], "yes")
-        self.assertIn("Agent memory in context: yes (Codex Memories; see the debrief)", out.getvalue())
+        self.assertIn("Memory ON", out.getvalue())
         with open(os.path.join(w.ws_home(), "results.csv"), encoding="utf-8") as f:
             self.assertEqual(f.readline().strip().split(",")[-7:], ["memory_used", "effort", "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun"])
 
@@ -127,11 +127,11 @@ class MemoriesCard(unittest.TestCase):
 
     def test_shown_with_config_flag(self):
         out = self._card(config="[features]\n memories = true  # on\n")
-        self.assertIn(self.CARD, out)
-        self.assertIn("type /memories first", out)
+        self.assertIn(self.CARD, flat(out))
+        self.assertIn("type /memories first", flat(out))
 
     def test_shown_with_memory_file(self):
-        self.assertIn(self.CARD, self._card(memfile="anything"))
+        self.assertIn(self.CARD, flat(self._card(memfile="anything")))
 
     def test_not_shown_with_neither(self):
         self.assertEqual(self._card(), "")
