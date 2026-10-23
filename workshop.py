@@ -74,6 +74,8 @@ _ESC_LINE = re.compile(r"^(\x1b\[[0-9;]*m)(.*)(\x1b\[0m)$")
 _ATOM = re.compile(r"^\s*(?:[A-Za-z]:[\/]|/|~|\.{1,2}[\/]|python |bin/|https?:)")
 import builtins  # noqa: E402
 _builtin_print = builtins.print
+# all_results data lines are copied by hand when the clipboard fails: never wrap them (a note can hold spaces)
+_DATA_LINE = re.compile(r"(vesper-results\b|[a-z_]+=[^ ;]*;)")
 _WRAP = [True]                                     # doctor text is copied into help prompts: not wrapped
 
 
@@ -85,7 +87,7 @@ def wrap_line(line, width=MAXW):
     if len(line) <= width or "\x1b" in line:
         return [line]
     body = line.lstrip(" ")
-    if not body or body[0] in "|+=" or " " not in body or _ATOM.match(line):
+    if not body or body[0] in "|+=" or " " not in body or _ATOM.match(line) or _DATA_LINE.match(body):
         return [line]
     ind = line[:len(line) - len(body)]
     out, cur = [], ind
