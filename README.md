@@ -125,7 +125,7 @@ outside its own folder unless you confirm.
   click Submit, and press Enter. If the paste is empty, copy the printed lines by hand.
   The form has only two fields, `alias` and `all_results` (one `vesper-results v1` line per run).
 - If `doctor` shows RED, follow [MANUAL.md](MANUAL.md). More exercises: [HOMEWORK.md](HOMEWORK.md).
-- **Take home:** [HOW-TO-TEST-A-SKILL.md](HOW-TO-TEST-A-SKILL.md): the 5 steps to test a skill in your own work.
+- **Take home:** [HOW-TO-TEST-A-SKILL.md](HOW-TO-TEST-A-SKILL.md): how to choose, build and test a skill in your own work.
 
 ## Rules for the exercise
 
@@ -157,5 +157,5 @@ prompts/            the prompts you paste into your agent
 guides/             skill-writing guides used in stage 2 (with their licenses)
 MANUAL.md           the same exercise by hand
 HOMEWORK.md         more exercises
-HOW-TO-TEST-A-SKILL.md  take-home checklist: how to test a skill in your own work
+HOW-TO-TEST-A-SKILL.md  take-home checklist: choose, build and test a skill
 ```
