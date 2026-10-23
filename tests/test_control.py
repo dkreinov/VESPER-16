@@ -118,6 +118,7 @@ class TaskAllTest(unittest.TestCase):
         self.assertNotIn("real test", out)
         self.assertIn("Time box 10 min: stop any agent still working at 10 min, then run its done line.", out)
         self.assertLess(out.index("Start in this order"), out.index("RUN 1 of 4"))
+        self.assertIn("Together, these 4 runs are a small benchmark of your skill", out)
         for i in runs:
             self.assertIn("python workshop.py done " + i, out)
         for n in (str(keys.index("n3") + 1), str(keys.index("n6") + 1)):   # the control prompts: no skill sentences

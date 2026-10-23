@@ -911,6 +911,10 @@ def start_order_keys(seed):
     return [ORDER_KEY[x] for x in start_order(seed)]
 
 
+BENCH_LINE = ("  Together, these 4 runs are a small benchmark of your skill: the same task and a different task,"
+              " each with and without it.")
+
+
 def start_order_line(seed):
     return "  Start in this order: " + " ".join("%d. %s" % (i, x) for i, x in enumerate(start_order(seed), 1))
 
@@ -935,6 +939,7 @@ def new_s3_all(reg, a):
     if not gate_on():
         s3_header(reg, a, True, total=4)
     print(line)                          # before the pages: the pages follow this order
+    print(BENCH_LINE)
     order = [k for k in start_order_keys(seed) if k in made]
     for i, k in enumerate(order, 1):
         rid, f, p = made[k]
