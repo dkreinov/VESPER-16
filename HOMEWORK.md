@@ -42,6 +42,26 @@ Our reference wiki skill is in part 3: `unlock 3 <password>`, then `new s3 --tas
 `workshop.py doctor` checks a computer and writes `doctor-report.txt` when something is wrong. Write that idea
 as a skill for your own team's tools: what to check, how to report it, and what the agent must never change.
 
+## Check your skill with an independent judge
+
+After `harvest`, `workshop.py` shows how many lines your skill shares with your T3 solution. A line match is free,
+but it cannot tell a useful helper from the answer written in other words. A judge can.
+
+Use a fresh thread as the judge, not the thread that wrote the skill. The writer would judge its own work, and it
+remembers its T3 solution.
+
+```sh
+python workshop.py judge
+```
+
+It builds a read-only folder (your skill, your T3 solution, the task, the kit examples) and copies a prompt to the
+clipboard. Open a NEW thread (any model; memory off) in that folder, paste the prompt, and read the answer
+(about 2 minutes; nothing is graded or sent). The verdict is KNOWLEDGE, ANSWER or MIXED.
+
+- KNOWLEDGE: the skill should help on tasks other than T3. Go on.
+- ANSWER or MIXED: go back to the thread that wrote the skill. Ask it to rewrite the skill as knowledge (how the
+  console works, what fails, how to test), without the game logic of T3. Then test the new skill on T6.
+
 ## Also
 
 - Other models: run stage 1 and stage 3 with a smaller and a larger model; `done` reads the model and the cost.

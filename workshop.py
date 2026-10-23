@@ -2594,11 +2594,58 @@ def cmd_harvest(a):
     print("\n" + SAVED_LINE)
     print()
     print("\n".join(harvest_note(share)))
+    print("  Want a better check (2 minutes, optional)?  python workshop.py judge")
     if getattr(a, "blocks", False):      # instructor view: where the shared code is
         print("\n".join(block_lines(dst, blocks)))
     next_box(["python workshop.py new s3 --task all",
               "(cmd/PowerShell: one command; it starts all four runs)"],
              "stage 3: FOUR new agent threads (T3, T3 control, T6, T6 control). Run:")
+    return 0
+
+
+def latest_harvested(reg):
+    """Run id of the newest stage-1 run that has a harvested skill, or None."""
+    rows = [r for r in reg.data["rows"].values() if r["stage"] == "1"
+            and os.path.isfile(os.path.join(ws_home(), ".skills", r["run_id"], "vesper16", "SKILL.md"))]
+    return max(rows, key=lambda r: float(r["cutoff"] or 0))["run_id"] if rows else None
+
+
+def cmd_judge(a):
+    """Build a read-only folder for an independent judge thread; print and copy the prompt."""
+    reg = Registry.load()
+    rid = a.run_id or latest_harvested(reg)
+    if not rid:
+        sys.exit("No harvested skill yet. Do stage 2:  python workshop.py skill  then  harvest")
+    skill = os.path.join(ws_home(), ".skills", rid, "vesper16")
+    if not os.path.isfile(os.path.join(skill, "SKILL.md")):
+        sys.exit("Run %s has no harvested skill. Do stage 2 for it:  python workshop.py skill  then  harvest" % rid)
+    snap = snap_path(rid, "1")
+    if not os.path.isfile(snap):
+        sys.exit("No T3 solution snapshot for run %s (%s). The judge needs it." % (rid, snap))
+    folder = os.path.join(ws_home(), "judge-" + rid)
+    reg.add_item(folder, "dir")
+    reg.save()
+    if os.path.exists(folder):
+        rmtree(folder)
+    os.makedirs(os.path.join(folder, "tasks"))
+    shutil.copytree(skill, os.path.join(folder, "skill"))
+    shutil.copy2(snap, os.path.join(folder, "t3-solution.vsa"))
+    shutil.copy2(os.path.join(KIT, "tasks", "T3.md"), os.path.join(folder, "tasks", "T3.md"))
+    shutil.copytree(os.path.join(KIT, "examples"), os.path.join(folder, "kit-examples"))
+    prompt = render_prompt("judge", run_id=rid)
+    banner("JUDGE - does your skill hold the T3 answer?        run %s" % rid)
+    print("\n  A fresh thread judges the skill. The thread that wrote it would judge its own work,")
+    print("  and it remembers its T3 solution.")
+    print("\n  Folder for the judge:\n\n       %s" % folder)
+    prompt_block(prompt)
+    ok = copy_to_clipboard(prompt)
+    if ok:
+        print("\n  Open a NEW thread (any model; memory off) in the folder above, paste the prompt (it is on the")
+        print("  clipboard), and read the answer. About 2 minutes. Nothing is graded or sent.")
+    else:
+        print("\n  Open a NEW thread (any model; memory off) in the folder above, copy the prompt between the")
+        print("  PROMPT lines, paste it, and read the answer. About 2 minutes. Nothing is graded or sent.")
+    next_box("python workshop.py new s3 --task all", "when you have read the answer, go on to stage 3:")
     return 0
 
 
@@ -2793,6 +2840,9 @@ def parse(argv):
     s.add_argument("--blocks", action="store_true", help="instructor: list where the shared T3 code is in the skill")
     s.add_argument("--remove-global", action="store_true")
     s.set_defaults(func=cmd_harvest)
+    s = sub.add_parser("judge", help="check your skill with an independent judge thread (optional)")
+    s.add_argument("run_id", nargs="?", help="default: the latest run with a harvested skill")
+    s.set_defaults(func=cmd_judge)
     s = sub.add_parser("grade")
     s.add_argument("--no-form", action="store_true")
     s.set_defaults(func=cmd_grade)
