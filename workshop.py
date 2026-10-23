@@ -404,6 +404,7 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
         if extra:
             extra()
         print("\n  1. Open this folder as a NEW project in your agent:\n\n       %s" % folder)
+        print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
         print("\n  2. Start a NEW thread.")
         n = 3
         if mem:
@@ -794,6 +795,7 @@ def next_box(cmd, when):
 def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False):
     print("\n  1. Open this folder as a NEW project in your agent (nothing else):")
     print("\n       %s" % folder)
+    print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
     print("\n  2. Start a NEW thread.")
     if mem:
         print("\n  3. " + c_next("Type /memories first and turn off memory for this chat."))
@@ -2313,7 +2315,7 @@ def cmd_done(a):
     print(isolation_lines(row))
     if row.get("overrun") == "yes":
         print("  Over the 10-minute time box: flagged in the results.")
-    if row["grading"] == "ungraded":
+    if row["grading"] == "ungraded" and stage == "3":   # stages 1-2: grading is at the end (the last NEXT box says how)
         who = AFTER_ALL if stage == "3" and reg.actives("3") else "After the agent is done"
         print("\nNot graded yet. %s:  python workshop.py unlock 4 <password from the slide>  "
               "then  python workshop.py grade" % who)
