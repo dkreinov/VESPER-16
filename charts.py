@@ -240,7 +240,7 @@ def flagged(r):
 
 def unconfirmed(r):
     """A stage-3 row whose settings the gate did not confirm ("" or "not_asked"). Not a flag."""
-    return str(r.get("stage", "")) == "3" and r.get("settings_confirmed") not in ("yes", "no")
+    return str(r.get("stage", "")) == "3" and r.get("settings_confirmed") not in ("yes", "no", "auto")
 
 
 def plural(n, one, many):

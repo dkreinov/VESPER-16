@@ -191,6 +191,56 @@ def claude_sessions(t0, t1, sid=None):
     return out
 
 
+# ---------------------------------------------------------------- Cursor (stream-json output file)
+_VESPER_RUN = re.compile(r"""vesper(?:\.exe)?["']?\s+run\b""")
+
+
+def cursor_model(name):
+    """Model id as written in the stream-json init event: lower case, no spaces; 'Auto' -> 'auto'."""
+    return re.sub(r"\s+", "-", str(name or "").strip().lower())
+
+
+def cursor_sessions(path):
+    """Read the agent-output.jsonl of one `cursor-agent -p --output-format stream-json` run.
+    Cursor keeps no token counts locally, so this file is the measurement source. Returns a list with one
+    dict (or [] when the file has no init and no result event): tot (i = uncached input, cr, cw, o), models,
+    first/last (epoch seconds from timestamp_ms), cwd, session_id, tools (started tool_call events as text),
+    emulator_runs (started `vesper run` calls), complete (a result event with usage was seen)."""
+    models, cwd, sid, usage, stamps, tools, runs = set(), None, None, None, [], [], 0
+    seen_init = False
+    for d in jsonl(path):
+        if not isinstance(d, dict):
+            continue
+        ms = d.get("timestamp_ms")
+        if isinstance(ms, (int, float)):
+            stamps.append(ms / 1000.0)
+        typ = d.get("type")
+        if typ == "system" and d.get("subtype") == "init":
+            seen_init = True
+            if d.get("model"):
+                models.add(cursor_model(d["model"]))
+            cwd = d.get("cwd") or cwd
+            sid = d.get("session_id") or sid
+        elif typ == "tool_call" and d.get("subtype") == "started":
+            text = json.dumps(d.get("tool_call"))
+            tools.append(text)
+            if _VESPER_RUN.search(text.replace("\\\"", '"')):
+                runs += 1
+        elif typ == "result":
+            if isinstance(d.get("usage"), dict):
+                usage = d["usage"]
+            if not stamps and isinstance(d.get("duration_ms"), (int, float)):
+                stamps.extend([0.0, d["duration_ms"] / 1000.0])
+    if not seen_init and usage is None:
+        return []
+    u = usage or {}
+    tot = dict(i=int(u.get("inputTokens", 0) or 0), cr=int(u.get("cacheReadTokens", 0) or 0),
+               cw=int(u.get("cacheWriteTokens", 0) or 0), o=int(u.get("outputTokens", 0) or 0))
+    return [dict(agent="cursor", file=path, cwd=cwd, tot=tot, models=models, first=min(stamps) if stamps else None,
+                 last=max(stamps) if stamps else None, sid=sid or os.path.basename(path), tools=tools,
+                 emulator_runs=runs, complete=usage is not None)]
+
+
 # ---------------------------------------------------------------- Codex
 def find_total_usage(obj):
     if isinstance(obj, dict):
