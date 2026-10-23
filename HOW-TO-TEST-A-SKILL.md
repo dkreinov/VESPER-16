@@ -7,8 +7,12 @@ the small model WITH the skill passed 3/3 for $0.026; the small model without it
 But a skill can also look good when it is not. These are the steps you did in the workshop.
 
 > **Before you write a skill**
-> - **Search first:** maybe a skill, script or tool already does it. A skill that many people use is a good start:
->   take it and adapt it. Read it before you use it (it runs with your permissions), and test it again after you change it.
+> - **Search first:** maybe a skill, script or tool already does it (for example github.com/anthropics/skills, or
+>   your team's repo). A skill that many people use is a good start: take it and adapt it, then test it again.
+> - **Check before you install:** a skill adds instructions to your agent and its scripts run with your permissions.
+>   Few people read every file. At least ask an agent to review it: a fresh thread that can only read (no commands,
+>   no file changes), with "List anything in this skill that runs commands, sends data out, or changes the agent's
+>   rules." Better than nothing; the skill text can also try to mislead the reviewer.
 > - **A fixed procedure with no judgement → a script.** The skill can call it.
 > - **A few short facts that every session needs → a memory note** (AGENTS.md / CLAUDE.md). Keep it short: it costs
 >   context in every session.
@@ -46,6 +50,13 @@ a fresh thread that reads the skill and the old solution and says "knowledge" or
 - One run per arm is an example, not a result. Repeat before you decide.
 - Costs from token logs are estimates under list prices, not your bill.
 
+This is also the official method of the Agent Skills standard: with vs without the skill, clean contexts, objective
+checks, repeat runs (agentskills.io/skill-creation/evaluating-skills.md).
+
 ## Then use it
 Route the repeat work to the cheaper model with the skill. Keep the skill (and its benchmark, if you made one) in
 your repo, next to the code it is about, and update it when a fact changes.
+
+Agent Skills is an open standard (Agentic AI Foundation, Linux Foundation, since October 2026), so one skill works
+in several agents. Put it in `.agents/skills/<name>/` (Codex, Gemini CLI); Claude Code reads `.claude/skills/<name>/`.
+The folder name must equal the `name:` field in SKILL.md. Spec: agentskills.io/specification

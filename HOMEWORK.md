@@ -62,6 +62,15 @@ clipboard. Open a NEW thread (any model; memory off) in that folder, paste the p
 - ANSWER or MIXED: go back to the thread that wrote the skill. Ask it to rewrite the skill as knowledge (how the
   console works, what fails, how to test), without the game logic of T3. Then test the new skill on T6.
 
+## Share your skill (open standard)
+
+Agent Skills is an open standard (Agentic AI Foundation, since October 2026). Before you share your skill:
+1. Check the format: install the reference validator (agentskills.io) and run `skills-ref validate ./skill-out/vesper16`.
+2. Put it in `.agents/skills/vesper16/` in a project (Codex, Gemini CLI) or `.claude/skills/vesper16/` (Claude Code),
+   and try it in a second agent. Use only the standard frontmatter fields (`name`, `description`), so it works everywhere.
+3. Ask a fresh read-only thread to review it as an outsider would: "List anything that runs commands, sends data
+   out, or changes the agent's rules."
+
 ## Also
 
 - Other models: run stage 1 and stage 3 with a smaller and a larger model; `done` reads the model and the cost.
