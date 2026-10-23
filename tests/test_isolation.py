@@ -388,3 +388,102 @@ class HarvestStepTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WrongFolderTest(unittest.TestCase):
+    """The agent worked in another folder than the run folder (Documents instead of the run folder)."""
+    def setUp(self):
+        self.w, self.home = fresh_ws()
+        self.t = time.time()
+
+    def _log(self, name, cwd_forms, claude=False):
+        p = os.path.join(self.home, name)
+        with open(p, "w") as f:
+            for i, c in enumerate(cwd_forms):
+                if claude:
+                    d = {"type": "assistant", "timestamp": iso(self.t + i), "cwd": c, "message": {"content": []}}
+                else:
+                    d = {"type": "event_msg", "timestamp": iso(self.t + i), "payload": {
+                        "type": "item_completed", "item": {"cwd": c}}}
+                f.write(json.dumps(d) + "\n")
+        return p
+
+    def test_inside_both_forms_and_subfolder(self):
+        folder = os.path.join(self.home, "Run Dir", "s1-aaaa")
+        os.makedirs(folder)
+        url = "file:///" + folder.replace("\\", "/").replace(" ", "%20")
+        p = self._log("a.jsonl", [folder, url, os.path.join(folder, "sub")])
+        self.assertEqual(self.w.outside_workdirs([p], self.t - 5, self.t + 5, folder), [])
+        self.assertEqual(len(self.w.session_workdirs([p], self.t - 5, self.t + 5)), 2)
+
+    def test_outside_and_window(self):
+        folder = os.path.join(self.home, "runs", "s1-aaaa")
+        docs = os.path.join(self.home, "Docs Dir")
+        url = "file:///" + docs.replace("\\", "/").replace(" ", "%20")
+        p = self._log("b.jsonl", [folder, url])
+        out = self.w.outside_workdirs([p], self.t - 5, self.t + 5, folder)
+        self.assertEqual(out, [self.w._npath(docs)])
+        self.assertEqual(self.w.outside_workdirs([p], self.t + 100, self.t + 200, folder), [])
+
+    def test_claude_log(self):
+        folder = os.path.join(self.home, "runs", "s1-aaaa")
+        p = self._log("c.jsonl", [folder, os.path.join(self.home, "elsewhere")], claude=True)
+        self.assertEqual(len(self.w.outside_workdirs([p], self.t - 5, self.t + 5, folder)), 1)
+
+    def _stage1(self, cwd_of):
+        w = self.w
+        run(w, "doctor", "--agent", "codex", "--alias", "t")
+        run(w, "new", "s1", "--method", "plain")
+        reg = w.Registry.load()
+        rid = reg.data["active"]["run_id"]
+        f = reg.data["runs"][rid]["folder"]
+        t0 = reg.data["active"]["start"]
+        cwd = cwd_of(f)
+        log = fakes.codex_log("0c0d0e0f-0000-1111-2222-333344445555", cwd,
+                              [(t0 + 0.01, 10, 0, 1, "Workshop run: %s" % rid), (t0 + 0.02, 20, 0, 2, "")])
+        return rid, f, cwd, log
+
+    def _done(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            run(self.w, "done", "--no-form")
+        return out.getvalue()
+
+    def test_done_inside_no_warning(self):
+        rid, f, _, _ = self._stage1(lambda f: f)
+        out = self._done()
+        self.assertNotIn("WRONG FOLDER", out)
+        self.assertEqual(self.w.Registry.load().row(rid, "1")["isolation"], "not_detected")
+
+    def test_done_outside_warns_and_anonymises(self):
+        docs = os.path.join(os.path.expanduser("~"), "Documents")
+        rid, f, _, _ = self._stage1(lambda f: docs)
+        out = self._done()
+        self.assertIn("WRONG FOLDER: your agent worked in", out)
+        self.assertIn("redo the step there", out)
+        self.assertLess(out.index("WRONG FOLDER"), out.index("STAGE 1 FINISHED"))
+        row = self.w.Registry.load().row(rid, "1")
+        self.assertEqual(row["isolation"], "detected")
+        self.assertTrue(row["isolation_note"].startswith("worked outside the run folder: ~"), row["isolation_note"])
+        self.assertNotIn(os.path.basename(os.path.expanduser("~")).lower(), row["isolation_note"].lower())
+
+    def test_harvest_names_skill_in_outside_dir(self):
+        rid, f, _, log = self._stage1(lambda f: f)
+        self._done()
+        run(self.w, "skill")
+        other = os.path.join(self.home, "elsewhere")
+        sk = os.path.join(other, "skill-out", "vesper16")
+        os.makedirs(sk)
+        with open(os.path.join(sk, "SKILL.md"), "w") as fh0:
+            fh0.write("x")
+        with open(log, "a") as fh:
+            fh.write(json.dumps({"type": "event_msg", "timestamp": iso(time.time()), "payload": {
+                "type": "item_completed", "item": {"cwd": other}}}) + "\n")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as cm:
+            run(self.w, "harvest", "--no-form")
+        txt = out.getvalue()
+        self.assertIn("WRONG FOLDER", txt, str(cm.exception))
+        self.assertIn("run harvest again", txt)
+        self.assertIn("A skill was written here instead:", txt)
+        self.assertIn("No skill at", str(cm.exception))

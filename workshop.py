@@ -19,6 +19,7 @@ opens the results form in your browser. See README.md (Workshop), MANUAL.md and 
 """
 import argparse, csv, difflib, fnmatch, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, time, webbrowser, zipfile
 from urllib.parse import urlencode
+import urllib.parse
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, KIT)
@@ -403,7 +404,7 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
         print("\n" + c_banner(WIDE) + "\n" + c_banner("  " + head) + "\n" + c_banner(WIDE))
         if extra:
             extra()
-        print("\n  1. Open this folder as a NEW project in your agent:\n\n       %s" % folder)
+        print("\n  1. Open this folder as a NEW project in your agent (choose exactly this folder, not a folder above it):\n\n       %s" % folder)
         print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
         print("\n  2. Start a NEW thread.")
         n = 3
@@ -793,7 +794,7 @@ def next_box(cmd, when):
 
 
 def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False):
-    print("\n  1. Open this folder as a NEW project in your agent (nothing else):")
+    print("\n  1. Open this folder as a NEW project in your agent (choose exactly this folder, not a folder above it):")
     print("\n       %s" % folder)
     print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
     print("\n  2. Start a NEW thread.")
@@ -1598,6 +1599,100 @@ def detect_outside_reads(paths, t0, t1, folder, writer=False):
     return "detected", _private("; ".join(hits[:3]))[:200]
 
 
+_CWD_KEYS = ("cwd", "workdir")
+
+
+def _cwd_norm(v):
+    """A working folder as written in a log (plain path or file URL) -> normalised path, or ''."""
+    v = v.strip()
+    if v[:7].lower() == "file://":
+        v = urllib.parse.unquote(v[7:])
+        if re.match(r"^/[A-Za-z]:", v):
+            v = v[1:]
+    if not _is_abs(v):
+        return ""
+    return _npath(v).rstrip("/") if len(_npath(v)) > 3 else _npath(v)
+
+
+def _walk_cwds(o, out, depth=0):
+    if depth > 8:
+        return
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if k in _CWD_KEYS and isinstance(v, str):
+                n = _cwd_norm(v)
+                if n:
+                    out.add(n)
+            elif isinstance(v, (dict, list)):
+                _walk_cwds(v, out, depth + 1)
+    elif isinstance(o, list):
+        for x in o:
+            _walk_cwds(x, out, depth + 1)
+
+
+def session_workdirs(paths, t0, t1):
+    """Normalised working folders ('cwd' / 'workdir' fields of Codex and Claude Code log events)
+    that the agent used in [t0, t1]."""
+    if isinstance(paths, str):
+        paths = [paths]
+    out = set()
+    for path in [p for p in (paths or []) if p and os.path.exists(p)]:
+        evs = [d for d in M.jsonl(path) if isinstance(d, dict)]
+        stamped = [(M.parse_ts(d.get("timestamp")), d) for d in evs]
+        use_ts = any(ts is not None for ts, _ in stamped)
+        for ts, d in stamped:
+            if use_ts and (ts is None or not (t0 - 1 <= ts <= t1 + 1)):
+                continue
+            _walk_cwds(d, out)
+    return out
+
+
+def outside_workdirs(paths, t0, t1, folder):
+    """Sorted working folders of the run window that are not inside the run folder."""
+    own = _npath(os.path.abspath(folder))
+    return sorted(w for w in session_workdirs(paths, t0, t1) if not _within(w, own))
+
+
+def wrong_folder_block(outside, folder, harvest=False):
+    """Attention text (list of lines) for a learner whose agent worked outside the run folder."""
+    first = outside[0]
+    lines = ["  WRONG FOLDER: your agent worked in %s, not in the run folder." % first,
+             "  Its files are not where the tool looks. Fix: in your agent, open exactly this folder as the project "
+             "(not a folder above it):",
+             "       %s" % folder,
+             "  Then ask the agent to write the skill there, and run harvest again." if harvest
+             else "  Then ask the agent to redo the step there."]
+    return [c_err(x) for x in lines]
+
+
+def print_wrong_folder(run, row, harvest=False):
+    try:
+        out = outside_workdirs(session_paths(run.get("session")), float(row["start"]), float(row["cutoff"]), run["folder"])
+    except (ValueError, TypeError, KeyError):
+        return []
+    if out:
+        print("\n" + "\n".join(wrong_folder_block(out, run["folder"], harvest)) + "\n")
+    return out
+
+
+def skill_in_outside(outside):
+    """A skill-out/vesper16/SKILL.md inside one of the outside working folders, or ''."""
+    for d in outside:
+        p = os.path.join(d, "skill-out", "vesper16", "SKILL.md")
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def isolation_with_workdirs(iso, note, outside):
+    if not outside:
+        return iso, note
+    n = "worked outside the run folder: " + _private(outside[0])
+    if iso == "detected" and note:
+        n += "; " + note
+    return "detected", n[:200]
+
+
 def isolation_lines(row):
     st = row.get("isolation") or "unknown"
     out = "  Isolation check: %s." % st
@@ -2265,7 +2360,8 @@ def finish_stage(reg, rid, stage, a, grade=True):
     fields["memory_used"] = detect_memory_used(session_paths(run.get("session")), t0, t1)
     iso, iso_note = detect_outside_reads(session_paths(run.get("session")), t0, t1, run["folder"],
                                          writer=stage in ("1", "2"))
-    fields["isolation"], fields["isolation_note"] = iso, iso_note
+    outside = outside_workdirs(session_paths(run.get("session")), t0, t1, run["folder"])
+    fields["isolation"], fields["isolation_note"] = isolation_with_workdirs(iso, iso_note, outside)
     p0 = prompt_time(session_paths(run.get("session")), rid, t0, t1) if stage == "3" else None
     fields["overrun"] = overrun_flag(stage, t0 if p0 is None else p0, t1)   # 10 min from the prompt, not the set-up
     fields["settings_confirmed"] = run.get("settings_confirmed", "")
@@ -2307,6 +2403,7 @@ def cmd_done(a):
             print("Updating the finished stage %s of %s (same cutoff, same frozen solution)." % (stage, rid))
     row = finish_stage(reg, rid, stage, a)
     clear_screen()
+    print_wrong_folder(reg.data["runs"][rid], row)
     banner("STAGE %s FINISHED        run %s" % (stage, rid))
     print()
     show_rows([row], note=stage != "3")          # stage 3: show_compare prints the cost note once
@@ -2546,6 +2643,15 @@ def cmd_harvest(a):
     src = os.path.join(run["folder"], "skill-out", "vesper16")
     if not os.path.exists(os.path.join(src, "SKILL.md")):
         g = find_global_vesper_skills()
+        try:
+            outside = outside_workdirs(session_paths(run.get("session")), float(acts2[0]["start"]), time.time(), run["folder"])
+        except (ValueError, TypeError, KeyError):
+            outside = []
+        if outside:
+            print("\n" + "\n".join(wrong_folder_block(outside, run["folder"], True)) + "\n")
+            sk = skill_in_outside(outside)
+            if sk:
+                print("  A skill was written here instead: %s\n" % sk)
         sys.exit("No skill at %s\n%sAsk the agent to write it there, then run harvest again."
                  % (os.path.join(src, "SKILL.md"), ("It may be in a global folder: %s\n" % ", ".join(g)) if g else ""))
     base = os.path.join(ws_home(), ".skills", rid)
@@ -2588,6 +2694,7 @@ def cmd_harvest(a):
             for p in g:
                 if not os.path.islink(p):
                     rmtree(p)
+    print_wrong_folder(run, row, True)
     banner("STAGE 2 FINISHED - skill harvested        run %s" % rid)
     print()
     show_rows([row])
