@@ -1035,16 +1035,37 @@ def _log_files():
     return out
 
 
-def find_sessions(run_id):
+CHUNK = 8 * 2 ** 20
+
+
+def _file_has(p, key):
+    """True if the bytes key occur in file p. Reads in chunks (overlap len(key)); stops at the first hit."""
+    keep = b""
+    with open(p, "rb") as f:
+        while True:
+            buf = f.read(CHUNK)
+            if not buf:
+                return False
+            if key in keep + buf:
+                return True
+            keep = buf[-(len(key) - 1):] if len(key) > 1 else b""
+
+
+def find_sessions(run_id, since=None):
+    """Agent logs that contain the run id. With since (epoch seconds), a log whose last write is more than
+    120 s before since is skipped unread (it cannot hold this run). Older big logs (> 200 MB) are skipped
+    only when since is not given; a log written during the run is always searched."""
     key, seen, out = run_id.encode(), set(), []
     codex_root = os.path.abspath(M.codex_home())
     for p in _log_files():
         try:
-            if os.path.getsize(p) > 200 * 2 ** 20:
-                continue
-            with open(p, "rb") as f:
-                if key not in f.read():
+            if since is not None:
+                if os.path.getmtime(p) < since - 120:
                     continue
+            elif os.path.getsize(p) > 200 * 2 ** 20:
+                continue
+            if not _file_has(p, key):
+                continue
         except OSError:
             continue
         if os.path.abspath(p).startswith(codex_root):
@@ -1769,8 +1790,8 @@ def _same_dir(a, b):
     return bool(a and b) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
-def pick_session(run_id, folder=None):
-    s = find_sessions(run_id)
+def pick_session(run_id, folder=None, since=None):
+    s = find_sessions(run_id, since)
     if len(s) > 1 and folder:                     # a pasted run code elsewhere must not count
         own = [x for x in s if _same_dir(session_cwd(x["path"]), folder)]
         if own:
@@ -2318,7 +2339,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
     else:
         t0, t1 = float(row["start"]), float(row["cutoff"])
     if not run.get("session"):
-        run["session"] = pick_session(rid, run["folder"])
+        run["session"] = pick_session(rid, run["folder"], t0)
     m = measure_stage(run, t0, t1)
     if not m["measurement"]:
         prev = row or {}

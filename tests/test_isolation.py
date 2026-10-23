@@ -487,3 +487,43 @@ class WrongFolderTest(unittest.TestCase):
         self.assertIn("run harvest again", txt)
         self.assertIn("A skill was written here instead:", txt)
         self.assertIn("No skill at", str(cm.exception))
+
+
+class FindSessionsSinceTest(unittest.TestCase):
+    def setUp(self):
+        self.w, self.home = fresh_ws()
+        d = os.path.join(os.environ["CODEX_HOME"], "sessions", "2026", "10", "18")
+        os.makedirs(d)
+        self.d = d
+
+    def _log(self, name, text, mtime):
+        p = os.path.join(self.d, name)
+        with open(p, "w") as f:
+            f.write(text)
+        os.utime(p, (mtime, mtime))
+        return p
+
+    def test_old_log_not_opened_new_log_found(self):
+        now = time.time()
+        old = self._log("rollout-2026-10-18T10-00-00-0a0b0c0d-0000-1111-2222-333344445555.jsonl", "s1-zzzz\n", now - 3600)
+        self._log("rollout-2026-10-18T11-00-00-0a0b0c0d-0000-1111-2222-333344445556.jsonl", "s1-zzzz\n", now)
+        real_open, opened = open, []
+
+        def spy(p, *a, **k):
+            opened.append(str(p))
+            return real_open(p, *a, **k)
+        self.w.open = spy
+        try:
+            s = self.w.find_sessions("s1-zzzz", since=now - 60)
+        finally:
+            del self.w.open
+        self.assertEqual(len(s), 1)
+        self.assertNotIn(old, opened)
+        self.assertEqual(len(self.w.find_sessions("s1-zzzz")), 2)     # without since: both
+
+    def test_key_across_chunk_edge_and_big_new_log(self):
+        self.w.CHUNK = 16
+        now = time.time()
+        self._log("rollout-2026-10-18T11-00-00-0a0b0c0d-0000-1111-2222-333344445556.jsonl", "x" * 13 + "s1-qqqq" + "y" * 40, now)
+        self.assertEqual(len(self.w.find_sessions("s1-qqqq", since=now - 60)), 1)
+        self.assertEqual(len(self.w.find_sessions("s1-nope", since=now - 60)), 0)
