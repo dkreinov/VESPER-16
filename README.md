@@ -127,6 +127,30 @@ outside its own folder unless you confirm.
 - If `doctor` shows RED, follow [MANUAL.md](MANUAL.md). More exercises: [HOMEWORK.md](HOMEWORK.md).
 - **Take home:** [HOW-TO-TEST-A-SKILL.md](HOW-TO-TEST-A-SKILL.md): how to choose, build and test a skill in your own work.
 
+### Stage 3 with `--auto`
+
+`python workshop.py new s3 --task all --auto` makes the same four run folders, with the same prompts and the same start
+order. Then the tool starts the four agents itself, one after the other, without a window. Each agent works in its own
+run folder with the stage-3 model of your agent (Codex: gpt-6-luna, effort high, Memories off; Claude Code: Haiku, only
+the project settings; Cursor: gpt-5.6-luna-high). `--model NAME` changes the model. The tool prints one short status
+block every 30 seconds, stops any agent still working at 10 minutes (the whole process tree), and finishes each run
+like `done <run_id>`. The row says `settings_confirmed = auto` and, for a run that the tool stopped, `stopped = time`.
+Ctrl+C stops all agents and keeps the finished results. The manual flow (without `--auto`) does not change.
+
+- **Check first:** `python workshop.py doctor` says for each agent whether `--auto` is ready (CLI found, Cursor logged
+  in). `python workshop.py doctor --check-auto` makes ONE tiny run ("Reply OK") with the stage-3 model.
+- **Codex:** `--auto` uses `codex.exe` of the Codex app (`%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`). The
+  npm `codex` is used only if it is version 0.163 or newer (0.154 rejects gpt-6-luna on a ChatGPT account).
+- **Cursor, install and login (Windows PowerShell):** `irm 'https://cursor.com/install?win32=true' | iex`, then
+  `agent login` (it opens the browser). macOS/Linux: `curl https://cursor.com/install -fsS | bash`, then `agent login`.
+  Cursor keeps no token counts on disk, so the tool saves the output of the run in `agent-output.jsonl` in the run
+  folder and measures from it.
+- **Cursor free plan:** a free plan lists the models but runs only Auto. A run with a named model then fails with
+  "Named models unavailable". `doctor --check-auto` reports "free plan: only Auto". Use the manual flow, or a paid plan.
+- **Cursor rules:** Cursor loads your User Rules and alwaysApply rules in every run. Turn them off for a clean run.
+- **Lost window:** each stage-3 prompt is also saved as `PROMPT.txt` in its run folder. If you press Ctrl+C while the
+  pages show, or close the window, run the same `new s3` command again: it shows the pages of the runs that are not done.
+
 ## Rules for the exercise
 
 - Leave `bin/`, `examples/` and `tasks/` unchanged.
