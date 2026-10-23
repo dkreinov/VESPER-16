@@ -11,6 +11,8 @@
   python workshop.py new s3 --task both     stage 3, two runs (T6, then T3) in one command
   python workshop.py new s3 --task T6       stage 3, run 1: T6 with your name, a NEW agent thread
   python workshop.py new s3 --task T3       stage 3, run 2: T3 again, a SECOND new agent thread
+  python workshop.py new s3 --task all --auto   stage 3, the tool runs the 4 agents itself (about 10 min)
+  python workshop.py doctor --check-auto    one tiny agent run: can --auto use the stage-3 model?
   python workshop.py unlock 4 <password from the slide>    grader (only after the agent is done)
   python workshop.py grade | show | cleanup
 
@@ -144,7 +146,7 @@ ROW_FIELDS = ["alias", "run_id", "stage", "revision", "parent_run_id", "task", "
               "skill_source", "skill_hash", "skill_has_solution", "elapsed_min", "wall_min", "emulator_runs",
               "tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd", "price_table",
               "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used", "memory_used", "effort",
-              "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun"]
+              "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun", "stopped"]
 LINE = "-" * 72
 T6_PASS = 90
 
@@ -762,7 +764,12 @@ def _cmd_doctor(a):
                         "answer 'go on'." % (agent, "; ".join(sp)))
     if agent == "codex" and codex_memories_have_vesper():
         note(1, "WARN", MEMORY_WARN)
-    reg.data.update(agent=agent, alias=alias, doctor={"level": level, "time": time.time()})
+    al, ready = doctor_auto_lines(agent, getattr(a, "check_auto", False))
+    for x in al:
+        if x.startswith("  WARN"):
+            level = max(level, 1)
+    lines += al
+    reg.data.update(agent=agent, alias=alias, doctor={"level": level, "time": time.time()}, auto_ready=ready)
     reg.add_item(h, "dir")
     reg.mark_done(h)
     reg.save()
@@ -910,6 +917,8 @@ def create_s3_run(reg, a, task, name=None, control=False):
     try:
         f = make_run_folder(reg, rid, task, skill_dir=None if control else src, name=name)
         prompt = render_prompt("stage3-noskill" if control else "stage3", task=task, run_id=rid)
+        with open(os.path.join(f, "PROMPT.txt"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(prompt)                    # a lost window is never fatal: the prompt stays in the run folder
     except BaseException:
         reg.data["runs"].pop(rid, None)
         reg.save()
@@ -922,18 +931,24 @@ def create_s3_run(reg, a, task, name=None, control=False):
 
 def new_s3_both(reg, a):
     """new s3 --task both: the T6 run, then the T3 run, in one process and one terminal."""
+    auto = getattr(a, "auto", False)
     r1, f1, p1 = create_s3_run(reg, a, "T6")
     a.s3_first = r1
-    if not gate_on():
-        s3_header(reg, a, True)
-    s3_show(reg, r1, 1, 2, "T6", f1, p1)
+    if not auto:
+        if not gate_on():
+            s3_header(reg, a, True)
+        s3_show(reg, r1, 1, 2, "T6", f1, p1)
     try:
         r2, f2, p2 = create_s3_run(reg, a, "T3")
     except Exception as e:
         print(c_err("\n  The T3 run could not be created: %s" % e))
         print("  The T6 run %s is valid. Start the T3 run later with:  python workshop.py new s3 --task T3" % r1)
+        if auto:
+            return run_auto(reg, a, [auto_item(reg, a, r1, f1, p1)]) or 1
         next_box("python workshop.py done " + r1, "when the T6 agent says it is done, run:")
         return 1
+    if auto:
+        return run_auto(reg, a, [auto_item(reg, a, r1, f1, p1), auto_item(reg, a, r2, f2, p2)])
     s3_show(reg, r2, 2, 2, "T3", f2, p2)
     next_box(["python workshop.py done %s   (T6)" % r1, "python workshop.py done %s   (T3)" % r2],
              "when an agent is done, run its line:")
@@ -1012,18 +1027,13 @@ def new_s3_all(reg, a):
         return 1
     a.s3_first = made["t6"][0] if "t6" in made else next(iter(made.values()))[0]
     seed = reg.data["runs"][next(iter(made.values()))[0]].get("parent", "")
-    line = start_order_line(seed)
+    if getattr(a, "auto", False):
+        order = [k for k in start_order_keys(seed) if k in made]
+        rc = run_auto(reg, a, [auto_item(reg, a, made[k][0], made[k][1], made[k][2]) for k in order])
+        return rc or (0 if len(made) == 4 else 1)
     if not gate_on():
         s3_header(reg, a, True, total=4)
-    print(line)                          # before the pages: the pages follow this order
-    print(BENCH_LINE)
-    order = [k for k in start_order_keys(seed) if k in made]
-    for i, k in enumerate(order, 1):
-        rid, f, p = made[k]
-        s3_show(reg, rid, i, 4, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k],
-                extra=(lambda: print(line)) if gate_on() else None)
-    next_box(["python workshop.py done %s   %s" % (made[k][0], ALL_LABEL[k]) for k in order],
-             "when an agent is done (or at 10 min), run its line:")
+    s3_pages(reg, a, made, seed, total=4)         # the start order line comes before the pages
     return 0 if len(made) == 4 else 1
 
 
@@ -1049,9 +1059,10 @@ def cmd_new(a):
         same = [x for x in acts if reg.data["runs"].get(x["run_id"], {}).get("task") in
                 (("T6", "T3") if task in ("both", "all") else (task,))
                 and (task == "all" or not is_control(reg.data["runs"].get(x["run_id"], {})))]
-        if same:
-            sys.exit("Stage 3 with %s is already active: %s\n  When that agent is done:  %s"
-                     % (task, same[0]["run_id"], next_cmd(same[0])))
+    else:
+        same = []
+    if getattr(a, "auto", False) and a.stage != "s3":
+        sys.exit("--auto is for stage 3 only:  python workshop.py new s3 --task all --auto")
     if a.stage == "s1":
         if task == "T6":
             sys.exit("T6 is a stage-3 task. Stage 1 uses T3:  python workshop.py new s1")
@@ -1071,21 +1082,31 @@ def cmd_new(a):
         if g:
             sys.exit("A VESPER skill is in a global folder, so stage 3 would not be clean:\n  " + "\n  ".join(g)
                      + "\nMove it away (or run harvest / cleanup), then run this command again.")
-        if task == "all":
-            return new_s3_all(reg, a)
-        if task == "both":
-            return new_s3_both(reg, a)
-        rid, f, prompt = create_s3_run(reg, a, task)
-        a.s3_first = rid
-        if not gate_on():
-            s3_header(reg, a, False)
-        s3_show(reg, rid, 1, 1, task, f, prompt)
-        next_box("python workshop.py done " + rid, "when the agent is done, run:")
-        hint = second_s3_hint(reg, rid)
-        if hint:
-            print("  Now start the second stage-3 run (here), and open it in a SECOND new agent thread:")
-            print("      %s\n" % hint)
-        return 0
+        if getattr(a, "auto", False):
+            auto_setup(reg, a)
+        try:
+            if same:
+                return resume_s3(reg, a, same)
+            if task == "all":
+                return new_s3_all(reg, a)
+            if task == "both":
+                return new_s3_both(reg, a)
+            rid, f, prompt = create_s3_run(reg, a, task)
+            a.s3_first = rid
+            if getattr(a, "auto", False):
+                return run_auto(reg, a, [auto_item(reg, a, rid, f, prompt)])
+            if not gate_on():
+                s3_header(reg, a, False)
+            s3_show(reg, rid, 1, 1, task, f, prompt)
+            next_box("python workshop.py done " + rid, "when the agent is done, run:")
+            hint = second_s3_hint(reg, rid)
+            if hint:
+                print("  Now start the second stage-3 run (here), and open it in a SECOND new agent thread:")
+                print("      %s\n" % hint)
+            return 0
+        except KeyboardInterrupt:
+            print("\n" + S3_STOPPED)
+            return 130
     reg.data["runs"][rid]["folder"] = f
     reg.start_active(rid, "1" if a.stage == "s1" else "3")
     reg.save()
@@ -1432,6 +1453,14 @@ def _cwd_args(v, out):
                 out.append('workdir:"%s"' % v[k])
 
 
+def _ev_ts(d):
+    """Event time in epoch seconds: 'timestamp' (Codex, Claude Code) or 'timestamp_ms' (Cursor stream-json)."""
+    ts = M.parse_ts(d.get("timestamp"))
+    if ts is None and isinstance(d.get("timestamp_ms"), (int, float)):
+        ts = d["timestamp_ms"] / 1000.0
+    return ts
+
+
 def _call_text(d):
     """The arguments of one agent tool call (Codex function_call / custom_tool_call, Claude tool_use), else ''."""
     parts = []
@@ -1447,6 +1476,8 @@ def _call_text(d):
                 pass
         _cwd_args(raw, parts)
         _strings(raw, parts)
+    elif d.get("type") == "tool_call" and d.get("subtype") == "started":      # Cursor stream-json
+        _strings(d.get("tool_call"), parts)
     elif d.get("type") == "assistant":
         c = (d.get("message") or {}).get("content")
         if isinstance(c, list):
@@ -1679,7 +1710,7 @@ def detect_outside_reads(paths, t0, t1, folder, writer=False):
         try:
             for d in M.jsonl(path):
                 if isinstance(d, dict):
-                    calls.append((M.parse_ts(d.get("timestamp")), _call_text(d)))
+                    calls.append((_ev_ts(d), _call_text(d)))
         except Exception:
             continue
         if any(ts is not None for ts, _ in calls):
@@ -1694,7 +1725,7 @@ def detect_outside_reads(paths, t0, t1, folder, writer=False):
     return "detected", _private("; ".join(hits[:3]))[:200]
 
 
-_CWD_KEYS = ("cwd", "workdir")
+_CWD_KEYS = ("cwd", "workdir", "workingDirectory")
 
 
 def _cwd_norm(v):
@@ -1733,10 +1764,11 @@ def session_workdirs(paths, t0, t1):
     out = set()
     for path in [p for p in (paths or []) if p and os.path.exists(p)]:
         evs = [d for d in M.jsonl(path) if isinstance(d, dict)]
-        stamped = [(M.parse_ts(d.get("timestamp")), d) for d in evs]
+        stamped = [(_ev_ts(d), d) for d in evs]
         use_ts = any(ts is not None for ts, _ in stamped)
         for ts, d in stamped:
-            if use_ts and (ts is None or not (t0 - 1 <= ts <= t1 + 1)):
+            if use_ts and (ts is None or not (t0 - 1 <= ts <= t1 + 1)) and not (
+                    ts is None and d.get("type") == "system" and d.get("subtype") == "init"):    # Cursor init: no time
                 continue
             _walk_cwds(d, out)
     return out
@@ -1812,6 +1844,8 @@ def measure_stage(run, t0, t1):
         found = M.codex_sessions(t0, t1, s["sid"])
     elif s.get("agent") == "claude":
         found = M.claude_sessions(t0, t1, s["sid"])
+    elif s.get("agent") == "cursor":
+        found = M.cursor_sessions(s.get("path") or "")
     acts = _runlog_times(run["folder"], t0, t1, False) or []
     if found:
         tot = {"i": 0, "cr": 0, "cw": 0, "o": 0}
@@ -1834,7 +1868,8 @@ def measure_stage(run, t0, t1):
             res["model_switched"] = "yes" if len({frozenset(x["models"]) for x in found}) > 1 else "no"
         res.update(model=" ".join(sorted(models)), effort=eff[1], tok_uncached=tot["i"], tok_cache_read=tot["cr"],
                    tok_cache_write=tot["cw"], tok_out=tot["o"], cost_usd=("%.2f" % c) if c is not None else "",
-                   measurement="log" if s["agent"] == "codex" else "log, output lower bound")
+                   measurement={"codex": "log", "cursor": "log" if all(x.get("complete") for x in found)
+                                else "log, stopped before the usage report"}.get(s["agent"], "log, output lower bound"))
     res["elapsed_min"] = ("%.1f" % ((max(acts) - min(acts)) / 60)) if len(acts) >= 2 else ""
     return res
 
@@ -2467,6 +2502,8 @@ def finish_stage(reg, rid, stage, a, grade=True):
         prev = row or {}
         if prev.get("measurement") == "manual":
             m.update({k: prev[k] for k in ("model", "tok_uncached", "tok_out", "cost_usd", "measurement")})
+        elif run.get("auto"):
+            m["measurement"] = "none"             # --auto never asks: the tool started the agent itself
         else:
             print("No agent log contains %s (Cursor or another agent?). "
                   "Type the numbers from the agent's usage screen (Enter = skip)." % rid)
@@ -2483,6 +2520,9 @@ def finish_stage(reg, rid, stage, a, grade=True):
     agent = m.pop("agent") or reg.data.get("agent", "")
     fields = dict(m)
     runs = count_runs(run["folder"], t0, t1)
+    if runs is None and run.get("auto"):
+        runs = next((x.get("emulator_runs") for x in M.cursor_sessions(
+            (run.get("session") or {}).get("path") or "") if (run.get("session") or {}).get("agent") == "cursor"), None)
     fields.update(alias=reg.data.get("alias", ""), task=run["task"], agent=agent, method=run["method"],
                   parent_run_id=run["parent"], skill_source=run["skill_source"], skill_hash=run["skill_hash"],
                   skill_has_solution=run["skill_has_solution"], price_table=PRICE_TABLE,
@@ -2505,8 +2545,11 @@ def finish_stage(reg, rid, stage, a, grade=True):
                                          writer=stage in ("1", "2"))
     outside = outside_workdirs(session_paths(run.get("session")), t0, t1, run["folder"])
     fields["isolation"], fields["isolation_note"] = isolation_with_workdirs(iso, iso_note, outside)
-    p0 = prompt_time(session_paths(run.get("session")), rid, t0, t1) if stage == "3" else None
+    p0 = prompt_time(session_paths(run.get("session")), rid, t0, t1) if stage == "3" and not run.get("auto") else None
     fields["overrun"] = overrun_flag(stage, t0 if p0 is None else p0, t1)   # 10 min from the prompt, not the set-up
+    if run.get("auto") and stage == "3":
+        fields["overrun"] = "no"           # --auto: the start is the launch and the tool stops the run at the box
+    fields["stopped"] = run.get("stopped", "")
     fields["settings_confirmed"] = run.get("settings_confirmed", "")
     reg.set_row(rid, stage, fields)
     reg.save()
@@ -2855,9 +2898,7 @@ def cmd_harvest(a):
     print("\n  Optional (2 min): python workshop.py judge")
     if getattr(a, "blocks", False):      # instructor view: where the shared code is
         print("\n".join(block_lines(dst, blocks)))
-    next_box(["python workshop.py new s3 --task all",
-              "(cmd/PowerShell: one command; it starts all four runs)"],
-             "stage 3: FOUR new agent threads (T3, T3 control, T6, T6 control). Run:")
+    s3_choice_box(reg, "stage 3: FOUR new agents (T3, T3 control, T6, T6 control). Choose one:")
     return 0
 
 
@@ -2903,7 +2944,7 @@ def cmd_judge(a):
     else:
         print("\n  Open a NEW thread (any model; memory off) in the folder above, copy the prompt between the")
         print("  PROMPT lines, paste it, and read the answer. About 2 minutes. Nothing is graded or sent.")
-    next_box("python workshop.py new s3 --task all", "when you have read the answer, go on to stage 3:")
+    s3_choice_box(reg, "when you have read the answer, go on to stage 3. Choose one:")
     return 0
 
 
@@ -3068,6 +3109,447 @@ def cmd_shadow(a):
     return 0
 
 
+# ------------------------------------------------------------------ stage 3 --auto
+# `new s3 --auto`: the tool starts the stage-3 agents itself (headless), stops each at the time box,
+# and then finishes each run like `done <run_id>`. The manual flow is unchanged.
+AUTO_TICK = 30             # seconds between two status blocks
+AUTO_POLL = 0.5            # seconds between two checks of the processes
+AUTO_BOX_SEC = None        # tests only: the time box in seconds (default: TIME_BOX_MIN minutes)
+AUTO_CHECK_SEC = 180       # doctor --check-auto: the tiny run must end within this time
+AUTO_MODEL = {"codex": "gpt-6-luna", "claude": "haiku", "cursor": "gpt-5.6-luna-high"}
+AUTO_AGENTS = tuple(AUTO_MODEL)
+CODEX_MIN = (0, 163)       # the npm `codex` 0.154 rejects gpt-6-luna on a ChatGPT account
+FREE_PLAN_RE = re.compile(r"Named models unavailable|Free plans can only use Auto", re.I)
+FREE_PLAN_MSG = "free plan: only Auto"
+_sleep = time.sleep
+AUTO_LABEL = {"t3": "T3 with skill", "n3": "T3 without skill", "t6": "T6 with skill", "n6": "T6 without skill"}
+
+
+def _as_argv(path):
+    return [sys.executable, path] if str(path).lower().endswith(".py") else [path]
+
+
+def _exe_override(agent):
+    p = os.environ.get("VESPER_%s_EXE" % agent.upper())
+    return _as_argv(p) if p else None
+
+
+def _version_tuple(text):
+    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", text or "")
+    return tuple(int(x or 0) for x in m.groups()) if m else None
+
+
+def _run_text(argv, timeout=20):
+    """Output (stdout + stderr) of a short CLI call, or '' when it cannot run."""
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=timeout, stdin=subprocess.DEVNULL)
+        return ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def _exe_version(argv):
+    if os.environ.get("VESPER_DOCTOR_SKIP_CLI"):
+        return "skipped"
+    out = _run_text(argv + ["--version"])
+    return out.splitlines()[0].strip() if out else ""
+
+
+def find_cli(agent):
+    """(argv, '') for the CLI that --auto starts, or (None, why). Codex = the Codex app's own codex.exe
+    (newest); the npm codex only when it is 0.163 or newer. Env VESPER_<AGENT>_EXE overrides (tests)."""
+    ov = _exe_override(agent)
+    if ov:
+        return ov, ""
+    lad = os.environ.get("LOCALAPPDATA", "")
+    if agent == "codex":
+        found = glob.glob(os.path.join(lad, "OpenAI", "Codex", "bin", "*", "codex.exe")) if lad else []
+        if found:
+            return [max(found, key=os.path.getmtime)], ""
+        p = shutil.which("codex")
+        if not p:
+            return None, "codex was not found"
+        argv = _as_argv(p)
+        v = _exe_version(argv)
+        if v == "skipped" or (_version_tuple(v) or (0, 0)) >= CODEX_MIN:
+            return argv, ""
+        return None, "codex on PATH is too old (%s); it needs 0.163 or newer" % (v or "version unknown")
+    if agent == "cursor":
+        p = os.path.join(lad, "cursor-agent", "cursor-agent.cmd") if lad else ""
+        if p and os.path.isfile(p):
+            return [p], ""
+        p = shutil.which("cursor-agent") or shutil.which("agent")
+        return (_as_argv(p), "") if p else (None, "cursor-agent was not found")
+    p = shutil.which("claude")
+    return (_as_argv(p), "") if p else (None, "claude was not found")
+
+
+def install_help(agent):
+    """How to get the CLI, in the form that works in the learner's shell (no %VAR% syntax)."""
+    if agent == "cursor":
+        if os.name == "nt":
+            return ["Install (PowerShell):  irm 'https://cursor.com/install?win32=true' | iex",
+                    "Then log in:  agent login   (it opens the browser)"]
+        return ["Install:  curl https://cursor.com/install -fsS | bash", "Then log in:  agent login"]
+    if agent == "codex":
+        return ["Install the Codex app (it contains codex.exe 0.163 or newer), or update the codex CLI."]
+    return ["Install Claude Code:  npm install -g @anthropic-ai/claude-code"]
+
+
+def cursor_logged_in(argv):
+    """True / False from `status` ('Logged in as ...' / 'Not logged in'), None when unknown."""
+    out = _run_text(argv + ["status"])
+    if re.search(r"not logged in", out, re.I):
+        return False
+    return True if re.search(r"logged in", out, re.I) else None
+
+
+def auto_ready(agent):
+    """(ok, text, fix_lines): can `--auto` start this agent? Never makes a model call."""
+    if agent not in AUTO_AGENTS:
+        return False, "not available for this agent (codex, claude or cursor only)", []
+    argv, why = find_cli(agent)
+    if not argv:
+        return False, why, install_help(agent)
+    ver = _exe_version(argv)
+    if agent == "cursor" and not os.environ.get("VESPER_DOCTOR_SKIP_CLI"):
+        li = cursor_logged_in(argv)
+        if li is False:
+            return False, "Cursor is not logged in", ["Log in:  agent login   (it opens the browser)"]
+        if li is None:
+            ver = (ver + ", login unknown").strip(", ")
+    return True, "ready (%s)" % (ver if ver and ver != "skipped" else "CLI found"), []
+
+
+def cursor_rules_note():
+    """(always_on, text): alwaysApply rules in ~/.cursor/rules, else a one-line reminder."""
+    d = os.path.join(user_home(), ".cursor", "rules")
+    for dp, _, fns in os.walk(d):
+        for fn in fns:
+            try:
+                with open(os.path.join(dp, fn), encoding="utf-8", errors="replace") as f:
+                    if re.search(r"alwaysApply\s*:\s*true", f.read(4000), re.I):
+                        return True, ("Cursor has alwaysApply rules in %s. --auto runs load them: "
+                                      "turn them off for a clean run." % d)
+            except OSError:
+                pass
+    return False, ("Cursor loads User Rules and alwaysApply rules in every run (Settings > Rules). "
+                   "Turn them off for a clean --auto run.")
+
+
+def _cmd_script(argv):
+    return os.name == "nt" and bool(argv) and str(argv[0]).lower().endswith((".cmd", ".bat"))
+
+
+def build_auto_cmd(agent, argv, model, folder, prompt):
+    """The command line of one headless stage-3 run (flags tested on 2026-10-23)."""
+    if agent == "codex":
+        return argv + ["exec", "-m", model, "-c", 'model_reasoning_effort="high"', "-c", "features.memories=false",
+                       "-s", "workspace-write", "--skip-git-repo-check", "-C", folder, prompt]
+    if agent == "cursor":
+        if _cmd_script(argv):         # a .cmd file cannot take new lines or double quotes in an argument
+            prompt = " ".join(prompt.split()).replace('"', "'")
+        return argv + ["-p", "--model", model, "--output-format", "stream-json", "--force", "--trust",
+                       "--workspace", folder, prompt]
+    return argv + ["-p", prompt, "--model", model, "--output-format", "json", "--permission-mode", "acceptEdits",
+                   "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep", "--setting-sources", "project"]
+
+
+def start_agent(cmd, folder, out_path):
+    """Start the agent in the background; stdout and stderr go to out_path. Returns the Popen."""
+    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+    with open(out_path, "wb") as out:
+        return subprocess.Popen(cmd, cwd=folder, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, **kw)
+
+
+def kill_tree(proc):
+    """Kill the process and all its children (Windows: taskkill /T /F, else the process group)."""
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=30)
+        else:
+            import signal
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def check_auto_run(agent):
+    """doctor --check-auto: ONE tiny run ("Reply OK") with the stage-3 model. Returns (ok, text)."""
+    argv, why = find_cli(agent)
+    if not argv:
+        return False, "error: " + why
+    tmp = tempfile.mkdtemp(prefix="vesper-auto-check-")
+    try:
+        cmd = build_auto_cmd(agent, argv, AUTO_MODEL[agent], tmp, "Reply OK")
+        try:
+            r = subprocess.run(cmd, cwd=tmp, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               timeout=AUTO_CHECK_SEC, stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            return False, "error: no answer in %d s" % AUTO_CHECK_SEC
+        except OSError as e:
+            return False, "error: %s" % e
+        text = (r.stdout or "") + "\n" + (r.stderr or "")
+        if FREE_PLAN_RE.search(text):
+            return False, FREE_PLAN_MSG
+        if r.returncode == 0:
+            return True, "OK (model %s answered)" % AUTO_MODEL[agent]
+        lines = [x.strip() for x in text.splitlines() if x.strip() and "warn" not in x.lower()]
+        return False, "error: " + (lines[-1][:70] if lines else "exit code %d" % r.returncode)
+    finally:
+        rmtree(tmp)
+
+
+def doctor_auto_lines(agent, check=False):
+    """Doctor lines about --auto for each agent; returns (lines, ready{agent: bool})."""
+    lines, ready = [], {}
+    for ag in AUTO_AGENTS:
+        ok, text, fix = auto_ready(ag)
+        ready[ag] = ok
+        lines.append("  INFO  --auto %s: %s" % (ag, text if ok else "NOT ready - " + text))
+        if not ok and ag == agent:
+            lines += ["          " + x for x in fix]
+    if agent in AUTO_AGENTS and check:
+        ok, text = check_auto_run(agent)
+        lines.append("  %-5s --check-auto %s (%s): %s" % ("OK" if ok else "WARN", agent, AUTO_MODEL[agent], text))
+        if text == FREE_PLAN_MSG:
+            lines.append("          Named models need a paid plan. Use the manual flow, or upgrade the plan.")
+        ready[agent] = ready[agent] and ok
+    if agent == "cursor":
+        always, text = cursor_rules_note()
+        lines.append("  %-5s %s" % ("WARN" if always else "INFO", text))
+    return lines, ready
+
+
+def auto_setup(reg, a):
+    """Check that --auto can start the learner's agent; set a.auto_agent / auto_argv / auto_model. Exits if not."""
+    agent = reg.data.get("agent") or ""
+    ok, text, fix = auto_ready(agent)
+    if not ok:
+        sys.exit("--auto is not ready for %s: %s\n%s\nOr run the manual flow without --auto."
+                 % (agent or "your agent", text, "\n".join("  " + x for x in fix)))
+    a.auto_agent = agent
+    a.auto_argv = find_cli(agent)[0]
+    a.auto_model = getattr(a, "model", None) or AUTO_MODEL[agent]
+
+
+def auto_item(reg, a, rid, folder, prompt):
+    """Mark a run as an --auto run and return its item for run_auto."""
+    run = reg.data["runs"][rid]
+    run.update(auto=True, auto_model=a.auto_model, settings_confirmed="auto")
+    reg.save()
+    key = ("n" if is_control(run) else "t") + run["task"][-1]
+    return dict(rid=rid, folder=folder, prompt=prompt, key=key, label=AUTO_LABEL.get(key, run["task"]),
+                state="waiting", t0=0.0, end=None, proc=None, rc=None)
+
+
+def fmt_mss(sec):
+    return "%d:%02d" % divmod(int(max(sec, 0)), 60)
+
+
+def status_block(items, now=None):
+    """One line per run: '  T3 with skill     running 3:20' (at most 72 characters)."""
+    now = time.time() if now is None else now
+    out = []
+    for it in items:
+        el = ((it["end"] or now) - it["t0"]) if it["state"] != "waiting" else 0
+        out.append("  %-17s %-7s %s" % (it["label"], it["state"], fmt_mss(el)))
+    return "\n".join(out)
+
+
+def auto_launch(reg, a, it):
+    rid = it["rid"]
+    run = reg.data["runs"][rid]
+    out = os.path.join(it["folder"], "agent-output.jsonl")
+    if a.auto_agent == "cursor":      # Cursor keeps no token counts: this file is the measurement source
+        run["session"] = {"agent": "cursor", "sid": rid, "path": out}
+    it["t0"] = time.time()
+    act = reg.get_active(rid)
+    if act:
+        act["start"] = it["t0"]       # the start is the launch time
+    reg.save()
+    try:
+        it["proc"] = start_agent(build_auto_cmd(a.auto_agent, a.auto_argv, a.auto_model, it["folder"], it["prompt"]),
+                                 it["folder"], out)
+        it["state"] = "running"
+    except OSError as e:
+        it["state"], it["end"] = "failed", it["t0"]
+        print(c_err("  %s could not start: %s" % (it["label"], e)))
+
+
+def auto_finish(reg, it):
+    """The normal finish of one run (like `done <run_id>`), without clearing the screen."""
+    rid = it["rid"]
+    run = reg.data["runs"][rid]
+    if it["state"] == "stopped":
+        run["stopped"] = "time"
+        reg.save()
+    try:
+        row = finish_stage(reg, rid, "3", argparse.Namespace(partial=it["state"] == "stopped", auto=True))
+    except Exception as e:  # noqa: BLE001  (one run must not stop the others)
+        print(c_err("  %s: the finish failed (%s). Later:  python workshop.py done %s" % (it["label"], e, rid)))
+        return None
+    print("\n" + c_bold("  FINISHED  %s   (%s)" % (it["label"], it["state"])))
+    if it["state"] == "done" and it["rc"]:
+        print(c_err("  The agent ended with exit code %s; see agent-output.jsonl in the run folder." % it["rc"]))
+    try:
+        with open(os.path.join(it["folder"], "agent-output.jsonl"), encoding="utf-8", errors="replace") as f:
+            if FREE_PLAN_RE.search(f.read(200000)):
+                print(c_err("  Cursor says: %s. This run used no named model; it does not match the others."
+                            % FREE_PLAN_MSG))
+    except OSError:
+        pass
+    print_wrong_folder(run, row)
+    print(run_summary(row, "3"))
+    warn = run_warnings(row)
+    if warn:
+        print("\n".join(warn))
+    return row
+
+
+def auto_start_screen(a, items):
+    print("\n" + c_banner(WIDE))
+    print(c_banner("  STAGE 3 --auto - the tool runs %s for you"
+                   % ("the %d agents" % len(items) if len(items) > 1 else "the agent")))
+    print(c_banner(WIDE))
+    eff = ", effort high" if a.auto_agent == "codex" else ""
+    print("  Agent: %s   Model: %s%s" % (a.auto_agent, a.auto_model, eff))
+    print("  Each agent works alone in its own run folder.")
+    print("  Time box %d min: the tool stops any agent still working." % TIME_BOX_MIN)
+    print("  Do not type in these folders. Ctrl+C stops all agents.")
+    print("  Start order:")
+    print("\n".join(chunk_lines(["%d. %s" % (i, it["label"]) for i, it in enumerate(items, 1)], indent=4)))
+
+
+def run_auto(reg, a, items):
+    """Start the agents in order, print a status block every AUTO_TICK seconds, stop each at the time box,
+    finish each run when it ends. Ctrl+C: kill all, keep the finished results."""
+    box = AUTO_BOX_SEC if AUTO_BOX_SEC is not None else TIME_BOX_MIN * 60
+    auto_start_screen(a, items)
+    try:
+        for it in items:
+            auto_launch(reg, a, it)
+        print("\n" + status_block(items))
+        last = time.time()
+        while any(it["state"] == "running" for it in items):
+            _sleep(AUTO_POLL)
+            now = time.time()
+            for it in items:
+                if it["state"] != "running":
+                    continue
+                rc = it["proc"].poll()
+                if rc is None and now - it["t0"] < box:
+                    continue
+                if rc is None:
+                    kill_tree(it["proc"])
+                it["state"], it["end"], it["rc"] = ("done" if rc is not None else "stopped"), now, rc
+                auto_finish(reg, it)
+                print("\n" + status_block(items))
+                last = now
+            if now - last >= AUTO_TICK:
+                print("\n" + status_block(items))
+                last = now
+    except KeyboardInterrupt:
+        for it in items:
+            if it["state"] == "running":
+                kill_tree(it["proc"])
+                it["state"], it["end"] = "killed", time.time()
+        print(c_err("\n  Stopped with Ctrl+C. All agents are killed. Finished results are saved."))
+        left = reg.actives("3")
+        if left:
+            still_working_box(reg, left)
+        return 1
+    print("\n" + SAVED_LINE)
+    show_compare(reg, items[0]["rid"] if len(items) == 1 else None)
+    left = reg.actives("3")
+    if left:
+        still_working_box(reg, left)
+    else:
+        all_done_box(reg)
+    return 0
+
+
+def s3_choice_box(reg, when):
+    """The NEXT box with both ways to run stage 3. --auto goes first only when doctor said it is ready."""
+    agent = reg.data.get("agent") or ""
+    auto = ["python workshop.py new s3 --task all --auto", "   the tool runs the 4 agents, about 10 min"]
+    manual = ["python workshop.py new s3 --task all", "   you open 4 threads in your agent app"]
+    if agent and agent not in AUTO_AGENTS:
+        next_box(manual, when)
+    elif (reg.data.get("auto_ready") or {}).get(agent):
+        next_box(auto + manual, when)
+    else:
+        next_box(manual + auto, when)
+
+
+# ------------------------------------------------------------------ stage 3 pages and resume
+S3_STOPPED = "Stopped. Run the same command again to see the pages."
+
+
+def s3_pages(reg, a, entries, seed, total=None):
+    """Show the stage-3 run pages for entries {key: (rid, folder, prompt)} in the printed start order,
+    then the NEXT box with one done line per run."""
+    order = [k for k in start_order_keys(seed) if k in entries]
+    total = total or len(order)
+    labels = [x for x in start_order(seed) if ORDER_KEY[x] in entries]
+    print("  Start in this order: " + " ".join("%d. %s" % (i, x) for i, x in enumerate(labels, 1)))
+    print(BENCH_LINE)
+    for i, k in enumerate(order, 1):
+        rid, f, p = entries[k]
+        s3_show(reg, rid, i, total, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k],
+                extra=(lambda: print("  Start in this order: " + " ".join(
+                    "%d. %s" % (j, x) for j, x in enumerate(labels, 1)))) if gate_on() else None)
+    next_box(["python workshop.py done %s   %s" % (entries[k][0], ALL_LABEL[k]) for k in order],
+             "when an agent is done (or at 10 min), run its line:")
+    return order
+
+
+def resume_s3(reg, a, same):
+    """Stage 3 is already set up (for example the learner pressed Ctrl+C in the page gate): show the pages of
+    the runs that are still active again, in the start order. Prompts are rebuilt as create_s3_run builds them.
+    With --auto: ask, then start only the runs that are not done."""
+    runs = reg.data["runs"]
+    print("Stage 3 is already set up. Showing its pages again.")
+    parent = runs[same[0]["run_id"]].get("parent")
+    multi = a.task in ("both", "all")
+    acts = [x for x in reg.actives("3") if runs[x["run_id"]].get("parent") == parent] if multi else same
+    entries = {}
+    for x in acts:
+        rid, run = x["run_id"], runs[x["run_id"]]
+        ctl = is_control(run)
+        entries[("n" if ctl else "t") + run["task"][-1]] = (
+            rid, run["folder"], render_prompt("stage3-noskill" if ctl else "stage3", task=run["task"], run_id=rid))
+    if multi:
+        for r in sorted(reg.data["rows"].values(), key=lambda r: float(r.get("start") or 0)):
+            if r["stage"] == "3" and runs.get(r["run_id"], {}).get("parent") == parent \
+                    and not reg.get_active(r["run_id"]):
+                print("  Already done: %s %s" % (run_label(reg, r["run_id"]), r["run_id"]))
+    first = next(iter(entries.values()))[0]
+    a.s3_first = first
+    seed = parent or ""
+    if getattr(a, "auto", False):
+        order = [k for k in start_order_keys(seed) if k in entries]
+        if ask("Start the agents for the %d runs that are not done? [Y/n]: " % len(order), "y").lower().startswith("n"):
+            print(S3_STOPPED)
+            return 1
+        return run_auto(reg, a, [auto_item(reg, a, entries[k][0], entries[k][1], entries[k][2]) for k in order])
+    if not gate_on():
+        s3_header(reg, a, len(entries) > 1, total=len(entries) if len(entries) in (3, 4) else None)
+    s3_pages(reg, a, entries, seed)
+    return 0
+
+
 # ------------------------------------------------------------------ CLI
 def parse(argv):
     ap = argparse.ArgumentParser(prog="workshop.py", description=__doc__,
@@ -3076,6 +3558,8 @@ def parse(argv):
     s = sub.add_parser("doctor")
     s.add_argument("--agent", choices=["codex", "claude", "cursor", "other"])
     s.add_argument("--alias")
+    s.add_argument("--check-auto", action="store_true",
+                   help="ONE tiny agent run (Reply OK) with the stage-3 model: can --auto use it?")
     s.set_defaults(func=cmd_doctor)
     s = sub.add_parser("new")
     s.add_argument("stage", choices=["s1", "s3"])
@@ -3084,6 +3568,9 @@ def parse(argv):
     s.add_argument("--name", help="T6 (or both) only: your name on the screen (up to 8 letters A-Z; default: asked)")
     s.add_argument("--method", default="random", choices=["random"] + METHODS)
     s.add_argument("--skill", default="own", help="own | wiki | <folder with SKILL.md>")
+    s.add_argument("--auto", action="store_true",
+                   help="stage 3: the tool starts the agents itself (headless) and stops each at 10 min")
+    s.add_argument("--model", help="with --auto: the model (default: the stage-3 model of your agent)")
     s.set_defaults(func=cmd_new)
     s = sub.add_parser("done")
     s.add_argument("run_id", nargs="?", help="the run to end (needed when two stage-3 runs are active)")

@@ -73,7 +73,8 @@ class TwoRunsTest(unittest.TestCase):
 
     def test_harvest_box_recommends_task_all(self):
         self.assertIn("python workshop.py new s3 --task all", self.harvest_out)
-        self.assertIn("one command", self.harvest_out)
+        self.assertIn("python workshop.py new s3 --task all --auto", self.harvest_out)   # both ways are shown
+        self.assertIn("you open 4 threads in your agent app", self.harvest_out)
 
     def test_new_s3_both_creates_two_runs(self):
         out = capture(run, self.w, "new", "s3", "--task", "both", "--name", "MIRA")
@@ -90,8 +91,11 @@ class TwoRunsTest(unittest.TestCase):
         self.assertIn("name on T6: MIRA", out)
         for x in acts:
             self.assertIn("python workshop.py done " + x["run_id"], out)
-        with self.assertRaises(SystemExit):
-            run(self.w, "new", "s3", "--task", "both")
+        again = capture(run, self.w, "new", "s3", "--task", "both")      # no exit: the pages are shown again
+        self.assertIn("Stage 3 is already set up. Showing its pages again.", again)
+        for x in acts:
+            self.assertIn("python workshop.py done " + x["run_id"], again)
+        self.assertEqual(len(self.w.Registry.load().actives()), 2)        # no new run was created
 
     def test_name_from_alias_without_question(self):
         reg = self.w.Registry.load()
@@ -140,8 +144,9 @@ class TwoRunsTest(unittest.TestCase):
         t3, _ = self._new("T3")
         reg = self.w.Registry.load()
         self.assertEqual([x["run_id"] for x in reg.actives()], [t6, t3])
-        with self.assertRaises(SystemExit):                     # one run per stage-3 task
-            run(self.w, "new", "s3", "--task", "T3")
+        again = capture(run, self.w, "new", "s3", "--task", "T3")        # one run per task: its page again
+        self.assertIn("Showing its pages again", again)
+        self.assertEqual([x["run_id"] for x in self.w.Registry.load().actives()], [t6, t3])
         with self.assertRaises(SystemExit):                     # no stage 1 while stage 3 runs
             run(self.w, "new", "s1")
         with self.assertRaises(SystemExit):                     # no stage 2 while stage 3 runs
