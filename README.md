@@ -102,7 +102,7 @@ saved as "ungraded + stopped"; `grade` scores it later as partial work. `--task 
 `new s3 --task T6` asks for your name (up to 8 letters A-Z) and
 writes it into `tasks/T6.md`; T6 is a different task that shares components with T3. `new s3 --task T3` repeats the
 stage-1 game. Open each folder in its own new thread and choose the small model there (Claude Code: Haiku;
-Codex: gpt-6-luna; Cursor: its cheapest model). The prompt gives a budget of 6 emulator runs; the time box is
+Codex: gpt-6-luna; Cursor: GPT-5.6 Luna High, not Auto). The prompt gives a budget of 6 emulator runs; the time box is
 10 minutes (by hand the tool records the time but does not stop the agent: you stop it; `--auto` stops it for you). End each run with the `done <run_id>`
 command that `new` printed.
 

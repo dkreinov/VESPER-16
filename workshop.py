@@ -404,7 +404,7 @@ LARGE_SHORT = {"claude": "your default model (Sonnet or Opus, not Haiku)",
                "cursor": "a large model from the menu (not Auto)"}
 STOP_LINE = "Stop the agent at %d min, then run its done line." % TIME_BOX_MIN
 SMALL_SHORT = {"claude": "Haiku (/model haiku)", "codex": "gpt-6-luna, effort high",
-               "cursor": "its cheapest model"}
+               "cursor": "GPT-5.6 Luna High (not Auto)"}
 
 
 def cursor_app_lines(agent, total=4):
