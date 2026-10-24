@@ -3387,7 +3387,13 @@ def _exe_version(argv):
     if os.environ.get("VESPER_DOCTOR_SKIP_CLI"):
         return "skipped"
     out = _run_text(argv + ["--version"])
-    return out.splitlines()[0].strip() if out else ""
+    # a CLI can print warnings first (Linux codex: "WARNING: failed to clean up stale arg0 temp dirs ..."):
+    # take the first line that holds a version number, not simply the first line
+    lines = [x.strip() for x in out.splitlines() if x.strip()]
+    for x in lines:
+        if re.search(r"\d+\.\d+", x) and "warn" not in x.lower():
+            return x
+    return lines[0] if lines else ""
 
 
 def find_cli(agent):
