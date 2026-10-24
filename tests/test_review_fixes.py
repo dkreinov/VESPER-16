@@ -1,6 +1,6 @@
 """Final-review fixes: stopped runs stay gradable, overrun to the last activity, repeat question,
 check-auto probe, T6 name for a non-Latin alias, box tables, minimal stage-3 output."""
-import contextlib, io, os, sys, time, unittest
+import contextlib, io, os, re, sys, time, unittest
 from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
@@ -60,8 +60,9 @@ class Tables(unittest.TestCase):
             out = FakeTTY(enc)
             with mock.patch.object(sys, "stdout", out), mock.patch.dict(os.environ, {"VESPER_NO_CLEAR": "1"}):
                 run(self.w, "show")
-            lines = [x for x in out.getvalue().splitlines() if "vesper-runs" not in x]     # a path is one word
-            self.assertTrue(all(len(x) <= 72 for x in lines))
+            # a path is one word; measure the VISIBLE width (a colour terminal adds escape codes)
+            lines = [re.sub(r"\x1b\[[0-9;]*m", "", x) for x in out.getvalue().splitlines() if "vesper-runs" not in x]
+            self.assertTrue(all(len(x) <= 72 for x in lines), [x for x in lines if len(x) > 72][:3])
             self.assertEqual(any("┌" in x for x in lines), enc == "utf-8")
 
 

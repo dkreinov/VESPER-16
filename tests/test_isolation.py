@@ -306,7 +306,7 @@ class DoneFieldsTest(unittest.TestCase):
         w, rid, out = self._s1(60, ["ls"])
         row = w.Registry.load().row(rid, "1")
         self.assertEqual((row["isolation"], row["overrun"]), ("not_detected", ""))   # no time box in stage 1
-        self.assertNotIn("Isolation", out)          # only a problem is printed
+        self.assertIn("Isolation OK", out)          # summary line (organiser's approved layout); no extra lines
         self.assertNotIn("not proof", out)
         self.assertNotIn("time box: flagged", out)
 

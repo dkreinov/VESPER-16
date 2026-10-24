@@ -474,6 +474,7 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
         if extra:
             extra()
         print("\n  1. Open this folder as a NEW project in your agent (choose exactly this folder, not a folder above it):\n\n       %s" % folder)
+        print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
         print("\n  2. Start a NEW thread.")
         n = 3
         if mem:
@@ -895,6 +896,7 @@ def next_box(cmd, when):
 def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False, model=None):
     print("\n  1. Open this folder as a NEW project in your agent (choose exactly this folder, not a folder above it):")
     print("\n       %s" % folder)
+    print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
     print("\n  2. Start a NEW thread." + (("  Model: " + model) if model else ""))
     if mem:
         print("\n  3. " + c_next("Type /memories first and turn off memory for this chat."))
@@ -1026,6 +1028,10 @@ ORDER_KEY = {"T3 with skill": "t3", "T3 without skill": "n3", "T6 with skill": "
 def start_order_keys(seed):
     """start_order as ALL_ORDER keys (t3, n3, t6, n6)."""
     return [ORDER_KEY[x] for x in start_order(seed)]
+
+
+BENCH_LINE = ("  Together, these 4 runs are a small benchmark of your skill: the same task and a different task,"
+              " each with and without it.")
 
 
 def start_order_line(seed):
@@ -1807,6 +1813,7 @@ def _cwd_norm(v):
     v = v.strip()
     if v[:7].lower() == "file://":
         v = urllib.parse.unquote(v[7:])
+        v = "/" + v.lstrip("/") if v.startswith("/") else v    # POSIX normpath keeps '//': never two slashes
         if re.match(r"^/[A-Za-z]:", v):
             v = v[1:]
     if not _is_abs(v):
@@ -2371,7 +2378,8 @@ SHOW_WIDTHS = [16, 2, 4, 5, 4, 6, 9]          # the box table is 70 columns wide
 
 
 def run_summary(row, stage=None):
-    """Time, runs and cost of a stage on short lines. Memory and isolation print only as warnings."""
+    """Time, runs, cost, memory and isolation of a stage on short lines (the organiser's approved layout:
+    "Time 5.5 min   Cost $0.24 (estimate)   Memory off   Isolation OK"); details print only as warnings."""
     el, cost = _val(row, "elapsed_min"), _val(row, "cost_usd")
     stage = stage or row.get("stage")
     em = str(row.get("emulator_runs", "")).strip()
@@ -2379,6 +2387,8 @@ def run_summary(row, stage=None):
     if stage in ("1", "3") and em not in ("", "unknown"):
         chunks.append("Runs %s%s" % (em, " of 20" if stage == "1" else ""))
     chunks.append("Cost %s" % ("unknown" if cost is None else "$%.2f (estimate)" % cost))
+    chunks.append("Memory %s" % {"no": "off", "yes": "ON"}.get(row.get("memory_used", ""), "unknown"))
+    chunks.append("Isolation %s" % {"not_detected": "OK", "detected": "CHECK"}.get(row.get("isolation", ""), "unknown"))
     out = chunk_lines(chunks)
     if stage in ("1", "3"):
         if _val(row, "score") is not None:
@@ -4082,8 +4092,10 @@ def s3_pages(reg, a, entries, seed, total=None):
     order = [k for k in start_order_keys(seed) if k in entries]
     total = total or len(order)
     labels = [x for x in start_order(seed) if ORDER_KEY[x] in entries]
-    order_line = lambda: print("  Start in this order: " + " ".join(
-        "%d. %s" % (i, x) for i, x in enumerate(labels, 1)))
+    def order_line():
+        print("  Start in this order: " + " ".join("%d. %s" % (i, x) for i, x in enumerate(labels, 1)))
+        if total == 4:
+            print(BENCH_LINE)              # organiser's decision: name the 4 runs a benchmark
     if not gate_on():
         order_line()                       # a terminal clears the screen at each page: the order is on page 1
     for i, k in enumerate(order, 1):
