@@ -14,8 +14,10 @@ Env switches:
   FAKE_VERSION     text printed for --version (default "codex-cli 0.163.0")
   FAKE_LOGIN       "no" -> `status` prints "Not logged in"
   FAKE_INIT_MODEL  the model name Cursor reports in its init event (default: the --model argument)
+  FAKE_PROBE_NOWRITE=1   the check-auto probe: do NOT write out/ok.txt (permissions too narrow)
+  FAKE_PROBE_OUTSIDE=1   the check-auto probe: ALSO write the file outside the folder (no sandbox)
 """
-import json, os, subprocess, sys, time, uuid
+import json, os, re, subprocess, sys, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
@@ -54,6 +56,15 @@ def main(argv):
     if os.environ.get("FAKE_FAIL"):            # any agent: an error line on stderr, exit code 1, no tool call
         sys.stderr.write(os.environ["FAKE_FAIL"] + "\n")
         return 1
+    if "out/ok.txt" in prompt:                 # the doctor --check-auto probe
+        if not os.environ.get("FAKE_PROBE_NOWRITE"):
+            os.makedirs(os.path.join(folder, "out"), exist_ok=True)
+            with open(os.path.join(folder, "out", "ok.txt"), "w") as f:
+                f.write("OK")
+        m = re.search(r"into (\S+) \.", prompt)
+        if m and os.environ.get("FAKE_PROBE_OUTSIDE"):
+            with open(m.group(1), "w") as f:
+                f.write("NO")
     if os.environ.get("FAKE_CHILD"):
         subprocess.Popen([sys.executable, "-c",
                           "import sys,time\n"
