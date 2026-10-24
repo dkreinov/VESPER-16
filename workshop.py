@@ -3548,7 +3548,9 @@ def start_agent(cmd, folder, out_path, stdin_text=None):
     finally:
         if src:
             src.close()
-    proc._vesper_job = _job_for(proc)
+    # No Job Object for Codex: inside one, the Codex Windows sandbox fails ("workspace routing discovery failed",
+    # real test 2026-10-24). Codex stays stoppable with taskkill /T (kill_tree) and runs in its own sandbox.
+    proc._vesper_job = None if os.path.basename(str(cmd[0])).lower().startswith("codex") else _job_for(proc)
     return proc
 
 
@@ -3714,7 +3716,10 @@ def check_auto_run(agent):
     argv, why = find_cli(agent)
     if not argv:
         return False, "error: " + why
-    tmp = tempfile.mkdtemp(prefix="vesper-auto-check-")
+    # NOT tempfile.mkdtemp: since Python 3.12 it gives an owner-only folder on Windows, and the Codex sandbox
+    # (another, restricted user) gets "Access denied" there - a false FAIL. Real run folders use os.makedirs too.
+    tmp = os.path.join(ws_home(), ".check-auto-%s" % new_code())
+    os.makedirs(tmp)
     outside = os.path.join(user_home(), "vesper-probe-%s.txt" % new_code())
     try:
         os.makedirs(os.path.join(tmp, "bin"))
