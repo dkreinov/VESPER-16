@@ -269,18 +269,49 @@ class AutoClaude(AutoBase):
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         tools = argv[argv.index("--allowedTools") + 1:]
         self.assertEqual(tools, self.w.CLAUDE_TOOLS)               # the last flag: nothing after the list
+        for c in ("ls", "cat", "head", "tail", "grep", "wc", "find"):
+            self.assertIn("Bash(%s:*)" % c, tools)
+        self.assertIn("Bash(pwd)", tools)
+        self.assertEqual(argv[argv.index("--append-system-prompt") + 1], self.w.CLAUDE_SYSTEM)
+        self.assertIn("Do not chain commands with &&", self.w.CLAUDE_SYSTEM)
+        self.assertNotIn("Shell rule", d["stdin"])                  # the task prompt itself is unchanged
         self.assertIn("Bash(bin/vesper:*)", tools)
         self.assertIn("Bash(./bin/vesper:*)", tools)
-        ro = ("Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(mkdir out)", "Bash(mkdir -p out)")
+        ro = ("Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(wc:*)",
+              "Bash(find:*)", "Bash(pwd)", "Bash(mkdir out)", "Bash(mkdir -p out)")
         self.assertFalse([t for t in tools if t.startswith("Bash") and "vesper" not in t and t not in ro])  # no free Bash
         self.assertFalse([t for t in tools if "python" in t or t == "Bash"])
-        self.assertIn("Claude may only run bin/vesper (and ls, cat) and edit its run folder.", out)
+        self.assertIn("Claude may only run bin/vesper (and ls, cat, grep) and edit its run folder.", out)
         r = self.rows3()[rid]
         self.assertEqual(r["agent"], "claude")
         self.assertEqual(r["model"], "claude-haiku-5-5")
         self.assertEqual(r["tok_out"], 500)
         self.assertEqual(r["settings_confirmed"], "auto")
         self.assertEqual(long_lines(out), [])
+
+
+class ClaudeUsageFixture(unittest.TestCase):
+    """Real-shaped Claude Code usage (Windows run 2026-10-24, claude-haiku-4-5, 1 h cache writes): input 114,
+    cache write 52926, cache read 591456, output 32605 (15115 of it thinking). The stream-json result said
+    total_cost_usd 0.3281366; the tool must give the same."""
+
+    def test_tokens_and_cost_match_claude_result(self):
+        import measure as M
+        tot = dict(i=114, cw=52926, cr=591456, o=32605)
+        c = M.cost(tot, {"claude-haiku-4-5-20251001"})
+        self.assertAlmostEqual(c, 0.3281366, places=4)
+        self.assertEqual("%.2f" % c, "0.33")
+
+    def test_log_reader_maps_usage_fields(self):
+        import measure as M, fakes
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        os.environ["CLAUDE_CONFIG_DIR"] = d
+        t = time.time()
+        fakes.claude_log("sid1", d, [(t, 114, 591456, 52926, 32605, "")], model="claude-haiku-4-5-20251001")
+        s = M.claude_sessions(t - 5, t + 5, "sid1")
+        self.assertEqual(s[0]["tot"], dict(i=114, cw=52926, cr=591456, o=32605))
+        self.assertAlmostEqual(M.cost(s[0]["tot"], s[0]["models"]), 0.3281366, places=4)
 
 
 class AutoCursor(AutoBase):
@@ -348,6 +379,16 @@ class AutoCursor(AutoBase):
         self.assertIn("run failed", charts.flag_reasons(r))
         self.assertEqual(charts.outcome(r), "ungraded")
 
+    def test_usage_limit_recorded_score_kept(self):
+        os.environ["FAKE_LIMIT"] = "1"
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        r = next(iter(self.rows3().values()))
+        self.assertEqual(r["stopped"], "limit")
+        self.assertEqual(r["error_note"], "Cursor usage limit reached")
+        self.assertNotEqual(r["grading"], "none")                           # the saved solution is graded
+        for k in ("tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd"):
+            self.assertEqual(r[k], "", k)
+
     def test_killed_run_tokens_and_cost_unknown(self):
         os.environ["FAKE_NO_USAGE"] = "1"
         capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
@@ -409,8 +450,9 @@ class CmdLauncher(AutoBase):
     def test_claude_cmd(self):
         rid, run_, d, prompt, out = self.launch("claude")
         self.assertEqual(d["argv"], ["-p", "--model", "haiku", "--output-format", "json", "--permission-mode",
-                                     "dontAsk", "--setting-sources", "project", "--allowedTools"]
-                         + self.w.CLAUDE_TOOLS)
+                                     "dontAsk", "--setting-sources", "project", "--append-system-prompt",
+                                     self.w.CLAUDE_SYSTEM, "--disallowedTools"] + self.w.CLAUDE_DENY
+                         + ["--allowedTools"] + self.w.CLAUDE_TOOLS)
         self.assertEqual(d["stdin"], prompt)                        # the whole prompt, on stdin
         self.assertGreater(prompt.count("\n"), 1)
         self.assertEqual(self.rows3()[rid]["tok_out"], 500)         # the run was measured

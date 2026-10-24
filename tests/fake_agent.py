@@ -10,6 +10,7 @@ Env switches:
   FAKE_CHILD=1     start a child process that writes folder/heartbeat.txt every 0.1 s (tests the tree kill)
   FAKE_FREEPLAN=1  Cursor free plan: "Named models unavailable" on stderr, exit code 1
   FAKE_FAIL        any agent: print this text on stderr and exit with code 1 at once
+  FAKE_LIMIT=1     Cursor: "hit your usage limit" after the tool calls, no result event, exit code 1
   FAKE_NO_USAGE=1  Cursor: no result event (as a run killed before its usage report)
   FAKE_VERSION     text printed for --version (default "codex-cli 0.163.0")
   FAKE_LOGIN       "no" -> `status` prints "Not logged in"
@@ -92,6 +93,10 @@ def main(argv):
              "tool_call": {"shellToolCall": {"args": {"command": "bin/vesper run solutions/T3.vsa"}}}})
         say({"type": "assistant", "timestamp_ms": int(t1 * 1000),
              "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}})
+        if os.environ.get("FAKE_LIMIT"):         # free plan: cut off, no result line
+            sys.stderr.write("ActionRequiredError: You've hit your usage limit. Upgrade your plan.
+")
+            return 1
         if os.environ.get("FAKE_NO_USAGE"):
             return 0
         say({"type": "result", "subtype": "success", "duration_ms": int((t1 - t0) * 1000),

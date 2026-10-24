@@ -3488,8 +3488,16 @@ CMD_MAX = 8000             # cmd.exe cuts a command line at 8191 characters
 # Claude Code (dontAsk = every tool that is not in this list is refused): run the emulator, read, edit and
 # write only below the run folder. "./**" is relative to the working folder (the run folder).
 CLAUDE_TOOLS = ["Bash(bin/vesper:*)", "Bash(./bin/vesper:*)", "Bash(bin/vesper.exe:*)", "Bash(./bin/vesper.exe:*)",
-                "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(mkdir out)", "Bash(mkdir -p out)",
+                "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(wc:*)",
+                "Bash(find:*)", "Bash(pwd)", "Bash(mkdir out)", "Bash(mkdir -p out)",
                 "Read", "Glob", "Grep", "Edit(./**)", "Write(./**)", "Skill"]
+# find can run or delete things: these two forms are refused even though find is allowed.
+CLAUDE_DENY = ["Bash(find:* -exec*)", "Bash(find:* -delete*)"]
+# Same text for every --auto Claude run (both arms). A denied compound command made Haiku conclude "Bash is off".
+CLAUDE_SYSTEM = ("Shell rule for this run: only single shell commands are allowed: bin/vesper (or bin/vesper.exe), "
+                 "ls, cat, head, tail, grep, wc, find, pwd. Do not chain commands with &&, ; or pipes. "
+                 "A denied command does not mean the shell is off: run bin/vesper directly. "
+                 "Use the file tools to read and write files.")
 
 
 class LaunchError(Exception):
@@ -3521,7 +3529,8 @@ def build_auto_cmd(agent, argv, model, folder, prompt):
                               % len(subprocess.list2cmdline(cmd)))
         return cmd, None
     return argv + ["-p", "--model", model, "--output-format", "json", "--permission-mode", "dontAsk",
-                   "--setting-sources", "project", "--allowedTools"] + CLAUDE_TOOLS, prompt
+                   "--setting-sources", "project", "--append-system-prompt", CLAUDE_SYSTEM,
+                   "--disallowedTools"] + CLAUDE_DENY + ["--allowedTools"] + CLAUDE_TOOLS, prompt
 
 
 CURSOR_PERMS = {"permissions": {"allow": ["Shell(bin/vesper)", "Shell(bin/vesper.exe)", "Read(./**)",
@@ -3732,8 +3741,9 @@ def check_auto_run(agent):
         shutil.copy2(vesper_bin(), os.path.join(tmp, "bin"))
         if agent == "cursor":
             write_cursor_cli(tmp)
-        prompt = ("Write the word OK into out/ok.txt, run bin/vesper --version, then try to write the word NO "
-                  "into %s . Reply with the version text of bin/vesper." % outside.replace("\\", "/"))
+        prompt = ("Write the word OK into out/ok.txt. Then run the single command bin/vesper --version (no "
+                  "&&, no ;, no pipe). Then try to write the word NO into %s . Reply with the version text "
+                  "of bin/vesper." % outside.replace("\\", "/"))
         try:
             cmd, stdin_text = build_auto_cmd(agent, argv, AUTO_MODEL[agent], tmp, prompt)
             rc, text = run_capture(cmd, AUTO_CHECK_SEC, cwd=tmp, stdin_text=stdin_text)
@@ -3820,7 +3830,7 @@ def auto_setup(reg, a):
 # The flags that limit an --auto agent (one line of at most 72 characters each; shown before the start).
 # They say what is ASKED. The screen says "verified" only after `doctor --check-auto` passed here.
 AUTO_SAFETY = {"codex": "Codex starts in a sandbox: it may change files in its run folder only.",
-               "claude": "Claude may only run bin/vesper (and ls, cat) and edit its run folder.",
+               "claude": "Claude may only run bin/vesper (and ls, cat, grep) and edit its run folder.",
                "cursor": "Cursor may only run bin/vesper and use files in its run folder."}
 NOT_VERIFIED = "Not verified on this computer: run  doctor --check-auto"
 VERIFIED = "Verified by doctor --check-auto: a write outside failed."
@@ -3880,6 +3890,8 @@ AUTO_LOCK = ".agent.lock"
 AUTO_MIN_SEC = 60          # an agent that ends sooner than this did not do the task: the run failed
 AUTO_ERROR_RE = re.compile(r"Named models unavailable|Free plans can only use Auto|Authentication required"
                            r"|not supported when using Codex with a ChatGPT account|Not logged in", re.I)
+USAGE_LIMIT_RE = re.compile(r"hit your usage limit", re.I)
+USAGE_LIMIT_NOTE = "Cursor usage limit reached"
 _ERROR_LINE = re.compile(r"error|failed|denied|unauthori[sz]ed|invalid|not found|cannot|can't", re.I)
 
 
@@ -3976,6 +3988,8 @@ def agent_error(it):
             return x
         if not first_err and _ERROR_LINE.search(x) and "warn" not in x.lower():
             first_err = x
+    if USAGE_LIMIT_RE.search(_output_text(it["folder"])) and not _agent_worked(it):
+        return USAGE_LIMIT_NOTE
     el = (it["end"] or time.time()) - it["t0"]
     if el < AUTO_MIN_SEC:
         return first_err or "the agent ended after %d s (exit code %s)" % (el, it["rc"])
@@ -4026,6 +4040,9 @@ def auto_finish(reg, it):
             return auto_error(reg, it, why)
     if it["state"] in ("stopped", "killed"):
         run["stopped"] = "time" if it["state"] == "stopped" else "ctrl-c"
+        reg.save()
+    elif USAGE_LIMIT_RE.search(_output_text(it["folder"])):
+        run["stopped"], run["error_note"] = "limit", USAGE_LIMIT_NOTE     # cut off by the plan; the saved solution is graded
         reg.save()
     try:
         row = finish_stage(reg, rid, "3", argparse.Namespace(partial=it["state"] in ("stopped", "killed"), auto=True))
