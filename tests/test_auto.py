@@ -15,7 +15,16 @@ import measure  # noqa: E402
 
 ENV_KEYS = ("VESPER_CODEX_EXE", "VESPER_CURSOR_EXE", "VESPER_CLAUDE_EXE", "FAKE_SLEEP", "FAKE_SLOW_KEYS",
             "FAKE_SLOW_SEC", "FAKE_CHILD", "FAKE_FREEPLAN", "FAKE_VERSION", "FAKE_LOGIN", "FAKE_INIT_MODEL",
-            "LOCALAPPDATA")
+            "FAKE_FAIL", "FAKE_NO_USAGE", "LOCALAPPDATA")
+
+
+def make_echo_cmd(d, name="agent.cmd"):
+    """A fake .cmd launcher (as npm's claude.cmd / codex.cmd and cursor-agent.cmd): cmd.exe runs it and passes
+    %* to fake_agent.py, which writes the argv that arrived (and the stdin) to argv.json."""
+    p = os.path.join(d, name)
+    with open(p, "w", newline="\r\n") as f:
+        f.write('@echo off\n"%s" "%s" %%*\n' % (sys.executable, FAKE))
+    return p
 
 
 def capture(w, *argv):
@@ -54,6 +63,7 @@ class AutoBase(unittest.TestCase):
         reg.save()
         self.w.AUTO_TICK, self.w.AUTO_POLL = 0.3, 0.05
         self.w.AUTO_BOX_SEC = 30
+        self.w.AUTO_MIN_SEC = 0                  # the fake agents end in 0.2 s: not an error here
 
     def tearDown(self):
         for k, v in self.saved.items():
@@ -73,7 +83,7 @@ class AutoBase(unittest.TestCase):
 
 class AutoCodex(AutoBase):
     def test_all_four_run_and_finish(self):
-        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--name", "MIRA")
+        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
         self.assertEqual(rc, 0)
         self.assertEqual(long_lines(out), [])
         self.assertIn("STAGE 3 --auto - the tool runs the 4 agents for you", out)
@@ -103,7 +113,7 @@ class AutoCodex(AutoBase):
         self.assertEqual(out.count("FINISHED"), 4)
 
     def test_command_line_codex_verbatim(self):
-        capture(self.w, "new", "s3", "--task", "T3", "--auto")
+        capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
         _, runs = self.runs3()
         rid, run_ = next(iter(runs.items()))
         with open(os.path.join(run_["folder"], "argv.json")) as f:
@@ -116,11 +126,13 @@ class AutoCodex(AutoBase):
             self.assertTrue(any(argv[i:i + 2] == pair for i in range(len(argv))), pair)
         self.assertIn("--skip-git-repo-check", argv)
         self.assertEqual(argv[argv.index("-C") + 1], run_["folder"])
-        self.assertIn("Workshop run: " + rid, argv[-1])
+        self.assertEqual(argv[-1], "-")                            # the prompt comes on stdin
+        self.assertIn("Workshop run: " + rid, d["stdin"])
+        self.assertIn("\n", d["stdin"])                            # the whole prompt, new lines included
         self.assertEqual(os.path.normcase(d["cwd"]), os.path.normcase(run_["folder"]))
 
     def test_model_override(self):
-        capture(self.w, "new", "s3", "--task", "T3", "--auto", "--model", "gpt-6-sol")
+        capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes", "--model", "gpt-6-sol")
         _, runs = self.runs3()
         rid, run_ = next(iter(runs.items()))
         with open(os.path.join(run_["folder"], "argv.json")) as f:
@@ -136,12 +148,12 @@ class AutoCodex(AutoBase):
 
     def test_auto_needs_stage3_and_known_agent(self):
         with self.assertRaises(SystemExit):
-            run(self.w, "new", "s1", "--auto")
+            run(self.w, "new", "s1", "--auto", "--yes")
         reg = self.w.Registry.load()
         reg.data["agent"] = "other"
         reg.save()
         with self.assertRaises(SystemExit) as cm:
-            run(self.w, "new", "s3", "--task", "all", "--auto")
+            run(self.w, "new", "s3", "--task", "all", "--auto", "--yes")
         self.assertIn("not ready", str(cm.exception))
 
     def test_time_box_kills_the_process_tree(self):
@@ -149,7 +161,7 @@ class AutoCodex(AutoBase):
         os.environ["FAKE_CHILD"] = "1"
         self.w.AUTO_BOX_SEC = 2.5
         t = time.time()
-        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--name", "MIRA")
+        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
         self.assertLess(time.time() - t, 20)
         self.assertEqual(rc, 0)
         self.assertEqual(long_lines(out), [])
@@ -181,22 +193,41 @@ class AutoCodex(AutoBase):
                 raise KeyboardInterrupt
 
         self.w._sleep = fake_sleep
-        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--name", "MIRA")
+        import signal
+        seen = []
+        real_kill = self.w.kill_tree
+
+        def kill(proc):
+            seen.append(signal.getsignal(signal.SIGINT))
+            return real_kill(proc)
+
+        self.w.kill_tree = kill
+        before = signal.getsignal(signal.SIGINT)
+        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
         self.assertEqual(rc, 1)
-        self.assertIn("Stopped with Ctrl+C. All agents are killed. Finished results are saved.", flat(out))
+        self.assertIn("Stopped with Ctrl+C. All agents are killed.", flat(out))
+        self.assertIn("Each stopped run is saved as partial work.", flat(out))
+        self.assertNotRegex(out, r"agents? (is|are) still working")   # the agents are dead
         self.assertEqual(long_lines(out), [])
+        self.assertIn(signal.SIG_IGN, seen)                         # a second Ctrl+C cannot stop the kill loop
+        self.assertEqual(signal.getsignal(signal.SIGINT), before)   # and the handler is back afterwards
         rows = self.rows3()
         reg, runs = self.runs3()
-        self.assertEqual(len(rows), 2)                              # the two quick runs are finished
-        self.assertEqual(len(reg.actives("3")), 2)                  # the killed ones stay active: `done` works
-        for r in rows.values():
-            self.assertEqual(r["stopped"], "")
-        for k, r in runs.items():
-            if k not in rows:
-                hb = os.path.join(r["folder"], "heartbeat.txt")
-                m1 = open(hb).read()
-                time.sleep(0.6)
-                self.assertEqual(open(hb).read(), m1)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(reg.actives("3"), [])                      # the killed runs are finished as partial
+        by = {("n" if self.w.is_control(r) else "t") + r["task"][-1]: k for k, r in runs.items()}
+        for k in ("n3", "n6"):
+            r = rows[by[k]]
+            self.assertEqual(r["stopped"], "ctrl-c")
+            self.assertIn(r["grading"], ("partial", "ungraded"))
+            self.assertEqual(r["overrun"], "no")
+            hb = os.path.join(runs[by[k]]["folder"], "heartbeat.txt")
+            m1 = open(hb).read()
+            time.sleep(0.6)
+            self.assertEqual(open(hb).read(), m1)
+        for k in ("t3", "t6"):
+            self.assertEqual(rows[by[k]]["stopped"], "")
+        self.assertIn("python workshop.py unlock 4", out)          # the box shows the last steps
 
     def test_status_block_format(self):
         items = [dict(label="T3 with skill", state="running", t0=100.0, end=None),
@@ -210,28 +241,38 @@ class AutoCodex(AutoBase):
 
     def test_launch_failure_is_reported_and_the_run_stays_active(self):
         with mock.patch.object(self.w, "start_agent", side_effect=OSError("boom")):
-            out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto")
+            out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
         self.assertIn("could not start: boom", out)
+        self.assertIn("RUN FAILED: could not start: boom. Do this run by hand:", flat(out))
         reg, _ = self.runs3()
         self.assertEqual(len(reg.actives("3")), 1)
+        self.assertEqual(rc, 1)
 
 
 class AutoClaude(AutoBase):
     agent = "claude"
 
     def test_claude_command_and_measure(self):
-        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto")
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
         self.assertEqual(rc, 0)
         reg, runs = self.runs3()
         rid, run_ = next(iter(runs.items()))
         with open(os.path.join(run_["folder"], "argv.json")) as f:
-            argv = json.load(f)["argv"]
-        self.assertEqual(argv[0], "-p")
-        self.assertIn("Workshop run: " + rid, argv[1])
+            d = json.load(f)
+        argv = d["argv"]
+        self.assertEqual(argv[:2], ["-p", "--model"])               # no prompt in the arguments
+        self.assertIn("Workshop run: " + rid, d["stdin"])           # it comes on stdin
+        self.assertNotIn(d["stdin"], argv)
         self.assertEqual(argv[argv.index("--model") + 1], "haiku")
         self.assertEqual(argv[argv.index("--output-format") + 1], "json")
         self.assertEqual(argv[argv.index("--setting-sources") + 1], "project")
-        self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+        tools = argv[argv.index("--allowedTools") + 1:]
+        self.assertEqual(tools, self.w.CLAUDE_TOOLS)               # the last flag: nothing after the list
+        self.assertIn("Bash(bin/vesper:*)", tools)
+        self.assertIn("Bash(./bin/vesper:*)", tools)
+        self.assertFalse([t for t in tools if t.startswith("Bash") and "vesper" not in t])   # no free Bash
+        self.assertIn("Claude may only run bin/vesper and edit files in its run folder.", out)
         r = self.rows3()[rid]
         self.assertEqual(r["agent"], "claude")
         self.assertEqual(r["model"], "claude-haiku-5-5")
@@ -244,7 +285,7 @@ class AutoCursor(AutoBase):
     agent = "cursor"
 
     def test_cursor_run_measured_from_agent_output(self):
-        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--name", "MIRA")
+        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
         self.assertEqual(rc, 0)
         self.assertEqual(long_lines(out), [])
         self.assertIn("Agent: cursor   Model: gpt-5.6-luna-high", out)
@@ -266,13 +307,14 @@ class AutoCursor(AutoBase):
             self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
             self.assertIn("--force", argv)
             self.assertIn("--trust", argv)
+            self.assertEqual(argv[argv.index("--sandbox") + 1], "enabled")
             self.assertEqual(argv[argv.index("--model") + 1], "gpt-5.6-luna-high")
             self.assertEqual(os.path.normcase(argv[argv.index("--workspace") + 1]),
                              os.path.normcase(runs[rid]["folder"]))
 
     def test_unknown_model_cost_unknown_and_auto_recorded(self):
         os.environ["FAKE_INIT_MODEL"] = "Auto"
-        out, _ = capture(self.w, "new", "s3", "--task", "T3", "--auto")
+        out, _ = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
         r = next(iter(self.rows3().values()))
         self.assertEqual(r["model"], "auto")
         self.assertEqual(r["cost_usd"], "")
@@ -280,9 +322,44 @@ class AutoCursor(AutoBase):
 
     def test_free_plan_error_is_detected(self):
         os.environ["FAKE_FREEPLAN"] = "1"
-        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto")
-        self.assertIn("Cursor says: free plan: only Auto.", flat(out))
+        self.w.AUTO_MIN_SEC = 0                                     # the error text alone is enough
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        self.assertIn("RUN FAILED: ActionRequiredError: Named models unavailable", flat(out))
+        self.assertIn("Do this run by hand: python workshop.py new s3 --task T3 (shows its page)", flat(out))
         self.assertEqual(long_lines(out), [])
+        self.assertEqual(rc, 1)
+        reg, runs = self.runs3()
+        rid = next(iter(runs))
+        self.assertEqual([x["run_id"] for x in reg.actives("3")], [rid])     # kept active: do it by hand
+        r = self.rows3()[rid]
+        self.assertEqual(r["stopped"], "error")
+        self.assertIn("Named models unavailable", r["error_note"])
+        self.assertEqual((r["score"], r["grading"]), ("", "none"))          # never graded
+        self.assertTrue(charts.flagged(r))
+        self.assertIn("run failed", charts.flag_reasons(r))
+        self.assertEqual(charts.outcome(r), "ungraded")
+
+    def test_killed_run_tokens_and_cost_unknown(self):
+        os.environ["FAKE_NO_USAGE"] = "1"
+        capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        r = next(iter(self.rows3().values()))
+        self.assertEqual(r["measurement"], "log, stopped before the usage report")
+        for k in ("tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd"):
+            self.assertEqual(r[k], "", k)                                   # unknown, never 0
+
+    def test_cmd_too_long_is_not_launched(self):
+        if os.name != "nt":
+            self.skipTest("cmd.exe limit: Windows only")
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        cmd = make_echo_cmd(d)
+        os.environ["VESPER_CURSOR_EXE"] = cmd
+        self.w.CMD_MAX = 300
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        self.assertIn("the command line is too long for cursor-agent.cmd", flat(out))
+        self.assertIn("RUN FAILED", out)
+        _, runs = self.runs3()
+        self.assertFalse(os.path.exists(os.path.join(next(iter(runs.values()))["folder"], "argv.json")))
 
     def test_wrong_folder_from_init_cwd(self):
         # a stream-json file whose init cwd is not the run folder -> the wrong-folder check fires
@@ -297,6 +374,230 @@ class AutoCursor(AutoBase):
         self.assertEqual(len(outside), 1)
         inside = self.w.outside_workdirs([p], 0, time.time() + 10, os.path.join(d, "elsewhere"))
         self.assertEqual(inside, [])
+
+
+@unittest.skipUnless(os.name == "nt", "cmd.exe launchers exist on Windows only")
+class CmdLauncher(AutoBase):
+    """B1: npm's claude.cmd / codex.cmd and cursor-agent.cmd go through cmd.exe. Every flag and the whole
+    prompt must arrive (cmd.exe cuts an argument at the first new line)."""
+
+    def launch(self, agent):
+        reg = self.w.Registry.load()
+        reg.data["agent"] = agent
+        reg.save()
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        os.environ["VESPER_%s_EXE" % agent.upper()] = make_echo_cmd(d)
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        _, runs = self.runs3()
+        rid, run_ = next(iter(runs.items()))
+        with open(os.path.join(run_["folder"], "argv.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        with open(os.path.join(run_["folder"], "PROMPT.txt"), encoding="utf-8") as f:
+            prompt = f.read()
+        return rid, run_, d, prompt, out
+
+    def test_claude_cmd(self):
+        rid, run_, d, prompt, out = self.launch("claude")
+        self.assertEqual(d["argv"], ["-p", "--model", "haiku", "--output-format", "json", "--permission-mode",
+                                     "dontAsk", "--setting-sources", "project", "--allowedTools"]
+                         + self.w.CLAUDE_TOOLS)
+        self.assertEqual(d["stdin"], prompt)                        # the whole prompt, on stdin
+        self.assertGreater(prompt.count("\n"), 1)
+        self.assertEqual(self.rows3()[rid]["tok_out"], 500)         # the run was measured
+
+    def test_codex_cmd(self):
+        rid, run_, d, prompt, out = self.launch("codex")
+        self.assertEqual(d["argv"], ["exec", "-m", "gpt-6-luna", "-c", "model_reasoning_effort=high", "-c",
+                                     "features.memories=false", "-s", "workspace-write", "--skip-git-repo-check",
+                                     "-C", run_["folder"], "-"])
+        self.assertEqual(d["stdin"], prompt)
+
+    def test_cursor_cmd(self):
+        rid, run_, d, prompt, out = self.launch("cursor")
+        self.assertEqual(d["argv"], ["-p", "--model", "gpt-5.6-luna-high", "--output-format", "stream-json",
+                                     "--force", "--sandbox", "enabled", "--trust", "--workspace", run_["folder"],
+                                     " ".join(prompt.split()).replace('"', "'")])
+        self.assertIn("Workshop run: " + rid, d["argv"][-1])
+        self.assertEqual(self.rows3()[rid]["tok_out"], 340)
+
+
+class AutoConfirm(AutoBase):
+    """M1: a warning per agent and "Start the 4 agents? [y/N]" before anything is created."""
+
+    def test_no_terminal_and_no_yes_starts_nothing(self):
+        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--name", "MIRA")
+        self.assertEqual(rc, 1)
+        self.assertIn("--auto starts the 4 agents with no window. What they may do:", out)
+        self.assertIn("  Codex runs in a sandbox: it can change files only in its run folder.", out)
+        self.assertIn("Not started: no terminal to answer. Add --yes to start them.", out)
+        self.assertEqual(self.runs3()[1], {})                       # no run folder was made
+        self.assertEqual(long_lines(out), [])
+
+    def test_question_default_is_no(self):
+        asked, answer = [], [""]
+
+        def ask(p, d=""):
+            asked.append(p)
+            return (answer[0] or d) if "Start" in p else d
+
+        self.w.ask = ask
+        with mock.patch.object(sys.stdin, "isatty", return_value=True):
+            out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--name", "MIRA")
+            self.assertEqual(rc, 1)
+            self.assertIn("  Start the 4 agents? [y/N] ", asked)
+            self.assertEqual(self.runs3()[1], {})
+            answer[0] = "y"
+            out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto")
+        self.assertIn("  Start the agent? [y/N] ", asked)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.rows3()), 1)
+
+    def test_warning_lines_per_agent(self):
+        for ag, text in self.w.AUTO_SAFETY.items():
+            self.assertLessEqual(len("  " + text), 72, ag)
+        self.assertIn("sandbox", self.w.AUTO_SAFETY["cursor"])
+
+
+class AutoErrors(AutoBase):
+    """M2: an agent that fails at once gives no data row: stopped=error, not graded, the run stays active."""
+
+    def test_quick_exit_fails_and_the_learner_does_it_by_hand(self):
+        self.w.AUTO_MIN_SEC = 60                                    # the fake agent ends after 0.2 s
+        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
+        self.assertEqual(rc, 1)
+        self.assertEqual(flat(out).count("RUN FAILED: the agent ended after 0 s (exit code 0)."), 4)
+        self.assertEqual(flat(out).count("Do this run by hand: python workshop.py new s3 --task all "
+                                         "(shows its page)"), 4)
+        self.assertIn("4 runs failed. Do them by hand:", flat(out))
+        self.assertNotIn("FINISHED", out)
+        self.assertEqual(long_lines(out), [])
+        reg, runs = self.runs3()
+        self.assertEqual(len(reg.actives("3")), 4)
+        for rid, r in self.rows3().items():
+            self.assertEqual(r["stopped"], "error")
+            self.assertIn("the agent ended after", r["error_note"])
+            self.assertEqual((r["score"], r["grading"], r["solution_sha"]), ("", "none", ""))
+            self.assertEqual(r["revision"], 1)
+        # by hand: the pages make the runs manual; `done` then writes a normal row (a new revision)
+        out2, _ = capture(self.w, "new", "s3", "--task", "all")
+        self.assertEqual(out2.count("Workshop run: s3-"), 4)
+        reg, runs = self.runs3()
+        rid = next(iter(runs))
+        self.assertEqual(runs[rid]["mode"], "manual")
+        self.assertNotIn("auto", runs[rid])
+        run(self.w, "done", rid, "--no-form")
+        r = self.rows3()[rid]
+        self.assertEqual((r["stopped"], r["error_note"]), ("", ""))
+        self.assertEqual(r["revision"], 2)
+        self.assertNotEqual(r["settings_confirmed"], "auto")
+
+    def test_error_text_note_is_short_and_anonymous(self):
+        secret = os.path.join(self.home, "user", ".codex", "auth.json")
+        os.environ["FAKE_FAIL"] = "Error: Authentication required (%s) " % secret + "x" * 300
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        r = next(iter(self.rows3().values()))
+        self.assertEqual(r["stopped"], "error")
+        self.assertTrue(r["error_note"].startswith("Error: Authentication required (~"), r["error_note"])
+        self.assertNotIn(self.home, r["error_note"])
+        self.assertLessEqual(len(r["error_note"]), 200)
+        self.assertNotIn(secret, out)
+        self.assertEqual(self.w.ROW_FIELDS[-2:], ["stopped", "error_note"])
+
+    def test_nonzero_exit_without_tool_calls(self):
+        os.environ["FAKE_FAIL"] = "something odd happened"
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        r = next(iter(self.rows3().values()))
+        self.assertEqual(r["stopped"], "error")
+        self.assertEqual(r["error_note"], "exit code 1 and no tool calls")
+
+    def test_orphans_of_an_ended_agent_are_killed(self):
+        os.environ["FAKE_CHILD"] = "1"                              # the agent ends; its child would live on
+        capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        _, runs = self.runs3()
+        hb = os.path.join(next(iter(runs.values()))["folder"], "heartbeat.txt")
+        self.assertTrue(os.path.exists(hb))
+        m1 = open(hb).read()
+        time.sleep(0.6)
+        self.assertEqual(open(hb).read(), m1)
+
+
+class AutoResume(AutoBase):
+    """M5: a resume with --auto starts only --auto runs that are not done and that no live agent holds."""
+
+    def failed_run(self):
+        with mock.patch.object(self.w, "start_agent", side_effect=OSError("boom")):
+            capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        _, runs = self.runs3()
+        rid, r = next(iter(runs.items()))
+        self.assertEqual(r["mode"], "auto")
+        return rid, r
+
+    def write_lock(self, folder, pid):
+        with open(os.path.join(folder, ".agent.lock"), "w") as f:
+            json.dump({"pid": pid, "start": time.time(), "mode": "auto"}, f)
+
+    def test_manual_run_is_never_launched(self):
+        capture(self.w, "new", "s3", "--task", "T3")                # the learner pastes the prompt by hand
+        _, runs = self.runs3()
+        rid, r = next(iter(runs.items()))
+        self.assertEqual(r["mode"], "manual")
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        self.assertEqual(rc, 1)
+        self.assertIn("you run it by hand", out)
+        self.assertIn("python workshop.py done " + rid, out)
+        self.assertFalse(os.path.exists(os.path.join(r["folder"], "argv.json")))
+        reg, runs = self.runs3()
+        self.assertNotEqual(runs[rid].get("settings_confirmed"), "auto")
+        self.assertEqual(len(reg.actives("3")), 1)
+
+    def test_failed_auto_run_is_relaunched_with_a_lock(self):
+        rid, r = self.failed_run()
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        self.assertEqual(rc, 0)
+        self.assertIn("FINISHED", out)
+        lk = self.w.read_lock(r["folder"])
+        self.assertEqual((lk["pid"], lk["mode"]), (os.getpid(), "auto"))
+        row = self.rows3()[rid]
+        self.assertEqual((row["stopped"], row["error_note"]), ("", ""))
+        self.assertEqual(row["revision"], 2)                        # one more than the failed row
+
+    def test_live_lock_is_never_launched_into(self):
+        import subprocess
+        rid, r = self.failed_run()
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(p.kill)
+        self.write_lock(r["folder"], p.pid)
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        self.assertIn("an agent still works on it in another window", out)
+        self.assertFalse(os.path.exists(os.path.join(r["folder"], "argv.json")))
+        out2, _ = capture(self.w, "new", "s3", "--task", "T3")      # the manual pages do not show it either
+        self.assertIn("in another window", out2)
+        self.assertNotIn("Workshop run: " + rid, out2)
+
+    def test_stale_lock_with_partial_work_asks_default_no(self):
+        import subprocess
+        rid, r = self.failed_run()
+        p = subprocess.Popen([sys.executable, "-c", "pass"])
+        p.wait()
+        self.write_lock(r["folder"], p.pid)                         # its tool is gone: the lock is stale
+        os.makedirs(os.path.join(r["folder"], "solutions"), exist_ok=True)
+        with open(os.path.join(r["folder"], "solutions", "T3.vsa"), "w") as f:
+            f.write("; partial\n")
+        asked = []
+        real = self.w.ask
+        self.w.ask = lambda q, d="": asked.append(q) or real(q, d)
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        self.assertTrue(any("has work from an earlier agent" in q and "[y/N]" in q for q in asked))
+        self.assertFalse(os.path.exists(os.path.join(r["folder"], "argv.json")))
+        self.w.ask = lambda q, d="": "y" if "earlier agent" in q else d
+        out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
+        self.assertTrue(os.path.exists(os.path.join(r["folder"], "argv.json")))
+
+    def test_pid_alive(self):
+        self.assertTrue(self.w.pid_alive(os.getpid()))
+        self.assertFalse(self.w.pid_alive(0))
+        self.assertFalse(self.w.pid_alive("x"))
 
 
 class CursorReader(unittest.TestCase):
@@ -332,6 +633,21 @@ class CursorReader(unittest.TestCase):
         self.assertEqual(c["emulator_runs"], 1)                    # `vesper run` only; asm is free
         self.assertTrue(c["complete"])
         self.assertEqual(c["sid"], "sid1")
+
+    def test_duration_is_not_a_time_stamp(self):
+        # no timestamp_ms at all: duration_ms gives a separate value, never first=0 / last=duration (epoch)
+        p = self.write([{"type": "system", "subtype": "init", "cwd": "/x", "model": "Auto", "session_id": "s"},
+                        {"type": "result", "subtype": "success", "duration_ms": 60000,
+                         "usage": {"inputTokens": 1, "outputTokens": 1}}])
+        (c,) = measure.cursor_sessions(p)
+        self.assertEqual((c["first"], c["last"], c["duration"]), (None, None, 60.0))
+        w, _ = fresh_ws()
+        run_ = {"session": {"agent": "cursor", "path": p}, "folder": os.path.dirname(p)}
+        self.assertEqual(w.measure_stage(run_, 1000.0, 1100.0)["elapsed_min"], "1.0")
+        p2 = self.write([{"type": "system", "subtype": "init", "cwd": "/x", "model": "Auto"},
+                         {"type": "result", "duration_ms": 9e9, "usage": {"inputTokens": 1}}])
+        run_ = {"session": {"agent": "cursor", "path": p2}, "folder": os.path.dirname(p2)}
+        self.assertEqual(w.measure_stage(run_, 1000.0, 1100.0)["elapsed_min"], "")   # longer than the wall time
 
     def test_auto_model_and_incomplete_run(self):
         p = self.write([{"type": "system", "subtype": "init", "cwd": "/x", "model": "Auto", "session_id": "s"},
@@ -387,11 +703,55 @@ class DoctorAuto(unittest.TestCase):
         with mock.patch.object(self.w.shutil, "which", return_value=None):
             out = self.doctor("codex")
         self.assertIn("--auto codex: ready (codex-cli 0.163.0)", out)
-        self.assertIn("--auto cursor: ready", out)
-        self.assertRegex(out, r"--auto claude: NOT ready - claude was not found")
+        self.assertNotIn("--auto cursor", out)                      # only the learner's agent CLI is started
+        self.assertNotIn("--auto claude", out)
         reg = self.w.Registry.load()
-        self.assertEqual(reg.data["auto_ready"], {"codex": True, "claude": False, "cursor": True})
+        self.assertEqual(reg.data["auto_ready"], {"codex": True})
         self.assertEqual(reg.data["doctor"]["level"], 0)           # an unready --auto never turns doctor yellow
+        with mock.patch.object(self.w.shutil, "which", return_value=None):
+            out = self.doctor("claude")
+        self.assertIn("--auto claude: NOT ready - claude was not found", flat(out))
+        self.assertEqual(self.w.Registry.load().data["auto_ready"], {"claude": False})
+
+    def test_only_the_chosen_cli_is_started(self):
+        calls = []
+        real = self.w.auto_ready
+        self.w.auto_ready = lambda ag: calls.append(ag) or real(ag)
+        os.environ["VESPER_CURSOR_EXE"] = FAKE
+        with mock.patch.object(self.w.shutil, "which", return_value=None):
+            self.doctor("cursor")
+            self.doctor("other")
+        self.assertEqual(calls, ["cursor"])
+
+    def test_doctor_auto_lines_are_short(self):
+        os.environ["VESPER_CURSOR_EXE"] = FAKE
+        os.environ["FAKE_FREEPLAN"] = "1"
+        rules = os.path.join(self.home, "user", ".cursor", "rules")
+        os.makedirs(rules)
+        with open(os.path.join(rules, "x.mdc"), "w") as f:
+            f.write("---\nalwaysApply: true\n---\n")
+        with mock.patch.object(self.w.shutil, "which", return_value=None):
+            lines, _ = self.w.doctor_auto_lines("cursor", True)
+            os.environ.pop("VESPER_CURSOR_EXE")
+            lines += self.w.doctor_auto_lines("cursor")[0]
+        os.environ["FAKE_VERSION"] = "codex-cli 0.154.0"
+        with mock.patch.object(self.w.shutil, "which", side_effect=lambda n: FAKE if n == "codex" else None):
+            lines += self.w.doctor_auto_lines("codex")[0]
+        text = "\n".join(lines)
+        self.assertIn("Named models need a paid plan.", text)
+        self.assertIn("open a NEW PowerShell window" if os.name == "nt" else "agent login", text)
+        self.assertEqual(long_lines(text), [])
+
+    def test_check_auto_timeout_kills_the_tree(self):
+        os.environ["VESPER_CURSOR_EXE"] = FAKE
+        os.environ["FAKE_SLEEP"] = "30"
+        os.environ["FAKE_CHILD"] = "1"                              # a grandchild that would hold a pipe
+        self.w.AUTO_CHECK_SEC = 1
+        t = time.time()
+        ok, text = self.w.check_auto_run("cursor")
+        self.assertLess(time.time() - t, 15)
+        self.assertFalse(ok)
+        self.assertIn("no answer in 1 s", text)
 
     def test_cursor_not_logged_in_and_install_help(self):
         os.environ["VESPER_CURSOR_EXE"] = FAKE
@@ -427,7 +787,7 @@ class DoctorAuto(unittest.TestCase):
         os.environ.pop("VESPER_CODEX_EXE", None)
         with mock.patch.object(self.w.shutil, "which", side_effect=lambda n: FAKE if n == "codex" else None):
             out = self.doctor("codex")
-        self.assertIn("codex on PATH is too old (codex-cli 0.154.0); it needs 0.163 or newer", out)
+        self.assertIn("codex on PATH is too old (codex-cli 0.154.0); it needs 0.163 or newer", flat(out))
         os.environ["FAKE_VERSION"] = "codex-cli 0.170.2"
         with mock.patch.object(self.w.shutil, "which", side_effect=lambda n: FAKE if n == "codex" else None):
             out = self.doctor("codex")
@@ -474,9 +834,25 @@ class ChartsAuto(unittest.TestCase):
         self.assertTrue(charts.unconfirmed({"stage": "3", "settings_confirmed": "not_asked"}))
         self.assertTrue(charts.unconfirmed({"stage": "3", "settings_confirmed": ""}))
 
+    def test_stopped_and_failed_runs(self):
+        self.assertEqual(charts.FIELDS[-2:], ["stopped", "error_note"])
+        bad = {"stage": "3", "settings_confirmed": "auto", "score": "100", "grading": "graded", "stopped": "error",
+               "error_note": "Authentication required", "task": "T3"}
+        self.assertEqual(charts.flag_reasons(bad), ["run failed"])
+        self.assertEqual(charts.outcome(bad), "ungraded")          # never a pass
+        self.assertEqual(charts.counts([bad])["pass"], 0)
+        ok = dict(bad, stopped="ctrl-c", grading="partial")
+        self.assertEqual(charts.outcome(ok), "pass")
+        rows = charts.expand_all_results("vesper-results v1\nrun_id=x;stage=3;stopped=error;error_note=a%3Bb")
+        x = {f: rows[0].get(f, "") for f in charts.FIELDS}
+        self.assertEqual((x["stopped"], x["error_note"]), ("error", "a;b"))
+
 
 class ResumeStage3(unittest.TestCase):
     def setUp(self):
+        old = os.environ.get("LOCALAPPDATA")
+        self.addCleanup(lambda: os.environ.__setitem__("LOCALAPPDATA", old) if old is not None
+                        else os.environ.pop("LOCALAPPDATA", None))
         self.w, self.home = fresh_ws()
         self.s1, _ = fakes.ready_for_s3(self.w)
 
@@ -558,18 +934,36 @@ class ResumeStage3(unittest.TestCase):
         reg = self.w.Registry.load()
         acts = [x["run_id"] for x in reg.actives("3")]
         run(self.w, "done", acts[0], "--no-form")
-        asked = []
-        real_ask = self.w.ask
-        self.w.ask = lambda p, d="": asked.append(p) or real_ask(p, d)
-        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto")
-        self.assertEqual(rc, 0)
-        self.assertTrue(any("Start the agents for the 3 runs that are not done?" in x for x in asked))
+        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes")
+        self.assertEqual(rc, 1)
         self.assertIn("Showing its pages again", out)
-        self.assertEqual(out.count("FINISHED"), 3)
-        self.assertEqual(len(self.w.Registry.load().actives("3")), 0)
+        self.assertEqual(out.count("you run it by hand"), 3)        # manual runs: --auto never starts them
+        self.assertIn("No run can be started by --auto now.", out)
+        self.assertEqual(out.count("FINISHED"), 0)
+        self.assertEqual(len(self.w.Registry.load().actives("3")), 3)
         started = [r["folder"] for r in self.w.Registry.load().data["runs"].values()
                    if r.get("stage") == "3" and os.path.exists(os.path.join(r["folder"], "argv.json"))]
-        self.assertEqual(len(started), 3)
+        self.assertEqual(started, [])
+
+    def test_auto_resume_after_failed_runs_starts_only_those(self):
+        os.environ["VESPER_CODEX_EXE"] = FAKE
+        os.environ["FAKE_SLEEP"] = "0.2"
+        self.addCleanup(os.environ.pop, "VESPER_CODEX_EXE", None)
+        self.addCleanup(os.environ.pop, "FAKE_SLEEP", None)
+        os.environ["LOCALAPPDATA"] = os.path.join(self.home, "localappdata")
+        self.w.AUTO_TICK, self.w.AUTO_POLL, self.w.AUTO_BOX_SEC = 0.3, 0.05, 30
+        self.w.AUTO_MIN_SEC = 60                                    # all 4 end at once: all 4 fail
+        capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
+        self.assertEqual(len(self.w.Registry.load().actives("3")), 4)
+        acts = [x["run_id"] for x in self.w.Registry.load().actives("3")]
+        self.w.AUTO_MIN_SEC = 0
+        out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.count("FINISHED"), 4)
+        self.assertEqual(self.w.Registry.load().actives("3"), [])
+        rows = {r["run_id"]: r for r in self.w.Registry.load().data["rows"].values() if r["stage"] == "3"}
+        self.assertEqual(sorted(rows), sorted(acts))
+        self.assertTrue(all(r["stopped"] == "" and r["revision"] == 2 for r in rows.values()))
 
 
 if __name__ == "__main__":

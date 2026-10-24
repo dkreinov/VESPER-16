@@ -66,7 +66,7 @@ class MemoryUsed(unittest.TestCase):
         self.assertEqual(w.Registry.load().row(rid, "1")["memory_used"], "yes")
         self.assertIn("Memory ON", out.getvalue())
         with open(os.path.join(w.ws_home(), "results.csv"), encoding="utf-8") as f:
-            self.assertEqual(f.readline().strip().split(",")[-8:], ["memory_used", "effort", "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun", "stopped"])
+            self.assertEqual(f.readline().strip().split(",")[-9:], ["memory_used", "effort", "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun", "stopped", "error_note"])
 
 
 class Prompts(unittest.TestCase):

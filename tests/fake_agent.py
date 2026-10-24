@@ -9,6 +9,8 @@ Env switches:
   FAKE_SLOW_KEYS   comma list; a prompt that contains one of them runs FAKE_SLOW_SEC (default 60) seconds
   FAKE_CHILD=1     start a child process that writes folder/heartbeat.txt every 0.1 s (tests the tree kill)
   FAKE_FREEPLAN=1  Cursor free plan: "Named models unavailable" on stderr, exit code 1
+  FAKE_FAIL        any agent: print this text on stderr and exit with code 1 at once
+  FAKE_NO_USAGE=1  Cursor: no result event (as a run killed before its usage report)
   FAKE_VERSION     text printed for --version (default "codex-cli 0.163.0")
   FAKE_LOGIN       "no" -> `status` prints "Not logged in"
   FAKE_INIT_MODEL  the model name Cursor reports in its init event (default: the --model argument)
@@ -30,19 +32,27 @@ def main(argv):
     if argv and argv[0] == "status":
         print("Not logged in" if os.environ.get("FAKE_LOGIN") == "no" else "Logged in as test@example.com")
         return 0
+    stdin = None
     if "exec" in argv:
         kind, prompt, model = "codex", argv[-1], arg_after(argv, "-m")
         folder = arg_after(argv, "-C", os.getcwd())
+        if prompt == "-":                      # `codex exec ... -`: the prompt is on stdin
+            prompt = stdin = sys.stdin.read()
     elif "--workspace" in argv:
         kind, prompt, model = "cursor", argv[-1], arg_after(argv, "--model")
         folder = arg_after(argv, "--workspace", os.getcwd())
     else:
         kind, prompt, model = "claude", arg_after(argv, "-p"), arg_after(argv, "--model")
         folder = os.getcwd()
+        if not prompt or prompt.startswith("-"):   # `claude -p --model ...`: the prompt is on stdin
+            prompt = stdin = sys.stdin.read()
     with open(os.path.join(folder, "argv.json"), "w", encoding="utf-8") as f:
-        json.dump({"kind": kind, "argv": argv, "cwd": os.getcwd()}, f)
+        json.dump({"kind": kind, "argv": argv, "cwd": os.getcwd(), "prompt": prompt, "stdin": stdin}, f)
     if os.environ.get("FAKE_FREEPLAN") and kind == "cursor":
         sys.stderr.write("ActionRequiredError: Named models unavailable Free plans can only use Auto.\n")
+        return 1
+    if os.environ.get("FAKE_FAIL"):            # any agent: an error line on stderr, exit code 1, no tool call
+        sys.stderr.write(os.environ["FAKE_FAIL"] + "\n")
         return 1
     if os.environ.get("FAKE_CHILD"):
         subprocess.Popen([sys.executable, "-c",
@@ -68,6 +78,8 @@ def main(argv):
              "tool_call": {"shellToolCall": {"args": {"command": "bin/vesper run solutions/T3.vsa"}}}})
         say({"type": "assistant", "timestamp_ms": int(t1 * 1000),
              "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}})
+        if os.environ.get("FAKE_NO_USAGE"):
+            return 0
         say({"type": "result", "subtype": "success", "duration_ms": int((t1 - t0) * 1000),
              "usage": {"inputTokens": 1200, "outputTokens": 340, "cacheReadTokens": 5000, "cacheWriteTokens": 700}})
         return 0

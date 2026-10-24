@@ -144,7 +144,7 @@ class Gate(unittest.TestCase):
         rids = [x["run_id"] for x in reg.actives()]
         self.assertEqual({reg.data["runs"][r].get("settings_confirmed") for r in rids}, {"yes"})
         self.assertIn("settings_confirmed", self.w.ROW_FIELDS)
-        self.assertEqual(self.w.ROW_FIELDS[-4:], ["isolation", "isolation_note", "overrun", "stopped"])
+        self.assertEqual(self.w.ROW_FIELDS[-5:], ["isolation", "isolation_note", "overrun", "stopped", "error_note"])
 
 
 if __name__ == "__main__":

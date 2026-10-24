@@ -66,7 +66,7 @@ class HarvestMethodUsed(unittest.TestCase):
         row = self.w.Registry.load().row(rid, "2")
         self.assertEqual(row["method_used"], "skill-creator")
         with open(os.path.join(self.w.ws_home(), "results.csv"), encoding="utf-8") as f:
-            self.assertEqual(f.readline().strip().split(",")[-9:], ["method_used", "memory_used", "effort", "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun", "stopped"])
+            self.assertEqual(f.readline().strip().split(",")[-10:], ["method_used", "memory_used", "effort", "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun", "stopped", "error_note"])
 
     def test_none_when_not_mentioned(self):
         rid, out = self._harvest(False)

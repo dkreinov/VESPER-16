@@ -146,7 +146,8 @@ ROW_FIELDS = ["alias", "run_id", "stage", "revision", "parent_run_id", "task", "
               "skill_source", "skill_hash", "skill_has_solution", "elapsed_min", "wall_min", "emulator_runs",
               "tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd", "price_table",
               "measurement", "score", "grading", "solution_sha", "cutoff", "start", "method_used", "memory_used", "effort",
-              "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun", "stopped"]
+              "model_switched", "settings_confirmed", "isolation", "isolation_note", "overrun", "stopped",
+              "error_note"]
 LINE = "-" * 72
 T6_PASS = 90
 
@@ -488,6 +489,14 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
 
 def s3_show(reg, rid, n, total, task, folder, prompt, desc=None, extra=None):
     """Show one stage-3 run: its own page in a terminal, else the plain block."""
+    run = reg.data["runs"][rid]
+    if run_mode(run) == "auto":                   # a failed --auto run that the learner now does by hand
+        run["session"] = None
+        for k in ("auto", "auto_model", "stopped", "error_note"):
+            run.pop(k, None)
+    if run.get("mode") != "manual":
+        run["mode"] = "manual"                    # its page is shown: the learner runs it; --auto never relaunches it
+        reg.save()
     if not gate_on():
         reg.data["runs"][rid]["settings_confirmed"] = "not_asked"     # no terminal, no gate: unconfirmed, not "no"
         reg.save()
@@ -1084,6 +1093,8 @@ def cmd_new(a):
                      + "\nMove it away (or run harvest / cleanup), then run this command again.")
         if getattr(a, "auto", False):
             auto_setup(reg, a)
+            if not same and not auto_confirm(a, {"all": 4, "both": 2}.get(task, 1)):
+                return 1                          # nothing is created: the learner can choose the manual flow
         try:
             if same:
                 return resume_s3(reg, a, same)
@@ -1870,6 +1881,13 @@ def measure_stage(run, t0, t1):
                    tok_cache_write=tot["cw"], tok_out=tot["o"], cost_usd=("%.2f" % c) if c is not None else "",
                    measurement={"codex": "log", "cursor": "log" if all(x.get("complete") for x in found)
                                 else "log, stopped before the usage report"}.get(s["agent"], "log, output lower bound"))
+        if s["agent"] == "cursor" and not all(x.get("complete") for x in found):
+            # no usage report (the run was killed): the tokens and the cost are unknown, never 0
+            res.update(tok_uncached="", tok_cache_read="", tok_cache_write="", tok_out="", cost_usd="")
+        if s["agent"] == "cursor" and len(acts) < 2:
+            dur = sum(x.get("duration") or 0 for x in found)
+            if 0 < dur <= (t1 - t0) + 1:          # a duration longer than the wall time is wrong: ignore it
+                acts = [t1 - dur, t1]
     res["elapsed_min"] = ("%.1f" % ((max(acts) - min(acts)) / 60)) if len(acts) >= 2 else ""
     return res
 
@@ -2529,7 +2547,8 @@ def finish_stage(reg, rid, stage, a, grade=True):
                   start="%.0f" % t0, cutoff="%.0f" % t1, wall_min="%.1f" % ((t1 - t0) / 60),
                   emulator_runs="unknown" if runs is None else runs)
     if first:
-        fields["revision"] = 1
+        # 1, or one more than a failed --auto row of this run (that row may be submitted already)
+        fields["revision"] = int(row.get("revision") or 0) + 1 if row and row.get("stopped") == "error" else 1
         if grade:
             snap, sha = snapshot_solution(rid, run, stage)
             fields["solution_sha"] = sha
@@ -2550,6 +2569,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
     if run.get("auto") and stage == "3":
         fields["overrun"] = "no"           # --auto: the start is the launch and the tool stops the run at the box
     fields["stopped"] = run.get("stopped", "")
+    fields["error_note"] = run.get("error_note", "")
     fields["settings_confirmed"] = run.get("settings_confirmed", "")
     reg.set_row(rid, stage, fields)
     reg.save()
@@ -3140,13 +3160,22 @@ def _version_tuple(text):
 
 
 def _run_text(argv, timeout=20):
-    """Output (stdout + stderr) of a short CLI call, or '' when it cannot run."""
+    """Output (stdout + stderr) of a short CLI call, or '' when it cannot run or does not end in time."""
     try:
-        r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=timeout, stdin=subprocess.DEVNULL)
-        return ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
-    except (OSError, subprocess.TimeoutExpired):
+        rc, text = run_capture(argv, timeout)
+    except OSError:
         return ""
+    return "" if rc is None else text.strip()
+
+
+def anon(text):
+    """The text with the home folder written as ~ (error notes go to the shared sheet)."""
+    text = str(text or "")
+    for h in {user_home(), os.path.expanduser("~")}:
+        if h and len(h) > 3:
+            for v in {h, h.replace("\\", "/"), h.replace("/", "\\")}:
+                text = re.sub(re.escape(v), "~", text, flags=re.I)
+    return text
 
 
 def _exe_version(argv):
@@ -3189,8 +3218,10 @@ def install_help(agent):
     """How to get the CLI, in the form that works in the learner's shell (no %VAR% syntax)."""
     if agent == "cursor":
         if os.name == "nt":
-            return ["Install (PowerShell):  irm 'https://cursor.com/install?win32=true' | iex",
-                    "Then log in:  agent login   (it opens the browser)"]
+            return ["Install (PowerShell):",
+                    "  irm 'https://cursor.com/install?win32=true' | iex",
+                    "Then open a NEW PowerShell window (it needs the new PATH) and log in:",
+                    "  agent login   (it opens the browser)"]
         return ["Install:  curl https://cursor.com/install -fsS | bash", "Then log in:  agent login"]
     if agent == "codex":
         return ["Install the Codex app (it contains codex.exe 0.163 or newer), or update the codex CLI."]
@@ -3242,47 +3273,212 @@ def _cmd_script(argv):
     return os.name == "nt" and bool(argv) and str(argv[0]).lower().endswith((".cmd", ".bat"))
 
 
+CMD_MAX = 8000             # cmd.exe cuts a command line at 8191 characters
+# Claude Code (dontAsk = every tool that is not in this list is refused): run the emulator, read, edit and
+# write only below the run folder. "./**" is relative to the working folder (the run folder).
+CLAUDE_TOOLS = ["Bash(bin/vesper:*)", "Bash(./bin/vesper:*)", "Bash(bin/vesper.exe:*)", "Bash(./bin/vesper.exe:*)",
+                "Read", "Glob", "Grep", "Edit(./**)", "Write(./**)", "Skill"]
+
+
+class LaunchError(Exception):
+    """--auto cannot start this agent in a safe way (for example the command line is too long)."""
+
+
 def build_auto_cmd(agent, argv, model, folder, prompt):
-    """The command line of one headless stage-3 run (flags tested on 2026-10-23)."""
+    """(command line, stdin text) of one headless stage-3 run (flags tested on 2026-10-23).
+    The prompt is never an argument of a .cmd/.bat launcher for Codex and Claude: cmd.exe cuts an argument at
+    the first new line and drops every later flag. They read the prompt from stdin. Cursor has only a .cmd
+    on Windows: its prompt is flattened to one line, and a command line above CMD_MAX is refused."""
+    script = _cmd_script(argv)
     if agent == "codex":
-        return argv + ["exec", "-m", model, "-c", 'model_reasoning_effort="high"', "-c", "features.memories=false",
-                       "-s", "workspace-write", "--skip-git-repo-check", "-C", folder, prompt]
+        eff = "model_reasoning_effort=high" if script else 'model_reasoning_effort="high"'   # cmd.exe breaks \"
+        return argv + ["exec", "-m", model, "-c", eff, "-c", "features.memories=false", "-s", "workspace-write",
+                       "--skip-git-repo-check", "-C", folder, "-"], prompt
     if agent == "cursor":
-        if _cmd_script(argv):         # a .cmd file cannot take new lines or double quotes in an argument
+        if script:                    # a .cmd file cannot take new lines or double quotes in an argument
             prompt = " ".join(prompt.split()).replace('"', "'")
-        return argv + ["-p", "--model", model, "--output-format", "stream-json", "--force", "--trust",
-                       "--workspace", folder, prompt]
-    return argv + ["-p", prompt, "--model", model, "--output-format", "json", "--permission-mode", "acceptEdits",
-                   "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep", "--setting-sources", "project"]
+            if "%" in prompt or "!" in prompt:      # cursor-agent.cmd uses enabledelayedexpansion
+                raise LaunchError("the prompt has %% or ! (cursor-agent.cmd cannot pass them)")
+        cmd = argv + ["-p", "--model", model, "--output-format", "stream-json", "--force", "--sandbox", "enabled",
+                      "--trust", "--workspace", folder, prompt]
+        if script and len(subprocess.list2cmdline(cmd)) > CMD_MAX:
+            raise LaunchError("the command line is too long for cursor-agent.cmd (%d characters)"
+                              % len(subprocess.list2cmdline(cmd)))
+        return cmd, None
+    return argv + ["-p", "--model", model, "--output-format", "json", "--permission-mode", "dontAsk",
+                   "--setting-sources", "project", "--allowedTools"] + CLAUDE_TOOLS, prompt
 
 
-def start_agent(cmd, folder, out_path):
-    """Start the agent in the background; stdout and stderr go to out_path. Returns the Popen."""
+def start_agent(cmd, folder, out_path, stdin_text=None):
+    """Start the agent in the background; stdout and stderr go to out_path; stdin_text (if any) is its stdin.
+    Windows: the agent goes into its own Job Object, so every process it starts dies with it (and with
+    this tool). Returns the Popen."""
     kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
-    with open(out_path, "wb") as out:
-        return subprocess.Popen(cmd, cwd=folder, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, **kw)
+    src = None
+    if stdin_text is not None:
+        src = tempfile.TemporaryFile()
+        src.write(stdin_text.encode("utf-8"))
+        src.seek(0)
+    try:
+        with open(out_path, "wb") as out:
+            proc = subprocess.Popen(cmd, cwd=folder, stdin=src if src else subprocess.DEVNULL, stdout=out,
+                                    stderr=subprocess.STDOUT, **kw)
+    finally:
+        if src:
+            src.close()
+    proc._vesper_job = _job_for(proc)
+    return proc
+
+
+_K32 = []
+
+
+def _k32():
+    """kernel32 with the argument types this file uses (Windows only)."""
+    if not _K32:
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.CreateJobObjectW.restype = wintypes.HANDLE
+        k.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        k.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        k.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        k.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        k.CloseHandle.argtypes = [wintypes.HANDLE]
+        k.OpenProcess.restype = wintypes.HANDLE
+        k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        k.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(ctypes.c_uint64)] * 4
+        _K32.append(k)
+    return _K32[0]
+
+
+def _job_for(proc):
+    """Windows: put proc in a new Job Object with KILL_ON_JOB_CLOSE (its children join the job too).
+    Closing the handle (kill_tree, or this tool ends in any way) kills every process in the job.
+    Returns the job handle, or None (POSIX, VESPER_NO_JOB=1, or the call failed: taskkill is the fallback)."""
+    if os.name != "nt" or os.environ.get("VESPER_NO_JOB"):
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class Basic(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class Extended(ctypes.Structure):
+            _fields_ = [("Basic", Basic), ("Io", ctypes.c_uint64 * 6), ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+        k = _k32()
+        job = k.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = Extended()
+        info.Basic.LimitFlags = 0x2000                  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if k.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)) and \
+                k.AssignProcessToJobObject(job, int(proc._handle)):
+            return job
+        k.CloseHandle(job)
+    except Exception:  # noqa: BLE001  (no job: taskkill /T is the fallback)
+        pass
+    return None
+
+
+def pid_alive(pid, since=None):
+    """True when process pid runs (and, on Windows, was created before `since`, so a reused pid is not alive)."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k = _k32()
+        h = k.OpenProcess(0x1000, False, pid)            # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ctypes.get_last_error() == 5           # access denied: it exists
+        try:
+            code = wintypes.DWORD()
+            if not k.GetExitCodeProcess(h, ctypes.byref(code)) or code.value != 259:   # STILL_ACTIVE
+                return False
+            if since:
+                t = [ctypes.c_uint64() for _ in range(4)]
+                if k.GetProcessTimes(h, *[ctypes.byref(x) for x in t]):
+                    created = t[0].value / 1e7 - 11644473600     # FILETIME (1601, 100 ns) -> epoch seconds
+                    if created > float(since) + 2:
+                        return False
+            return True
+        finally:
+            k.CloseHandle(h)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def kill_tree(proc):
-    """Kill the process and all its children (Windows: taskkill /T /F, else the process group)."""
-    if proc.poll() is not None:
-        return
+    """Kill the agent and every process it started, also after the agent itself has ended (its orphans).
+    Windows: terminate its Job Object, then taskkill /T /F as the fallback; POSIX: the process group."""
+    job = getattr(proc, "_vesper_job", None)
+    if job:
+        proc._vesper_job = None
+        try:
+            _k32().TerminateJobObject(job, 1)
+            _k32().CloseHandle(job)
+        except Exception:  # noqa: BLE001
+            pass
     try:
         if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=30)
+            if proc.poll() is None:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=30)
         else:
             import signal
-            os.killpg(proc.pid, signal.SIGKILL)
+            os.killpg(proc.pid, signal.SIGKILL)       # the group lives on while an orphan is in it
     except (OSError, subprocess.TimeoutExpired):
         pass
-    try:
-        proc.kill()
-    except OSError:
-        pass
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         pass
+
+
+def run_capture(cmd, timeout, cwd=None, stdin_text=None):
+    """(exit code or None at the timeout, output text) of a short CLI call. The output goes to a temp file and
+    the whole process tree is killed at the timeout, so a grandchild that holds a pipe cannot hang the tool."""
+    fd, out = tempfile.mkstemp(prefix="vesper-cli-", suffix=".txt")
+    os.close(fd)
+    try:
+        proc = start_agent(cmd, cwd or os.getcwd(), out, stdin_text)
+        try:
+            rc = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            rc = None
+        kill_tree(proc)
+        with open(out, encoding="utf-8", errors="replace") as f:
+            return rc, f.read()
+    finally:
+        try:
+            os.remove(out)
+        except OSError:
+            pass
 
 
 def check_auto_run(agent):
@@ -3292,44 +3488,57 @@ def check_auto_run(agent):
         return False, "error: " + why
     tmp = tempfile.mkdtemp(prefix="vesper-auto-check-")
     try:
-        cmd = build_auto_cmd(agent, argv, AUTO_MODEL[agent], tmp, "Reply OK")
         try:
-            r = subprocess.run(cmd, cwd=tmp, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                               timeout=AUTO_CHECK_SEC, stdin=subprocess.DEVNULL)
-        except subprocess.TimeoutExpired:
-            return False, "error: no answer in %d s" % AUTO_CHECK_SEC
-        except OSError as e:
+            cmd, stdin_text = build_auto_cmd(agent, argv, AUTO_MODEL[agent], tmp, "Reply OK")
+            rc, text = run_capture(cmd, AUTO_CHECK_SEC, cwd=tmp, stdin_text=stdin_text)
+        except (OSError, LaunchError) as e:
             return False, "error: %s" % e
-        text = (r.stdout or "") + "\n" + (r.stderr or "")
+        if rc is None:
+            return False, "error: no answer in %d s" % AUTO_CHECK_SEC
         if FREE_PLAN_RE.search(text):
             return False, FREE_PLAN_MSG
-        if r.returncode == 0:
+        if rc == 0:
             return True, "OK (model %s answered)" % AUTO_MODEL[agent]
         lines = [x.strip() for x in text.splitlines() if x.strip() and "warn" not in x.lower()]
-        return False, "error: " + (lines[-1][:70] if lines else "exit code %d" % r.returncode)
+        return False, "error: " + (anon(lines[-1])[:50] if lines else "exit code %d" % rc)
     finally:
         rmtree(tmp)
 
 
+def _doctor_wrap(lines):
+    """Doctor is not wrapped by print (its text goes into help prompts): keep its --auto lines <= 72."""
+    out = []
+    for x in lines:
+        body = x.lstrip(" ")
+        ind = " " * (len(x) - len(body))
+        sub = ind if not re.match(r"(OK|INFO|WARN|FAIL)\s", body) else ind + "      "
+        out += textwrap.wrap(body, MAXW, initial_indent=ind, subsequent_indent=sub,
+                             break_long_words=False, break_on_hyphens=False) or [x]
+    return out
+
+
 def doctor_auto_lines(agent, check=False):
-    """Doctor lines about --auto for each agent; returns (lines, ready{agent: bool})."""
+    """Doctor lines about --auto for the learner's agent only (no other CLI is started);
+    returns (lines, ready{agent: bool})."""
     lines, ready = [], {}
-    for ag in AUTO_AGENTS:
-        ok, text, fix = auto_ready(ag)
-        ready[ag] = ok
-        lines.append("  INFO  --auto %s: %s" % (ag, text if ok else "NOT ready - " + text))
-        if not ok and ag == agent:
-            lines += ["          " + x for x in fix]
-    if agent in AUTO_AGENTS and check:
+    if agent not in AUTO_AGENTS:
+        return lines, ready
+    ok, text, fix = auto_ready(agent)
+    ready[agent] = ok
+    lines.append("  INFO  --auto %s: %s" % (agent, text if ok else "NOT ready - " + text))
+    if not ok:
+        lines += ["          " + x for x in fix]
+    if check:
         ok, text = check_auto_run(agent)
         lines.append("  %-5s --check-auto %s (%s): %s" % ("OK" if ok else "WARN", agent, AUTO_MODEL[agent], text))
         if text == FREE_PLAN_MSG:
-            lines.append("          Named models need a paid plan. Use the manual flow, or upgrade the plan.")
+            lines.append("          Named models need a paid plan.")
+            lines.append("          Use the manual flow, or upgrade the plan.")
         ready[agent] = ready[agent] and ok
     if agent == "cursor":
         always, text = cursor_rules_note()
         lines.append("  %-5s %s" % ("WARN" if always else "INFO", text))
-    return lines, ready
+    return _doctor_wrap(lines), ready
 
 
 def auto_setup(reg, a):
@@ -3344,14 +3553,38 @@ def auto_setup(reg, a):
     a.auto_model = getattr(a, "model", None) or AUTO_MODEL[agent]
 
 
+# What the agent may do in an --auto run (one line of at most 72 characters each; shown before the start).
+AUTO_SAFETY = {"codex": "Codex runs in a sandbox: it can change files only in its run folder.",
+               "claude": "Claude may only run bin/vesper and edit files in its run folder.",
+               "cursor": "Cursor runs in Cursor's sandbox (--sandbox enabled)."}
+
+
+def auto_confirm(a, n):
+    """The warning screen before --auto starts n agents. Default No; without a terminal only --yes starts."""
+    word = "the agent" if n == 1 else "the %d agents" % n
+    print("\n  --auto starts %s with no window. What they may do:" % word)
+    print("  " + AUTO_SAFETY.get(a.auto_agent, ""))
+    print("  The tool stops each agent at %d min. Ctrl+C stops all of them." % TIME_BOX_MIN)
+    if getattr(a, "yes", False):
+        return True
+    if not (sys.stdin and sys.stdin.isatty()):
+        print("  Not started: no terminal to answer. Add --yes to start them.")
+        return False
+    if ask("  Start %s? [y/N] " % word, "n").strip().lower() in ("y", "yes"):
+        return True
+    print("  Not started.")
+    return False
+
+
 def auto_item(reg, a, rid, folder, prompt):
     """Mark a run as an --auto run and return its item for run_auto."""
     run = reg.data["runs"][rid]
-    run.update(auto=True, auto_model=a.auto_model, settings_confirmed="auto")
+    run.update(auto=True, mode="auto", auto_model=a.auto_model, settings_confirmed="auto")
     reg.save()
     key = ("n" if is_control(run) else "t") + run["task"][-1]
     return dict(rid=rid, folder=folder, prompt=prompt, key=key, label=AUTO_LABEL.get(key, run["task"]),
-                state="waiting", t0=0.0, end=None, proc=None, rc=None)
+                state="waiting", t0=0.0, end=None, proc=None, rc=None, agent=a.auto_agent,
+                task=getattr(a, "task", "all"))
 
 
 def fmt_mss(sec):
@@ -3368,48 +3601,158 @@ def status_block(items, now=None):
     return "\n".join(out)
 
 
+AUTO_LOCK = ".agent.lock"
+AUTO_MIN_SEC = 60          # an agent that ends sooner than this did not do the task: the run failed
+AUTO_ERROR_RE = re.compile(r"Named models unavailable|Free plans can only use Auto|Authentication required"
+                           r"|not supported when using Codex with a ChatGPT account|Not logged in", re.I)
+_ERROR_LINE = re.compile(r"error|failed|denied|unauthori[sz]ed|invalid|not found|cannot|can't", re.I)
+
+
+def read_lock(folder):
+    """The .agent.lock of a run folder as a dict (pid, start, mode), or None."""
+    try:
+        with open(os.path.join(folder, AUTO_LOCK), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def lock_live(folder):
+    """True when another `--auto` process (alive, not this one) holds the lock of this run folder."""
+    lk = read_lock(folder)
+    return bool(lk and lk.get("mode") == "auto" and str(lk.get("pid")) != str(os.getpid())
+                and pid_alive(lk.get("pid"), lk.get("start")))
+
+
+def write_lock(folder, proc):
+    try:
+        with open(os.path.join(folder, AUTO_LOCK), "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(), "agent_pid": proc.pid, "start": time.time(), "mode": "auto"}, f)
+    except OSError:
+        pass
+
+
 def auto_launch(reg, a, it):
     rid = it["rid"]
     run = reg.data["runs"][rid]
     out = os.path.join(it["folder"], "agent-output.jsonl")
     if a.auto_agent == "cursor":      # Cursor keeps no token counts: this file is the measurement source
         run["session"] = {"agent": "cursor", "sid": rid, "path": out}
+    else:
+        run["session"] = None         # a relaunch finds its new session by the run id
+    for k in ("stopped", "error_note"):
+        run.pop(k, None)              # a relaunch after a failed run starts clean
     it["t0"] = time.time()
     act = reg.get_active(rid)
     if act:
         act["start"] = it["t0"]       # the start is the launch time
     reg.save()
     try:
-        it["proc"] = start_agent(build_auto_cmd(a.auto_agent, a.auto_argv, a.auto_model, it["folder"], it["prompt"]),
-                                 it["folder"], out)
+        cmd, stdin_text = build_auto_cmd(a.auto_agent, a.auto_argv, a.auto_model, it["folder"], it["prompt"])
+        it["proc"] = start_agent(cmd, it["folder"], out, stdin_text)
+        write_lock(it["folder"], it["proc"])
         it["state"] = "running"
-    except OSError as e:
+    except (OSError, LaunchError) as e:
         it["state"], it["end"] = "failed", it["t0"]
+        it["error"] = "could not start: %s" % e
         print(c_err("  %s could not start: %s" % (it["label"], e)))
 
 
-def auto_finish(reg, it):
-    """The normal finish of one run (like `done <run_id>`), without clearing the screen."""
+def _output_text(folder, limit=400000):
+    try:
+        with open(os.path.join(folder, "agent-output.jsonl"), encoding="utf-8", errors="replace") as f:
+            return f.read(limit)
+    except OSError:
+        return ""
+
+
+def _agent_worked(it):
+    """Did the agent do anything? Cursor: a tool call in its stream; others: a solution or an emulator run."""
+    if it.get("agent") == "cursor":
+        return any(c.get("tools") for c in M.cursor_sessions(os.path.join(it["folder"], "agent-output.jsonl")))
+    task = it.get("run_task") or ""
+    if task and os.path.isfile(os.path.join(it["folder"], "solutions", task + ".vsa")):
+        return True
+    return bool(count_runs(it["folder"], it["t0"] - 1, time.time() + 1))
+
+
+def agent_error(it):
+    """Why an agent that ended by itself failed ('' when it looks like a real run): it ended within
+    AUTO_MIN_SEC, or with a non-zero exit code and no tool calls, or it printed a known error text."""
+    if it.get("error"):
+        return it["error"]
+    lines = [x.strip() for x in _output_text(it["folder"]).splitlines() if x.strip()]
+    plain, first_err = [], ""
+    for x in lines:
+        if x.startswith("{"):
+            try:
+                d = json.loads(x)
+            except ValueError:
+                d = None
+            if isinstance(d, dict) and d.get("is_error") and d.get("result"):
+                plain.append(str(d["result"]).strip())        # Claude: {"type": "result", "is_error": true}
+            continue
+        plain.append(x)
+    for x in plain:
+        if AUTO_ERROR_RE.search(x):
+            return x
+        if not first_err and _ERROR_LINE.search(x) and "warn" not in x.lower():
+            first_err = x
+    el = (it["end"] or time.time()) - it["t0"]
+    if el < AUTO_MIN_SEC:
+        return first_err or "the agent ended after %d s (exit code %s)" % (el, it["rc"])
+    if it["rc"] and not _agent_worked(it):
+        return first_err or "exit code %s and no tool calls" % it["rc"]
+    return ""
+
+
+def auto_error(reg, it, reason):
+    """A failed --auto run: record stopped=error and the first error line, do NOT grade, keep the run active
+    (the learner does it by hand). Returns the row."""
     rid = it["rid"]
     run = reg.data["runs"][rid]
-    if it["state"] == "stopped":
-        run["stopped"] = "time"
+    note = " ".join(anon(reason).split())[:200]
+    run.update(stopped="error", error_note=note)
+    prev = reg.row(rid, "3")
+    t1 = it["end"] or time.time()
+    reg.set_row(rid, "3", dict(
+        alias=reg.data.get("alias", ""), task=run["task"], agent=it.get("agent", ""), model=run.get("auto_model", ""),
+        method=run["method"], parent_run_id=run["parent"], skill_source=run["skill_source"],
+        skill_hash=run["skill_hash"], skill_has_solution=run["skill_has_solution"], price_table=PRICE_TABLE,
+        start="%.0f" % it["t0"], cutoff="%.0f" % t1, wall_min="%.1f" % ((t1 - it["t0"]) / 60), score="",
+        grading="none", measurement="none", settings_confirmed="auto", stopped="error", error_note=note,
+        revision=int((prev or {}).get("revision") or 0) + 1))
+    reg.save()
+    reg.write_csv()
+    print("\n" + c_err("  RUN FAILED  %s" % it["label"]))
+    print(c_err("  RUN FAILED: %s. Do this run by hand: python workshop.py new s3 --task %s (shows its page)"
+                % (note.rstrip(". "), it.get("task") or "all")))
+    return reg.row(rid, "3")
+
+
+def auto_finish(reg, it):
+    """The normal finish of one run (like `done <run_id>`), without clearing the screen.
+    A failed run (agent_error) is not finished: it stays active with stopped=error."""
+    rid = it["rid"]
+    run = reg.data["runs"][rid]
+    it["run_task"] = run.get("task", "")
+    if it["state"] in ("done", "failed"):
+        why = agent_error(it)
+        if why:
+            it["state"] = "failed"
+            return auto_error(reg, it, why)
+    if it["state"] in ("stopped", "killed"):
+        run["stopped"] = "time" if it["state"] == "stopped" else "ctrl-c"
         reg.save()
     try:
-        row = finish_stage(reg, rid, "3", argparse.Namespace(partial=it["state"] == "stopped", auto=True))
+        row = finish_stage(reg, rid, "3", argparse.Namespace(partial=it["state"] in ("stopped", "killed"), auto=True))
     except Exception as e:  # noqa: BLE001  (one run must not stop the others)
         print(c_err("  %s: the finish failed (%s). Later:  python workshop.py done %s" % (it["label"], e, rid)))
         return None
     print("\n" + c_bold("  FINISHED  %s   (%s)" % (it["label"], it["state"])))
     if it["state"] == "done" and it["rc"]:
         print(c_err("  The agent ended with exit code %s; see agent-output.jsonl in the run folder." % it["rc"]))
-    try:
-        with open(os.path.join(it["folder"], "agent-output.jsonl"), encoding="utf-8", errors="replace") as f:
-            if FREE_PLAN_RE.search(f.read(200000)):
-                print(c_err("  Cursor says: %s. This run used no named model; it does not match the others."
-                            % FREE_PLAN_MSG))
-    except OSError:
-        pass
     print_wrong_folder(run, row)
     print(run_summary(row, "3"))
     warn = run_warnings(row)
@@ -3425,7 +3768,7 @@ def auto_start_screen(a, items):
     print(c_banner(WIDE))
     eff = ", effort high" if a.auto_agent == "codex" else ""
     print("  Agent: %s   Model: %s%s" % (a.auto_agent, a.auto_model, eff))
-    print("  Each agent works alone in its own run folder.")
+    print("  " + AUTO_SAFETY.get(a.auto_agent, ""))
     print("  Time box %d min: the tool stops any agent still working." % TIME_BOX_MIN)
     print("  Do not type in these folders. Ctrl+C stops all agents.")
     print("  Start order:")
@@ -3440,6 +3783,8 @@ def run_auto(reg, a, items):
     try:
         for it in items:
             auto_launch(reg, a, it)
+            if it["state"] == "failed":
+                auto_finish(reg, it)
         print("\n" + status_block(items))
         last = time.time()
         while any(it["state"] == "running" for it in items):
@@ -3451,8 +3796,7 @@ def run_auto(reg, a, items):
                 rc = it["proc"].poll()
                 if rc is None and now - it["t0"] < box:
                     continue
-                if rc is None:
-                    kill_tree(it["proc"])
+                kill_tree(it["proc"])         # also when it ended: its orphans (emulator, servers) die too
                 it["state"], it["end"], it["rc"] = ("done" if rc is not None else "stopped"), now, rc
                 auto_finish(reg, it)
                 print("\n" + status_block(items))
@@ -3461,23 +3805,55 @@ def run_auto(reg, a, items):
                 print("\n" + status_block(items))
                 last = now
     except KeyboardInterrupt:
+        return auto_ctrl_c(reg, items)
+    return auto_end_screen(reg, items)
+
+
+def auto_ctrl_c(reg, items):
+    """Ctrl+C: ignore a second Ctrl+C, kill every agent (the Job Objects make sure), then finish each killed
+    run as partial with stopped=ctrl-c (graded --partial, like the time box)."""
+    import signal
+    old = signal.getsignal(signal.SIGINT)
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except (ValueError, OSError):        # not the main thread
+        old = None
+    try:
+        now = time.time()
         for it in items:
             if it["state"] == "running":
                 kill_tree(it["proc"])
-                it["state"], it["end"] = "killed", time.time()
-        print(c_err("\n  Stopped with Ctrl+C. All agents are killed. Finished results are saved."))
-        left = reg.actives("3")
-        if left:
-            still_working_box(reg, left)
-        return 1
-    print("\n" + SAVED_LINE)
-    show_compare(reg, items[0]["rid"] if len(items) == 1 else None)
-    left = reg.actives("3")
-    if left:
+                it["state"], it["end"] = "killed", now
+        print(c_err("\n  Stopped with Ctrl+C. All agents are killed."))
+        print(c_err("  Each stopped run is saved as partial work."))
+        for it in items:
+            if it["state"] == "killed":
+                auto_finish(reg, it)
+        auto_end_screen(reg, items, show=False)
+    finally:
+        if old is not None:
+            signal.signal(signal.SIGINT, old)
+    return 1
+
+
+def auto_end_screen(reg, items, show=True):
+    """The NEXT box after --auto: failed runs (by hand), runs still active elsewhere, or the last steps."""
+    if show:
+        print("\n" + SAVED_LINE)
+        show_compare(reg, items[0]["rid"] if len(items) == 1 else None)
+    failed = [it for it in items if it["state"] == "failed"]
+    ours = {it["rid"] for it in items}
+    left = [x for x in reg.actives("3") if x["run_id"] not in ours]
+    if failed:
+        task = failed[0].get("task") or "all"
+        next_box(["python workshop.py new s3 --task %s" % task, "   shows the page of each failed run"],
+                 "1 run failed. Do it by hand:" if len(failed) == 1
+                 else "%d runs failed. Do them by hand:" % len(failed))
+    elif left:
         still_working_box(reg, left)
     else:
         all_done_box(reg)
-    return 0
+    return 0 if not failed else 1
 
 
 def s3_choice_box(reg, when):
@@ -3515,6 +3891,41 @@ def s3_pages(reg, a, entries, seed, total=None):
     return order
 
 
+def run_mode(run):
+    """'auto' (created or launched by --auto) or 'manual' (its page was shown: the learner runs it)."""
+    return run.get("mode") or ("auto" if run.get("auto") else "manual")
+
+
+def has_partial_work(run):
+    f = run.get("folder") or ""
+    return os.path.isfile(os.path.join(f, "solutions", run.get("task", "") + ".vsa")) or \
+        bool(count_runs(f, 0, time.time() + 1))
+
+
+def auto_resume_pick(reg, entries, order):
+    """The runs that a resume with --auto may start: created or launched by --auto, not done, and no live
+    agent on them. A stale lock with partial work: ask first (default No)."""
+    keep = []
+    for k in order:
+        rid, folder, _ = entries[k]
+        run = reg.data["runs"][rid]
+        lab = ALL_LABEL.get(k, run.get("task", ""))
+        if run_mode(run) != "auto":
+            print("  %s: you run it by hand. When it is done:" % lab)
+            print("      python workshop.py done %s" % rid)
+            continue
+        if lock_live(folder):
+            print("  %s: an agent still works on it in another window." % lab)
+            continue
+        if read_lock(folder) and has_partial_work(run):
+            q = "  %s has work from an earlier agent. Start a new agent there? [y/N] " % lab
+            if ask(q, "n").strip().lower() not in ("y", "yes"):
+                print("      Not started. To end it:  python workshop.py done %s --partial" % rid)
+                continue
+        keep.append(k)
+    return keep
+
+
 def resume_s3(reg, a, same):
     """Stage 3 is already set up (for example the learner pressed Ctrl+C in the page gate): show the pages of
     the runs that are still active again, in the start order. Prompts are rebuilt as create_s3_run builds them.
@@ -3539,11 +3950,19 @@ def resume_s3(reg, a, same):
     a.s3_first = first
     seed = parent or ""
     if getattr(a, "auto", False):
-        order = [k for k in start_order_keys(seed) if k in entries]
-        if ask("Start the agents for the %d runs that are not done? [Y/n]: " % len(order), "y").lower().startswith("n"):
-            print(S3_STOPPED)
+        order = auto_resume_pick(reg, entries, [k for k in start_order_keys(seed) if k in entries])
+        if not order:
+            print("  No run can be started by --auto now.")
+            return 1
+        if not auto_confirm(a, len(order)):
             return 1
         return run_auto(reg, a, [auto_item(reg, a, entries[k][0], entries[k][1], entries[k][2]) for k in order])
+    for k in list(entries):
+        if lock_live(entries[k][1]):                   # another terminal runs this agent with --auto
+            print("  %s: an --auto agent works on it in another window." % ALL_LABEL[k])
+            entries.pop(k)
+    if not entries:
+        return 1
     if not gate_on():
         s3_header(reg, a, len(entries) > 1, total=len(entries) if len(entries) in (3, 4) else None)
     s3_pages(reg, a, entries, seed)
@@ -3571,6 +3990,7 @@ def parse(argv):
     s.add_argument("--auto", action="store_true",
                    help="stage 3: the tool starts the agents itself (headless) and stops each at 10 min")
     s.add_argument("--model", help="with --auto: the model (default: the stage-3 model of your agent)")
+    s.add_argument("--yes", action="store_true", help="with --auto: start the agents without the question")
     s.set_defaults(func=cmd_new)
     s = sub.add_parser("done")
     s.add_argument("run_id", nargs="?", help="the run to end (needed when two stage-3 runs are active)")
