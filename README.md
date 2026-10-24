@@ -88,20 +88,22 @@ Codex: if Memories are on, type /memories first in each new workshop thread and 
 
 **Stage 3 runs four agents at the same time.** `new s3 --task all` (the default way; `--name` works with it)
 makes four runs in one command: (1) T3 WITH your skill, (2) T3 WITHOUT the skill (the control: same model, same
-task, no skill in the folder, and a prompt without the skill sentences; stop it at 10 min),
+task, no skill in the folder, and a prompt without the skill sentences),
 (3) T6 WITH your skill (a different task that shares components with T3), and (4) T6 WITHOUT the skill (control, same name on the
-nameplate; stop it at 10 min). Runs 2 and 4 make the matched comparison: what the skill adds in one attempt; `show` compares each pair, marks each score
+nameplate). Stop EVERY one of the four at 10 min (the same time box for all arms), then run its `done` line. Runs 2 and 4 make the matched comparison: what the skill adds in one attempt; `show` compares each pair, marks each score
 PASS or FAIL, and prints the observed score gains on T3 and T6. These results neither identify nor rule out answer
 reuse, and reliability is unknown (one attempt per condition). The tool prints the order to start the four threads
 (random per stage-1 run) and shows the runs in that order. At the end of each run it prints an isolation check: a scan
 of the agent's tool calls for reads of other run folders, the kit folder and memory files. The scan finds some outside
-reads; it is not proof. A run that takes more than 10 minutes from its prompt (the time in the agent log) to `done`
-is flagged as an overrun. `--task both` (T6 and T3 with the skill) still works. You can start the runs one by one instead:
+reads; it is not proof. A run whose agent kept working more than 10 minutes after its prompt (the time in the agent log; the time you
+run `done` does not count) is flagged as an overrun. `show` and the compare print "over 10 min" next to its score
+and do not call that pair a matched comparison. If a run is stopped at the box with the grader still locked, it is
+saved as "ungraded + stopped"; `grade` scores it later as partial work. `--task both` (T6 and T3 with the skill) still works. You can start the runs one by one instead:
 `new s3 --task T6` asks for your name (up to 8 letters A-Z) and
 writes it into `tasks/T6.md`; T6 is a different task that shares components with T3. `new s3 --task T3` repeats the
 stage-1 game. Open each folder in its own new thread and choose the small model there (Claude Code: Haiku;
 Codex: gpt-6-luna; Cursor: its cheapest model). The prompt gives a budget of 6 emulator runs; the time box is
-10 minutes (the tool records the time; it does not stop the agent). End each run with the `done <run_id>`
+10 minutes (by hand the tool records the time but does not stop the agent: you stop it; `--auto` stops it for you). End each run with the `done <run_id>`
 command that `new` printed.
 
 **When `doctor` finds a fault** it writes `doctor-report.txt` into this folder and prints a short prompt.
@@ -111,8 +113,8 @@ Paste that prompt into any LLM (an agent opened in this folder can read the file
 (Windows) or `~/vesper-runs`, runs `git init` there, runs the emulator and the grader, reads your agent's
 local session logs to count tokens (it finds them by the `Workshop run:` line in the prompt). At the end,
 `submit` opens the results form in your browser.
-**What it does not do:** it never starts or talks to an agent (you paste every prompt; the optional
-`shadow` command is the only exception), it sends nothing over the network, and it changes nothing
+**What it does not do:** it never starts an agent unless you run `--auto` or `shadow`, and both ask
+first (you paste every other prompt yourself), it sends nothing over the network, and it changes nothing
 outside its own folder unless you confirm.
 
 - The prompts are plain files in `prompts/`; read them before you paste them.
@@ -139,9 +141,11 @@ Ctrl+C stops all agents (Windows: each agent is in a Job Object, so every proces
 stopped run as partial work (`stopped = ctrl-c`). The manual flow (without `--auto`) does not change.
 
 - **Before the start:** the tool says what the agents may do, and asks `Start the 4 agents? [y/N]` (default No).
-  Without a terminal it starts only with `--yes`. Codex runs in its sandbox (it can change files only in its run
-  folder). Claude Code runs with `--permission-mode dontAsk` and may only run `bin/vesper` and read, edit and write
-  files in its run folder. Cursor runs with `--sandbox enabled`. The prompt goes on stdin (Codex, Claude Code), so a
+  Without a terminal it starts only with `--yes`. The flags ask for these limits: Codex `-s workspace-write`;
+  Claude Code `--permission-mode dontAsk` (it may run `bin/vesper`, `ls`, `cat`, `head`, `mkdir out`, and read,
+  edit and write files in its run folder); Cursor `--sandbox enabled`. The tool says a limit is verified only after
+  `doctor --check-auto` passed on this computer (otherwise: "Not verified on this computer"). The agents can read
+  other folders on this disk; the isolation check looks for that. The prompt goes on stdin (Codex, Claude Code), so a
   `.cmd` launcher (npm) gets every flag.
 - **Failed run:** an agent that ends within 60 seconds, or with an error and no tool call, or with a known error
   (no login, free plan) gives no data. The row says `stopped = error` with the first error line in `error_note`, the
@@ -149,7 +153,9 @@ stopped run as partial work (`stopped = ctrl-c`). The manual flow (without `--au
 - **Resume:** `new s3 --task all --auto` again starts only runs that `--auto` made, that are not done, and that no
   live agent holds (`.agent.lock` in the run folder). It never starts a run whose page you saw (manual).
 - **Check first:** `python workshop.py doctor` says whether `--auto` is ready for your agent (CLI found, Cursor logged
-  in). `python workshop.py doctor --check-auto` makes ONE tiny run ("Reply OK") with the stage-3 model.
+  in). `python workshop.py doctor --check-auto` makes ONE tiny run with the stage-3 model and the real `--auto` flags:
+  the agent writes `out/ok.txt`, runs `bin/vesper --version` and tries to write a file outside its folder. It prints
+  PASS only if `out/ok.txt` exists and the outside file does not.
 - **Codex:** `--auto` uses `codex.exe` of the Codex app (`%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`). The
   npm `codex` is used only if it is version 0.163 or newer (0.154 rejects gpt-6-luna on a ChatGPT account).
 - **Cursor, install and login (Windows PowerShell):** `irm 'https://cursor.com/install?win32=true' | iex`, then
@@ -160,7 +166,9 @@ stopped run as partial work (`stopped = ctrl-c`). The manual flow (without `--au
   "Named models unavailable". `doctor --check-auto` reports "free plan: only Auto". Use the manual flow, or a paid plan.
 - **Cursor rules:** Cursor loads your User Rules and alwaysApply rules in every run. Turn them off for a clean run.
 - **Lost window:** each stage-3 prompt is also saved as `PROMPT.txt` in its run folder. If you press Ctrl+C while the
-  pages show, or close the window, run the same `new s3` command again: it shows the pages of the runs that are not done.
+  pages show, or close the window, run the same `new s3` command again: it shows the pages of the runs that are not done. When all runs of stage 3
+  are done, the same command asks "Start a repeat attempt? [y/N]" (default No; without a terminal it needs `--yes`).
+  Your done lines are in `show`.
 
 ## Rules for the exercise
 

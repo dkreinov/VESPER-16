@@ -50,7 +50,7 @@ a fresh thread that reads the skill and the old solution and says "knowledge" or
 - One run per arm is an example, not a result. Repeat before you decide.
 - Costs from token logs are estimates under list prices, not your bill.
 
-This is also the official method of the Agent Skills standard: with vs without the skill, clean contexts, objective
+The Agent Skills evaluation guide says the same: with vs without the skill, clean contexts, objective
 checks, repeat runs (agentskills.io/skill-creation/evaluating-skills.md).
 
 ## Then use it

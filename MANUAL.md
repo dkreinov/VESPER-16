@@ -40,9 +40,9 @@ Work in a local folder, not on OneDrive. Choose any 4 hex digits (0-9a-f) for <s
 4. Look in `$R\skill-out\vesper16`. If you see a `.vsa` file or long blocks of assembly, estimate how much
    of your stage-1 game is in the skill and write it down (for example 30%). Keep the files: this is only recorded.
 
-## Stage 3 — two new agents with the skill, at the same time
+## Stage 3 — new agents with and without the skill, at the same time
 
-With the tool, `python workshop.py new s3 --task all` is the default way. It makes four runs: T3 with the skill, T3 WITHOUT the skill (the control: no skill folders, and a prompt without the skill sentences; run id tag `n3`), T6 with the skill, and T6 WITHOUT the skill (control, same name in the task file; tag `n6`). Separate commands (`--task both`, `--task T6`, `--task T3`) also work. By hand: make two run folders: T6 (your name) and T3 again. Use the same <s1code> as in your stage-1 run_id (`s1-<s1code>`), and choose new 4 hex digits for <code>.
+With the tool, `python workshop.py new s3 --task all` is the default way. It makes four runs: T3 with the skill, T3 WITHOUT the skill (the control: no skill folders, and a prompt without the skill sentences; run id tag `n3`), T6 with the skill, and T6 WITHOUT the skill (control, same name in the task file; tag `n6`). Separate commands (`--task both`, `--task T6`, `--task T3`) also work. By hand: make four run folders: T6 (your name) and T3 again, each with the skill and each WITHOUT it (the two controls: the same folder, but no `.agents\skills` and no `.claude\skills`, and the prompt without the skill sentences; tags `n3` and `n6`). Without the controls, your rows have no partner and appear in chart 1 only. Use the same <s1code> as in your stage-1 run_id (`s1-<s1code>`), and choose new 4 hex digits for <code>.
 
 1. Make the first run folder as in stage 1, step 1, but with `$R3 = "$env:LOCALAPPDATA\vesper-manual\s3-<s1code>-t6-<code>"`
    and `$R3` instead of `$R` in all commands of that step. Do **not** copy `tasks\T3.md`. Instead write your T6 task:
@@ -63,7 +63,7 @@ With the tool, `python workshop.py new s3 --task all` is the default way. It mak
 4. Codex: if Memories are on, type /memories first in each new workshop thread and turn memory off for that chat.
    Open each folder as a new project, each in a new thread, with the small model (Claude Code: Haiku; Codex:
    gpt-6-luna; Cursor: its cheapest). Paste `prompts/stage3.md` into each (replace `{run_id}` and `{task}`: T6 and T3).
-5. Measure each run as in stage 1. Time box: 10 minutes. Budget: 6 emulator runs.
+5. Stop every agent at 10 minutes (the same for all runs), then measure each run as in stage 1. Budget: 6 emulator runs.
 6. Read the results with care. Each condition has one attempt, so reliability is unknown. Check PASS or FAIL before time or cost. The gain line (T3 and T6) shows observed score gains only; it neither identifies nor rules out answer reuse. The pay-back line shows only what the skill cost to write; break-even is not established. Costs are estimates under the kit's price assumptions. The comparison is matched only when both runs have the same model and the same effort.
 
 ### Stage 3 with `--auto` (optional)
