@@ -96,8 +96,8 @@ reuse, and reliability is unknown (one attempt per condition). The tool prints t
 (random per stage-1 run) and shows the runs in that order. At the end of each run it prints an isolation check: a scan
 of the agent's tool calls for reads of other run folders, the kit folder and memory files. The scan finds some outside
 reads; it is not proof. A run whose agent kept working more than 10 minutes after its prompt (the time in the agent log; the time you
-run `done` does not count) is flagged as an overrun. `show` and the compare print "over 10 min" next to its score
-and do not call that pair a matched comparison. If a run is stopped at the box with the grader still locked, it is
+run `done` does not count) is flagged as an overrun. `show` marks its score with `!` ("! = over 10 min"), the compare prints "over 10 min" next to it,
+and neither calls that pair a matched comparison. If a run is stopped at the box with the grader still locked, it is
 saved as "ungraded + stopped"; `grade` scores it later as partial work. `--task both` (T6 and T3 with the skill) still works. You can start the runs one by one instead:
 `new s3 --task T6` asks for your name (up to 8 letters A-Z) and
 writes it into `tasks/T6.md`; T6 is a different task that shares components with T3. `new s3 --task T3` repeats the
@@ -143,7 +143,9 @@ stopped run as partial work (`stopped = ctrl-c`). The manual flow (without `--au
 - **Before the start:** the tool says what the agents may do, and asks `Start the 4 agents? [y/N]` (default No).
   Without a terminal it starts only with `--yes`. The flags ask for these limits: Codex `-s workspace-write`;
   Claude Code `--permission-mode dontAsk` (it may run `bin/vesper`, `ls`, `cat`, `head`, `mkdir out`, and read,
-  edit and write files in its run folder); Cursor `--sandbox enabled`. The tool says a limit is verified only after
+  edit and write files in its run folder); Cursor never gets `--force`: each Cursor run folder has
+  `.cursor/cli.json` (allow `bin/vesper`, read and write inside the folder), plus `--sandbox enabled` on macOS/Linux
+  (the sandbox does not exist on Windows). The tool says a limit is verified only after
   `doctor --check-auto` passed on this computer (otherwise: "Not verified on this computer"). The agents can read
   other folders on this disk; the isolation check looks for that. The prompt goes on stdin (Codex, Claude Code), so a
   `.cmd` launcher (npm) gets every flag.
@@ -202,3 +204,10 @@ MANUAL.md           the same exercise by hand
 HOMEWORK.md         more exercises
 HOW-TO-TEST-A-SKILL.md  take-home checklist: choose, build and test a skill
 ```
+
+## Cursor app (manual) learners
+The stage-3 page names the model (GPT-5.6 Luna High, not Auto, no Plan mode). The Cursor app shows no tokens or cost.
+At `done` the tool reads Cursor's local chat data (read-only) to record the model and the time. It finds the chat by the
+run id in its first message. If it finds nothing, model and time stay unknown. A model "Auto" is recorded as `auto` and
+is never a matched pair. The row has `measurement = cursor-app`; its PASS/FAIL counts, but charts leave it out of the
+cost chart. For tokens and cost use `--auto`.

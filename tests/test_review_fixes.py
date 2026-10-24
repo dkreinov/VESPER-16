@@ -207,6 +207,12 @@ class CheckAutoProbe(TA.AutoBase):                          # M4 / M5
         self.assertIn("could not write out/ok.txt", flat(out))
         self.assertFalse(self.w.Registry.load().data["auto_probe"]["cursor"]["pass"])
 
+    def test_fail_when_no_version_text(self):
+        os.environ["FAKE_PROBE_NOVERSION"] = "1"
+        out = self._check()
+        self.assertIn("did not run bin/vesper --version", flat(out))
+        self.assertFalse(self.w.Registry.load().data["auto_probe"]["cursor"]["pass"])
+
     def test_fail_when_the_agent_writes_outside(self):
         os.makedirs(os.path.join(self.home, "user"), exist_ok=True)
         os.environ["FAKE_PROBE_OUTSIDE"] = "1"
@@ -219,10 +225,12 @@ class CheckAutoProbe(TA.AutoBase):                          # M4 / M5
     def test_warning_screen_says_only_what_was_verified(self):
         out, _ = capture(self.w, "new", "s3", "--task", "T3", "--auto")
         self.assertIn("Not verified on this computer: run  doctor --check-auto", flat(out))
-        self.assertIn("It can read other folders on this disk", flat(out))
-        self.assertNotIn("Verified here", out)
+        self.assertIn("It can read other folders;", flat(out))
+        self.assertNotIn("Verified by", out)
         a = type("A", (), {"auto_agent": "cursor", "auto_verified": True})()
-        self.assertIn("Verified here", "\n".join(self.w.auto_limit_lines(a)))
+        for t in (self.w.VERIFIED, self.w.READ_NOTE):
+            self.assertLessEqual(len(t), 70)
+        self.assertIn("Verified by doctor --check-auto", "\n".join(self.w.auto_limit_lines(a)))
 
 
 if __name__ == "__main__":

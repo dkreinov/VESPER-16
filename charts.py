@@ -303,10 +303,15 @@ def split_flagged(rs):
 SERIES3 = ["stage 1: T3, no skill", "stage 3: T6 with skill", "stage 3: T3 again with skill"]
 
 
+CURSOR_HINT = ("Cursor app rows (measurement cursor-app) have no tokens or cost: they are not in this chart. "
+               "Their PASS/FAIL and time count in the other charts.")
+
+
 def money_time(groups):
     keys = ("s1", "T6", "T3")
     return {"labels": [g["label"] for g in groups],
-            "cost": [[num((g.get(k) or {}).get("cost_usd")) for k in keys] for g in groups],
+            "cost": [[None if (g.get(k) or {}).get("measurement") == "cursor-app"
+                      else num((g.get(k) or {}).get("cost_usd")) for k in keys] for g in groups],
             "time": [[num((g.get(k) or {}).get("elapsed_min")) for k in keys] for g in groups]}
 
 
@@ -338,7 +343,8 @@ def paired(groups):
                 missing += 1
                 continue
             ew, ec = (w.get("effort") or "").strip(), (c.get("effort") or "").strip()
-            same = bool(w.get("model")) and w.get("model") == c.get("model") and ew == ec
+            same = bool(w.get("model")) and w.get("model") == c.get("model") and ew == ec and w.get("model") != "auto"
+            # (Cursor "Auto" is not one fixed model: such a pair is not matched)
             if not same:
                 skipped += 1
                 continue
@@ -401,7 +407,8 @@ def chart_specs(rows):
                      plural(tp["unconfirmed"], "run", "runs"), plural(tp["repeats"], "repeat attempt", "repeat attempts")))
     return [
         {"id": "money", "kind": "bars", "title": "1a. Money per learner: stage 1 vs stage 3 (USD, API list price) (not a matched comparison)",
-         "groups": mt["labels"], "series": SERIES3, "values": mt["cost"], "unit": "USD"},
+         "groups": mt["labels"], "series": SERIES3, "values": mt["cost"], "unit": "USD",
+         "hint": CURSOR_HINT if any((r.get("measurement") or "") == "cursor-app" for r in rows) else ""},
         {"id": "time", "kind": "bars", "title": "1b. Time per learner: stage 1 vs stage 3 (minutes) (not a matched comparison)",
          "groups": mt["labels"], "series": SERIES3, "values": mt["time"], "unit": "min"},
         pair_spec(g),

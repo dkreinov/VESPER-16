@@ -15,6 +15,7 @@ Env switches:
   FAKE_LOGIN       "no" -> `status` prints "Not logged in"
   FAKE_INIT_MODEL  the model name Cursor reports in its init event (default: the --model argument)
   FAKE_PROBE_NOWRITE=1   the check-auto probe: do NOT write out/ok.txt (permissions too narrow)
+  FAKE_PROBE_NOVERSION=1 the check-auto probe: do NOT print the VESPER-16 version text
   FAKE_PROBE_OUTSIDE=1   the check-auto probe: ALSO write the file outside the folder (no sandbox)
 """
 import json, os, re, subprocess, sys, time, uuid
@@ -61,6 +62,8 @@ def main(argv):
             os.makedirs(os.path.join(folder, "out"), exist_ok=True)
             with open(os.path.join(folder, "out", "ok.txt"), "w") as f:
                 f.write("OK")
+        if not os.environ.get("FAKE_PROBE_NOVERSION"):
+            print("VESPER-16 SDK 2.3.1", flush=True)
         m = re.search(r"into (\S+) \.", prompt)
         if m and os.environ.get("FAKE_PROBE_OUTSIDE"):
             with open(m.group(1), "w") as f:

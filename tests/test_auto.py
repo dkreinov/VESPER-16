@@ -15,7 +15,7 @@ import measure  # noqa: E402
 
 ENV_KEYS = ("VESPER_CODEX_EXE", "VESPER_CURSOR_EXE", "VESPER_CLAUDE_EXE", "FAKE_SLEEP", "FAKE_SLOW_KEYS",
             "FAKE_SLOW_SEC", "FAKE_CHILD", "FAKE_FREEPLAN", "FAKE_VERSION", "FAKE_LOGIN", "FAKE_INIT_MODEL",
-            "FAKE_FAIL", "FAKE_NO_USAGE", "FAKE_PROBE_NOWRITE", "FAKE_PROBE_OUTSIDE", "LOCALAPPDATA")
+            "FAKE_FAIL", "FAKE_NO_USAGE", "FAKE_PROBE_NOWRITE", "FAKE_PROBE_NOVERSION", "FAKE_PROBE_OUTSIDE", "LOCALAPPDATA")
 
 
 def make_echo_cmd(d, name="agent.cmd"):
@@ -307,9 +307,16 @@ class AutoCursor(AutoBase):
                 argv = json.load(f)["argv"]
             self.assertEqual(argv[0], "-p")
             self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
-            self.assertIn("--force", argv)
+            self.assertNotIn("--force", argv)
+            self.assertNotIn("--yolo", argv)
             self.assertIn("--trust", argv)
-            self.assertEqual(argv[argv.index("--sandbox") + 1], "enabled")
+            if sys.platform != "win32":
+                self.assertEqual(argv[argv.index("--sandbox") + 1], "enabled")
+            else:
+                self.assertNotIn("--sandbox", argv)
+            with open(os.path.join(runs[rid]["folder"], ".cursor", "cli.json")) as f:
+                self.assertEqual(json.load(f), {"permissions": {"allow": [
+                    "Shell(bin/vesper)", "Shell(bin/vesper.exe)", "Read(./**)", "Write(./**)"], "deny": []}})
             self.assertEqual(argv[argv.index("--model") + 1], "gpt-5.6-luna-high")
             self.assertEqual(os.path.normcase(argv[argv.index("--workspace") + 1]),
                              os.path.normcase(runs[rid]["folder"]))
@@ -417,9 +424,9 @@ class CmdLauncher(AutoBase):
 
     def test_cursor_cmd(self):
         rid, run_, d, prompt, out = self.launch("cursor")
-        self.assertEqual(d["argv"], ["-p", "--model", "gpt-5.6-luna-high", "--output-format", "stream-json",
-                                     "--force", "--sandbox", "enabled", "--trust", "--workspace", run_["folder"],
-                                     " ".join(prompt.split()).replace('"', "'")])
+        sb = [] if sys.platform == "win32" else ["--sandbox", "enabled"]
+        self.assertEqual(d["argv"], ["-p", "--model", "gpt-5.6-luna-high", "--output-format", "stream-json"] + sb
+                         + ["--trust", "--workspace", run_["folder"], " ".join(prompt.split()).replace('"', "'")])
         self.assertIn("Workshop run: " + rid, d["argv"][-1])
         self.assertEqual(self.rows3()[rid]["tok_out"], 340)
 
@@ -458,7 +465,7 @@ class AutoConfirm(AutoBase):
     def test_warning_lines_per_agent(self):
         for ag, text in self.w.AUTO_SAFETY.items():
             self.assertLessEqual(len("  " + text), 72, ag)
-        self.assertIn("sandbox", self.w.AUTO_SAFETY["cursor"])
+        self.assertIn("only run bin/vesper", self.w.AUTO_SAFETY["cursor"])
 
 
 class AutoErrors(AutoBase):

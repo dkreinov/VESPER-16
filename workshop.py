@@ -407,6 +407,16 @@ SMALL_SHORT = {"claude": "Haiku (/model haiku)", "codex": "gpt-6-luna, effort hi
                "cursor": "its cheapest model"}
 
 
+def cursor_app_lines(agent, total=4):
+    """Stage-3 lines for a learner who uses the Cursor app (not --auto)."""
+    if agent != "cursor":
+        return []
+    return ["  Model: GPT-5.6 Luna High (%s) in %s." % (AUTO_MODEL["cursor"],
+                                                     "all %d chats" % total if total > 1 else "this chat"),
+            "  Not Auto. Do not use Plan mode.",
+            "  Tokens and cost: not shown by the Cursor app. Want them? Use --auto."]
+
+
 def s3_header(reg, a, both, total=None):
     """Compact stage-3 header: title (+ T6 name), one steps paragraph, one wait line."""
     agent = reg.data.get("agent") or ""
@@ -443,6 +453,8 @@ def s3_header(reg, a, both, total=None):
         print("  (Codex Memories are on: turn them off per thread with /memories)")
     if right and getattr(a, "name_from_alias", False):
         print("  (change: --name OTHER)")
+    for l in cursor_app_lines(agent, total or (2 if both else 1)):
+        print(l)
     print("  Wait until the agent is done; do not ask it anything else.")
     print("  If an agent asks a question, reply: Make reasonable assumptions and continue.")
     print("  Time box %d min: stop any agent still working at %d min, then run its done line."
@@ -466,7 +478,8 @@ def gate_on():
     return bool(sys.stdout.isatty())
 
 
-def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=False, after=None):
+def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=False, after=None,
+             cursor_lines=None):
     """One run as its own page (terminal only). Repeats the steps until the learner answers y."""
     while True:
         clear_screen()
@@ -481,6 +494,8 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
             print("\n  3. " + c_next("/memories -> turn memory off for this chat."))
             n = 4
         print("\n  %d. Model: %s" % (n, model_line))
+        if cursor_lines:
+            print("\n".join([""] + cursor_lines))
         if ask("\n  Done with these steps? [y/n] (n = show them again): ", "y").lower().startswith("y"):
             break
     reg.data["runs"][rid]["settings_confirmed"] = "yes"
@@ -512,7 +527,8 @@ def s3_show(reg, rid, n, total, task, folder, prompt, desc=None, extra=None):
     head = "STAGE 3 - RUN %d of %d  %s%s" % (n, total, desc, ("   name on T6: " + nm) if nm and task == "T6" else "")
     run_page(reg, rid, head, folder, prompt, model, n >= total, extra=extra,
              mem=codex_memories_on(reg) and agent in ("codex", ""),
-             after="Send it and note the time. " + STOP_LINE)
+             after="Send it and note the time. " + STOP_LINE,
+             cursor_lines=cursor_app_lines(agent, total))
 
 
 def method_notice(method, when):
@@ -2436,6 +2452,8 @@ def show_rows(rows, note=True):
         sc = ("%s %s" % (r.get("score", ""), verdict(r))).strip() or "-"
         if r.get("grading") == "partial":
             sc += "*"
+        if r.get("overrun") == "yes":
+            sc += "!"
         em = str(r.get("emulator_runs", "")).strip()
         body.append([r.get("run_id", ""), r.get("stage", ""), r.get("task", ""), "-" if el is None else "%.1f" % el,
                      "-" if em in ("", "unknown") else em, "-" if cost is None else "$%.2f" % cost, sc])
@@ -2456,6 +2474,8 @@ def show_rows(rows, note=True):
         print("  Model: %s (%d %s)" % (m, n, "run" if n == 1 else "runs"))
     if any(r.get("grading") == "partial" for r in rows):
         print("  * = stopped early; graded as partial work.")
+    if any(r.get("overrun") == "yes" for r in rows):
+        print("  ! = over %d min (the agent worked past the time box)." % TIME_BOX_MIN)
     if note and any(str(r.get("cost_usd", "")).strip() for r in rows):
         print(COST_NOTE)
 
@@ -2503,8 +2523,8 @@ def settings_match(rw, rc):
     efforts empty (Claude Code and Cursor do not log effort). '' otherwise: models differ or are unknown,
     efforts differ, or only one effort is known."""
     g = lambda r, k: str((r or {}).get(k, "")).strip()
-    if not g(rw, "model") or g(rw, "model") != g(rc, "model"):
-        return ""
+    if not g(rw, "model") or g(rw, "model") != g(rc, "model") or g(rw, "model") == "auto":
+        return ""                              # "auto" (Cursor Auto) is not one fixed model
     ew, ec = g(rw, "effort"), g(rc, "effort")
     if not ew and not ec:
         return "no_effort"
@@ -2673,6 +2693,17 @@ def finish_stage(reg, rid, stage, a, grade=True):
             m.update({k: prev[k] for k in ("model", "tok_uncached", "tok_out", "cost_usd", "measurement")})
         elif run.get("auto"):
             m["measurement"] = "none"             # --auto never asks: the tool started the agent itself
+        elif reg.data.get("agent") == "cursor":
+            # Cursor app: no tokens anywhere. Model and time come from Cursor's local chat data, if found.
+            m["measurement"] = "cursor-app"
+            chat = M.cursor_app_chat(rid)
+            if chat:
+                lo, hi = max(chat["first"], t0), min(chat["last"], t1)
+                m["model"] = chat["model"]
+                if hi > lo:
+                    m["elapsed_min"] = "%.1f" % ((hi - lo) / 60)
+                    m["last_activity"] = hi
+            print(CURSOR_APP_LINE)
         else:
             print("No agent log contains %s (Cursor or another agent?). "
                   "Type the numbers from the agent's usage screen (Enter = skip)." % rid)
@@ -2731,6 +2762,9 @@ def finish_stage(reg, rid, stage, a, grade=True):
     reg.save()
     reg.write_csv()
     return reg.row(rid, stage)
+
+
+CURSOR_APP_LINE = "  Tokens and cost: not available in the Cursor app."
 
 
 def cmd_done(a):
@@ -3471,14 +3505,30 @@ def build_auto_cmd(agent, argv, model, folder, prompt):
             prompt = " ".join(prompt.split()).replace('"', "'")
             if "%" in prompt or "!" in prompt:      # cursor-agent.cmd uses enabledelayedexpansion
                 raise LaunchError("the prompt has %% or ! (cursor-agent.cmd cannot pass them)")
-        cmd = argv + ["-p", "--model", model, "--output-format", "stream-json", "--force", "--sandbox", "enabled",
-                      "--trust", "--workspace", folder, prompt]
+        # never --force/--yolo: the allow-list in <folder>/.cursor/cli.json (write_cursor_cli) limits the agent
+        cmd = argv + ["-p", "--model", model, "--output-format", "stream-json"]
+        if sys.platform != "win32":       # "Sandbox requires macOS or Linux"
+            cmd += ["--sandbox", "enabled"]
+        cmd += ["--trust", "--workspace", folder, prompt]
         if script and len(subprocess.list2cmdline(cmd)) > CMD_MAX:
             raise LaunchError("the command line is too long for cursor-agent.cmd (%d characters)"
                               % len(subprocess.list2cmdline(cmd)))
         return cmd, None
     return argv + ["-p", "--model", model, "--output-format", "json", "--permission-mode", "dontAsk",
                    "--setting-sources", "project", "--allowedTools"] + CLAUDE_TOOLS, prompt
+
+
+CURSOR_PERMS = {"permissions": {"allow": ["Shell(bin/vesper)", "Shell(bin/vesper.exe)", "Read(./**)",
+                                          "Write(./**)"], "deny": []}}
+
+
+def write_cursor_cli(folder):
+    """<folder>/.cursor/cli.json: Cursor may run bin/vesper and read/write inside its run folder only.
+    (.cursor/ is not part of the solution: the snapshot copies solutions/<task>.vsa only.)"""
+    d = os.path.join(folder, ".cursor")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "cli.json"), "w", encoding="utf-8") as f:
+        json.dump(CURSOR_PERMS, f, indent=2)
 
 
 def start_agent(cmd, folder, out_path, stdin_text=None):
@@ -3659,7 +3709,8 @@ _PROBE = {}
 def check_auto_run(agent):
     """doctor --check-auto: ONE tiny run with the stage-3 model and the real --auto flags. The agent writes
     out/ok.txt, runs bin/vesper --version and tries to write a file OUTSIDE its folder. PASS only when ok.txt
-    exists (it can work) and the outside file does not (the limit works). Returns (ok, text)."""
+    exists (it can work), the VESPER-16 version text is in the agent output (it ran bin/vesper) and the
+    outside file does not exist (the limit works). Returns (ok, text)."""
     argv, why = find_cli(agent)
     if not argv:
         return False, "error: " + why
@@ -3668,8 +3719,10 @@ def check_auto_run(agent):
     try:
         os.makedirs(os.path.join(tmp, "bin"))
         shutil.copy2(vesper_bin(), os.path.join(tmp, "bin"))
+        if agent == "cursor":
+            write_cursor_cli(tmp)
         prompt = ("Write the word OK into out/ok.txt, run bin/vesper --version, then try to write the word NO "
-                  "into %s . Reply DONE." % outside.replace("\\", "/"))
+                  "into %s . Reply with the version text of bin/vesper." % outside.replace("\\", "/"))
         try:
             cmd, stdin_text = build_auto_cmd(agent, argv, AUTO_MODEL[agent], tmp, prompt)
             rc, text = run_capture(cmd, AUTO_CHECK_SEC, cwd=tmp, stdin_text=stdin_text)
@@ -3684,6 +3737,10 @@ def check_auto_run(agent):
         _PROBE[agent] = bool(wrote_ok and not wrote_out)
         if wrote_out:
             return False, "FAIL: the agent wrote a file OUTSIDE its folder (no safe limit)"
+        saw_version = "VESPER-16" in text
+        if rc == 0 and wrote_ok and not saw_version:
+            _PROBE[agent] = False
+            return False, "FAIL: the agent did not run bin/vesper --version (no version text in its answer)"
         if rc == 0 and wrote_ok:
             return True, "PASS (%s wrote out/ok.txt; a write outside its folder was blocked)" % AUTO_MODEL[agent]
         if rc == 0:
@@ -3753,10 +3810,10 @@ def auto_setup(reg, a):
 # They say what is ASKED. The screen says "verified" only after `doctor --check-auto` passed here.
 AUTO_SAFETY = {"codex": "Codex starts in a sandbox: it may change files in its run folder only.",
                "claude": "Claude may only run bin/vesper (and ls, cat) and edit its run folder.",
-               "cursor": "Cursor starts with its sandbox on (--sandbox enabled)."}
+               "cursor": "Cursor may only run bin/vesper and use files in its run folder."}
 NOT_VERIFIED = "Not verified on this computer: run  doctor --check-auto"
-VERIFIED = "Verified here (doctor --check-auto): a write outside the folder failed."
-READ_NOTE = "It can read other folders on this disk; the isolation check looks for that."
+VERIFIED = "Verified by doctor --check-auto: a write outside failed."
+READ_NOTE = "It can read other folders; the isolation check looks for that."
 
 
 def auto_limit_lines(a):
@@ -3856,6 +3913,8 @@ def auto_launch(reg, a, it):
         act["start"] = it["t0"]       # the start is the launch time
     reg.save()
     try:
+        if a.auto_agent == "cursor":
+            write_cursor_cli(it["folder"])
         cmd, stdin_text = build_auto_cmd(a.auto_agent, a.auto_argv, a.auto_model, it["folder"], it["prompt"])
         it["proc"] = start_agent(cmd, it["folder"], out, stdin_text)
         write_lock(it["folder"], it["proc"])

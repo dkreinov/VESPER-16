@@ -14,7 +14,7 @@ Claude Code (~/.claude/projects) and Codex (~/.codex/sessions). For any other ag
 with the numbers from that tool's usage screen. If part 4 is unlocked, `stop` also grades.
 Standard library only; Linux, macOS and Windows.
 """
-import argparse, csv, datetime as dt, glob, json, os, re, subprocess, sys, time
+import argparse, csv, datetime as dt, glob, json, os, re, sqlite3, subprocess, sys, time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(KIT, ".measure", "state.json")
@@ -240,6 +240,62 @@ def cursor_sessions(path):
     return [dict(agent="cursor", file=path, cwd=cwd, tot=tot, models=models, first=min(stamps) if stamps else None,
                  last=max(stamps) if stamps else None, sid=sid or os.path.basename(path), tools=tools,
                  emulator_runs=runs, complete=usage is not None, duration=duration)]
+
+
+# ---------------------------------------------------------------- Cursor app (manual runs, local chat data)
+def cursor_state_db():
+    """Path of Cursor's local state database (VESPER_CURSOR_STATE overrides it, for tests)."""
+    if os.environ.get("VESPER_CURSOR_STATE"):
+        return os.environ["VESPER_CURSOR_STATE"]
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+    elif sys.platform == "darwin":
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    else:
+        base = os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "Cursor", "User", "globalStorage", "state.vscdb")
+
+
+def cursor_app_chat(run_id, db=None):
+    """The Cursor app chat of a run: {model, first, last} (epoch seconds; model 'auto' for Cursor's 'default'),
+    or None. The run id is in the first message of the chat; the database is opened read-only.
+    Anything that goes wrong (no file, other layout, locked database) gives None, never an error."""
+    db = db or cursor_state_db()
+    if not run_id or not os.path.isfile(db):
+        return None
+    try:
+        from pathlib import Path
+        con = sqlite3.connect(Path(os.path.abspath(db)).as_uri() + "?mode=ro", uri=True, timeout=2)
+        try:
+            con.text_factory = lambda b: b.decode("utf-8", "replace")
+            ids = []
+            for (key,) in con.execute("SELECT key FROM cursorDiskKV WHERE key LIKE 'bubbleId:%' "
+                                      "AND instr(CAST(value AS TEXT), ?) > 0", (str(run_id),)):
+                parts = str(key).split(":")
+                if len(parts) >= 3 and parts[1] not in ids:
+                    ids.append(parts[1])
+            best = None
+            for cid in ids:
+                row = con.execute("SELECT CAST(value AS TEXT) FROM cursorDiskKV WHERE key = ?",
+                                  ("composerData:" + cid,)).fetchone()
+                try:
+                    d = json.loads(row[0]) if row else None
+                except ValueError:
+                    d = None
+                if not isinstance(d, dict) or not isinstance(d.get("createdAt"), (int, float)):
+                    continue
+                last = d.get("lastUpdatedAt")
+                last = last if isinstance(last, (int, float)) and last >= d["createdAt"] else d["createdAt"]
+                name = str((d.get("modelConfig") or {}).get("modelName") or "").strip()
+                found = dict(model="auto" if name.lower() in ("default", "auto") else cursor_model(name),
+                             first=d["createdAt"] / 1000.0, last=last / 1000.0)
+                if best is None or found["last"] > best["last"]:
+                    best = found                           # several chats: the newest one
+            return best
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001  (never crash a `done` because of Cursor's private data)
+        return None
 
 
 # ---------------------------------------------------------------- Codex
