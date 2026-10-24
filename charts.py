@@ -15,7 +15,8 @@ import xml.etree.ElementTree as ET
 
 FIELDS = ["alias", "run_id", "stage", "revision", "task", "agent", "model", "method", "skill_has_solution",
           "elapsed_min", "emulator_runs", "tok_uncached", "tok_cache_read", "tok_out", "cost_usd", "score",
-          "grading", "measurement", "effort", "memory_used", "settings_confirmed", "isolation", "overrun"]
+          "grading", "measurement", "effort", "memory_used", "settings_confirmed", "isolation", "overrun",
+          "stopped", "error_note"]
 DATE_HEADERS = ("completion time", "start time", "start")   # Forms columns first; results.csv has "start" (epoch)
 # Own copy as numbers; the source of truth is workshop.py T6_BASELINE ("small model, no skill: 0/12 pass in 5 min").
 T6_BASELINE = (0, 12)        # small model, no skill: 0/12 pass in 5 min (Haiku 0/6, gpt-6-luna 0/6)
@@ -210,7 +211,14 @@ def passed(r):
 
 def is_graded(r):
     # "partial" = the grader ran on the solution frozen early (same rule as workshop.py): it counts as graded
+    if run_failed(r):
+        return False
     return num(r.get("score")) is not None and (r.get("grading") or "graded") in ("graded", "partial")
+
+
+def run_failed(r):
+    """An --auto run whose agent failed at once (auth error, free plan, crash): no data, never a pass or fail."""
+    return (r.get("stopped") or "").strip().lower() == "error"
 
 
 def outcome(r):
@@ -220,6 +228,8 @@ def outcome(r):
 
 def flag_reasons(r):
     out = []
+    if run_failed(r):
+        out.append("run failed")
     if r.get("memory_used") == "yes":
         out.append("memory used")
     if r.get("isolation") == "detected":

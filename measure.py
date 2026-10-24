@@ -205,9 +205,10 @@ def cursor_sessions(path):
     Cursor keeps no token counts locally, so this file is the measurement source. Returns a list with one
     dict (or [] when the file has no init and no result event): tot (i = uncached input, cr, cw, o), models,
     first/last (epoch seconds from timestamp_ms), cwd, session_id, tools (started tool_call events as text),
-    emulator_runs (started `vesper run` calls), complete (a result event with usage was seen)."""
+    emulator_runs (started `vesper run` calls), complete (a result event with usage was seen),
+    duration (seconds from the result's duration_ms, or None; never mixed into first/last)."""
     models, cwd, sid, usage, stamps, tools, runs = set(), None, None, None, [], [], 0
-    seen_init = False
+    seen_init, duration = False, None
     for d in jsonl(path):
         if not isinstance(d, dict):
             continue
@@ -229,8 +230,8 @@ def cursor_sessions(path):
         elif typ == "result":
             if isinstance(d.get("usage"), dict):
                 usage = d["usage"]
-            if not stamps and isinstance(d.get("duration_ms"), (int, float)):
-                stamps.extend([0.0, d["duration_ms"] / 1000.0])
+            if isinstance(d.get("duration_ms"), (int, float)):
+                duration = d["duration_ms"] / 1000.0          # seconds, not a time stamp
     if not seen_init and usage is None:
         return []
     u = usage or {}
@@ -238,7 +239,7 @@ def cursor_sessions(path):
                cw=int(u.get("cacheWriteTokens", 0) or 0), o=int(u.get("outputTokens", 0) or 0))
     return [dict(agent="cursor", file=path, cwd=cwd, tot=tot, models=models, first=min(stamps) if stamps else None,
                  last=max(stamps) if stamps else None, sid=sid or os.path.basename(path), tools=tools,
-                 emulator_runs=runs, complete=usage is not None)]
+                 emulator_runs=runs, complete=usage is not None, duration=duration)]
 
 
 # ---------------------------------------------------------------- Codex
