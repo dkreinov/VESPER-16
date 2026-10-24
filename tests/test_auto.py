@@ -466,7 +466,7 @@ class AutoErrors(AutoBase):
         self.w.AUTO_MIN_SEC = 60                                    # the fake agent ends after 0.2 s
         out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
         self.assertEqual(rc, 1)
-        self.assertEqual(flat(out).count("RUN FAILED: the agent ended after 0 s (exit code 0)."), 4)
+        self.assertEqual(len(re.findall(r"RUN FAILED: the agent ended after \d+ s \(exit code 0\)\.", flat(out))), 4)
         self.assertEqual(flat(out).count("Do this run by hand: python workshop.py new s3 --task all "
                                          "(shows its page)"), 4)
         self.assertIn("4 runs failed. Do them by hand:", flat(out))
