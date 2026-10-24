@@ -403,7 +403,7 @@ LARGE_SHORT = {"claude": "your default model (Sonnet or Opus, not Haiku)",
                "codex": "gpt-6.1-sol (the large model; Codex keeps your last model, so check it)",
                "cursor": "a large model from the menu (not Auto)"}
 STOP_LINE = "Stop the agent at %d min, then run its done line." % TIME_BOX_MIN
-SMALL_SHORT = {"claude": "Haiku (/model haiku)", "codex": "gpt-6-luna, effort high",
+SMALL_SHORT = {"claude": "Haiku 5.5 (/model claude-haiku-5-5)", "codex": "gpt-6-luna, effort high",
                "cursor": "GPT-5.6 Luna High (not Auto)"}
 
 
@@ -3341,7 +3341,9 @@ AUTO_TICK = 30             # seconds between two status blocks
 AUTO_POLL = 0.5            # seconds between two checks of the processes
 AUTO_BOX_SEC = None        # tests only: the time box in seconds (default: TIME_BOX_MIN minutes)
 AUTO_CHECK_SEC = 180       # doctor --check-auto: the tiny run must end within this time
-AUTO_MODEL = {"codex": "gpt-6-luna", "claude": "haiku", "cursor": "gpt-5.6-luna-high"}
+# Claude: a FIXED model name, not the alias "haiku": the alias maps per account (Haiku 4.5 on one, 5.5 on
+# another; real runs 2026-10-24: 4.5 85/10 with the skill at $0.47-0.86, 5.5 100/100 at $0.04-0.08).
+AUTO_MODEL = {"codex": "gpt-6-luna", "claude": "claude-haiku-5-5", "cursor": "gpt-5.6-luna-high"}
 AUTO_AGENTS = tuple(AUTO_MODEL)
 CODEX_MIN = (0, 163)       # the npm `codex` 0.154 rejects gpt-6-luna on a ChatGPT account
 FREE_PLAN_RE = re.compile(r"Named models unavailable|Free plans can only use Auto", re.I)

@@ -101,7 +101,7 @@ and neither calls that pair a matched comparison. If a run is stopped at the box
 saved as "ungraded + stopped"; `grade` scores it later as partial work. `--task both` (T6 and T3 with the skill) still works. You can start the runs one by one instead:
 `new s3 --task T6` asks for your name (up to 8 letters A-Z) and
 writes it into `tasks/T6.md`; T6 is a different task that shares components with T3. `new s3 --task T3` repeats the
-stage-1 game. Open each folder in its own new thread and choose the small model there (Claude Code: Haiku;
+stage-1 game. Open each folder in its own new thread and choose the small model there (Claude Code: Haiku 5.5, `/model claude-haiku-5-5`;
 Codex: gpt-6-luna; Cursor: GPT-5.6 Luna High, not Auto). The prompt gives a budget of 6 emulator runs; the time box is
 10 minutes (by hand the tool records the time but does not stop the agent: you stop it; `--auto` stops it for you). End each run with the `done <run_id>`
 command that `new` printed.
@@ -133,7 +133,7 @@ outside its own folder unless you confirm.
 
 `python workshop.py new s3 --task all --auto` makes the same four run folders, with the same prompts and the same start
 order. Then the tool starts the four agents itself, one after the other, without a window. Each agent works in its own
-run folder with the stage-3 model of your agent (Codex: gpt-6-luna, effort high, Memories off; Claude Code: Haiku, only
+run folder with the stage-3 model of your agent (Codex: gpt-6-luna, effort high, Memories off; Claude Code: claude-haiku-5-5, only
 the project settings; Cursor: gpt-5.6-luna-high). `--model NAME` changes the model. The tool prints one short status
 block every 30 seconds, stops any agent still working at 10 minutes (the whole process tree), and finishes each run
 like `done <run_id>`. The row says `settings_confirmed = auto` and, for a run that the tool stopped, `stopped = time`.

@@ -263,7 +263,7 @@ class AutoClaude(AutoBase):
         self.assertEqual(argv[:2], ["-p", "--model"])               # no prompt in the arguments
         self.assertIn("Workshop run: " + rid, d["stdin"])           # it comes on stdin
         self.assertNotIn(d["stdin"], argv)
-        self.assertEqual(argv[argv.index("--model") + 1], "haiku")
+        self.assertEqual(argv[argv.index("--model") + 1], "claude-haiku-5-5")
         self.assertEqual(argv[argv.index("--output-format") + 1], "json")
         self.assertEqual(argv[argv.index("--setting-sources") + 1], "project")
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
@@ -449,7 +449,7 @@ class CmdLauncher(AutoBase):
 
     def test_claude_cmd(self):
         rid, run_, d, prompt, out = self.launch("claude")
-        self.assertEqual(d["argv"], ["-p", "--model", "haiku", "--output-format", "json", "--permission-mode",
+        self.assertEqual(d["argv"], ["-p", "--model", "claude-haiku-5-5", "--output-format", "json", "--permission-mode",
                                      "dontAsk", "--setting-sources", "project", "--append-system-prompt",
                                      self.w.CLAUDE_SYSTEM, "--disallowedTools"] + self.w.CLAUDE_DENY
                          + ["--allowedTools"] + self.w.CLAUDE_TOOLS)

@@ -61,8 +61,8 @@ With the tool, `python workshop.py new s3 --task all` is the default way. It mak
    }
    ```
 4. Codex: if Memories are on, type /memories first in each new workshop thread and turn memory off for that chat.
-   Open each folder as a new project, each in a new thread, with the small model (Claude Code: Haiku; Codex:
-   gpt-6-luna; Cursor: its cheapest). Paste `prompts/stage3.md` into each (replace `{run_id}` and `{task}`: T6 and T3).
+   Open each folder as a new project, each in a new thread, with the small model (Claude Code: Haiku 5.5, `/model claude-haiku-5-5`;
+   Codex: gpt-6-luna; Cursor: GPT-5.6 Luna High, not Auto). Paste `prompts/stage3.md` into each (replace `{run_id}` and `{task}`: T6 and T3).
 5. Stop every agent at 10 minutes (the same for all runs), then measure each run as in stage 1. Budget: 6 emulator runs.
 6. Read the results with care. Each condition has one attempt, so reliability is unknown. Check PASS or FAIL before time or cost. The gain line (T3 and T6) shows observed score gains only; it neither identifies nor rules out answer reuse. The pay-back line shows only what the skill cost to write; break-even is not established. Costs are estimates under the kit's price assumptions. The comparison is matched only when both runs have the same model and the same effort.
 
