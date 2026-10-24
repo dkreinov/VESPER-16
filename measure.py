@@ -409,7 +409,9 @@ def grade(task):
 
 
 def fmt_k(n):
-    return "%.1fM" % (n / 1e6) if n >= 1e6 else "%dk" % round(n / 1e3)
+    if n >= 1e6:
+        return "%.1fM" % (n / 1e6)
+    return str(int(n)) if 0 < n < 1000 else "%dk" % round(n / 1e3)
 
 
 # ---------------------------------------------------------------- commands

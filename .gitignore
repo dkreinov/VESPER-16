@@ -5,6 +5,5 @@ results.csv
 prices.json
 .vesper-runs.log
 __pycache__/
-__pycache__/
 doctor-report.txt
 charts-out/
