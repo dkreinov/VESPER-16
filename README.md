@@ -135,9 +135,20 @@ run folder with the stage-3 model of your agent (Codex: gpt-6-luna, effort high,
 the project settings; Cursor: gpt-5.6-luna-high). `--model NAME` changes the model. The tool prints one short status
 block every 30 seconds, stops any agent still working at 10 minutes (the whole process tree), and finishes each run
 like `done <run_id>`. The row says `settings_confirmed = auto` and, for a run that the tool stopped, `stopped = time`.
-Ctrl+C stops all agents and keeps the finished results. The manual flow (without `--auto`) does not change.
+Ctrl+C stops all agents (Windows: each agent is in a Job Object, so every process it started dies too) and saves each
+stopped run as partial work (`stopped = ctrl-c`). The manual flow (without `--auto`) does not change.
 
-- **Check first:** `python workshop.py doctor` says for each agent whether `--auto` is ready (CLI found, Cursor logged
+- **Before the start:** the tool says what the agents may do, and asks `Start the 4 agents? [y/N]` (default No).
+  Without a terminal it starts only with `--yes`. Codex runs in its sandbox (it can change files only in its run
+  folder). Claude Code runs with `--permission-mode dontAsk` and may only run `bin/vesper` and read, edit and write
+  files in its run folder. Cursor runs with `--sandbox enabled`. The prompt goes on stdin (Codex, Claude Code), so a
+  `.cmd` launcher (npm) gets every flag.
+- **Failed run:** an agent that ends within 60 seconds, or with an error and no tool call, or with a known error
+  (no login, free plan) gives no data. The row says `stopped = error` with the first error line in `error_note`, the
+  run is not graded and stays open: do it by hand with `python workshop.py new s3 --task all` (it shows its page).
+- **Resume:** `new s3 --task all --auto` again starts only runs that `--auto` made, that are not done, and that no
+  live agent holds (`.agent.lock` in the run folder). It never starts a run whose page you saw (manual).
+- **Check first:** `python workshop.py doctor` says whether `--auto` is ready for your agent (CLI found, Cursor logged
   in). `python workshop.py doctor --check-auto` makes ONE tiny run ("Reply OK") with the stage-3 model.
 - **Codex:** `--auto` uses `codex.exe` of the Codex app (`%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`). The
   npm `codex` is used only if it is version 0.163 or newer (0.154 rejects gpt-6-luna on a ChatGPT account).

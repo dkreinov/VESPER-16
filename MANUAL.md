@@ -71,8 +71,10 @@ With the tool, `python workshop.py new s3 --task all` is the default way. It mak
 `python workshop.py new s3 --task all --auto` starts the four stage-3 agents for you (headless Codex, Claude Code or Cursor
 CLI), stops each one at 10 minutes, and measures them. Run `python workshop.py doctor` first: it says whether `--auto` is
 ready for your agent. For Cursor: install with `irm 'https://cursor.com/install?win32=true' | iex` (PowerShell), log in with
-`agent login`, and use a paid plan (a free plan runs only Auto, so the model would not match). If you do not use `--auto`,
-follow the steps below by hand. See the README for details.
+`agent login` in a NEW PowerShell window, and use a paid plan (a free plan runs only Auto, so the model would not match).
+The tool asks `Start the 4 agents? [y/N]` first (`--yes` starts without the question). A run that fails at once
+(no login, free plan) prints `RUN FAILED`: do that run by hand with `python workshop.py new s3 --task all`. If you do
+not use `--auto`, follow the steps below by hand. See the README for details.
 
 ## Grade
 
