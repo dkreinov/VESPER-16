@@ -306,7 +306,7 @@ class DoneFieldsTest(unittest.TestCase):
         w, rid, out = self._s1(60, ["ls"])
         row = w.Registry.load().row(rid, "1")
         self.assertEqual((row["isolation"], row["overrun"]), ("not_detected", ""))   # no time box in stage 1
-        self.assertIn("Isolation OK", out)
+        self.assertNotIn("Isolation", out)          # only a problem is printed
         self.assertNotIn("not proof", out)
         self.assertNotIn("time box: flagged", out)
 
@@ -315,11 +315,11 @@ class DoneFieldsTest(unittest.TestCase):
         row = w.Registry.load().row(rid, "1")
         self.assertEqual((row["isolation"], row["overrun"]), ("detected", ""))      # 700 s in stage 1: not an overrun
         self.assertTrue(row["isolation_note"])
-        self.assertIn("Isolation CHECK (detected)", out)
+        self.assertIn("CHECK: the agent may have read outside the run folder.", flat(out))
         self.assertIn(row["isolation_note"][:20], flat(out))
         self.assertNotIn("time box: flagged", out)
 
-    def _s3(self, setup_s, prompt_before_cutoff, log=True):
+    def _s3(self, setup_s, prompt_before_cutoff, log=True, work_s=30):
         """A stage-3 run whose folder was made setup_s before 'done'; the prompt was sent prompt_before_cutoff s before."""
         w, _ = fresh_ws()
         fakes.ready_for_s3(w)
@@ -333,18 +333,21 @@ class DoneFieldsTest(unittest.TestCase):
             p = now - prompt_before_cutoff
             fakes.codex_log("0c0d0e0f-0000-1111-2222-3333444455%02d" % int(setup_s % 97), folder,
                             [(p - 5, 5, 0, 1, "# Workshop run %s (AGENTS.md)" % rid),
-                             (p, 10, 0, 1, "Workshop run: %s\nBuild T3." % rid), (p + 30, 20, 0, 2, "")])
+                             (p, 10, 0, 1, "Workshop run: %s\nBuild T3." % rid), (p + work_s, 20, 0, 2, "")])
         reg.data["active_runs"][rid]["start"] = now - setup_s
         reg.save()
         with contextlib.redirect_stdout(io.StringIO()):
             run(w, "done", rid, "--no-form")
         return w.Registry.load().row(rid, "3")
 
-    def test_overrun_counts_from_the_prompt_not_the_setup(self):     # review MAJOR-2, ruling R3
-        self.assertEqual(self._s3(14 * 60, 9 * 60)["overrun"], "no")     # 5 min of set-up, 9 min of agent
-        self.assertEqual(self._s3(14 * 60, 11 * 60)["overrun"], "yes")
-        self.assertEqual(self._s3(14 * 60, 0, log=False)["overrun"], "yes")   # no log time: folder-creation start
-        self.assertEqual(self._s3(5 * 60, 0, log=False)["overrun"], "no")
+    def test_overrun_counts_from_the_prompt_to_the_last_activity(self):     # B2: never to the `done` time
+        # the agent worked 8.8 min; the learner ran `done` 14 min after the folder was made: no overrun
+        self.assertEqual(self._s3(14 * 60, 9 * 60, work_s=9 * 60 - 10)["overrun"], "no")
+        self.assertEqual(self._s3(14 * 60, 11 * 60, work_s=11 * 60 - 10)["overrun"], "yes")   # worked 10.8 min
+        # a learner who runs `done` 40 minutes after the agent finished is NOT flagged
+        self.assertEqual(self._s3(50 * 60, 48 * 60, work_s=7 * 60)["overrun"], "no")
+        # no agent log: no activity time is known, so the run is not flagged
+        self.assertEqual(self._s3(14 * 60, 0, log=False)["overrun"], "")
 
     def test_prompt_time(self):
         w, home = fresh_ws()
@@ -379,12 +382,12 @@ class HarvestStepTest(unittest.TestCase):
         self.assertIn("    2. The skill holds parts of the T3 answer itself.", out)
         self.assertLess(out.index("Why stage 3 also runs"), out.index("NEXT:"))
         self.assertNotIn("Knowledge or the answer?", out)      # learners see no code blocks
-        self.assertIn("Isolation ", out)
+        self.assertNotIn("Isolation OK", out)
 
     def test_harvest_note_with_share(self):
         w, _ = fresh_ws()
         lines = w.harvest_note(0.13)
-        self.assertIn("shares 13% of its code with your T3 solution", lines[0])
+        self.assertIn("13% of your T3 solution's own lines are in your skill", lines[0])
         self.assertTrue(any("DIFFERENT task (T6)" in x for x in lines))
 
 

@@ -2,7 +2,7 @@
 import contextlib, io, os, sys, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakes  # noqa: E402
-from fakes import fresh_ws, run, codex_log  # noqa: E402
+from fakes import fresh_ws, run, codex_log, flat  # noqa: E402
 
 P = "01a15dd4-8bae-7ab1-b6c2-d3131c119a0c"
 C = "01a15dd4-d9fb-77d2-80f3-57da067494eb"
@@ -96,7 +96,7 @@ class Gate(unittest.TestCase):
         out, asked = self._tty(["n", "y"], "new", "s1")
         self.assertEqual([p for p in asked if "Done with these steps" in p].__len__(), 2)
         self.assertEqual(out.count("Open this folder as a NEW project"), 2)
-        self.assertIn("your default model", out)
+        self.assertIn("gpt-6.1-sol (the large model; Codex keeps your last model, so check it)", flat(out))
         self.assertLess(out.index("Done with these steps"), out.rindex("PROMPT"))
         self.assertIn("Paste it and send it.", out)
         self.assertEqual(out.count("NEXT:"), 1)

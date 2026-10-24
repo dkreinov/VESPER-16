@@ -77,7 +77,8 @@ class PayBackTest(unittest.TestCase):
     def test_hidden_when_ungraded(self):
         out = self._compare("", "")
         self.assertNotIn("pays for itself", out)
-        self.assertIn("Score not graded yet", out)
+        self.assertIn("Score", out)
+        self.assertNotIn("Score not graded yet", out)     # the NEXT box says unlock/grade, once
         self.assertNotIn("YOUR RESULT", out)
 
 
@@ -117,7 +118,9 @@ class TaskAllTest(unittest.TestCase):
         self.assertNotIn("real test", out)
         self.assertIn("Time box 10 min: stop any agent still working at 10 min, then run its done line.", flat(out))
         self.assertLess(out.index("Start in this order"), out.index("RUN 1 of 4"))
-        self.assertIn("Together, these 4 runs are a small benchmark of your skill", out)
+        self.assertEqual(out.count("Start in this order"), 1)
+        self.assertEqual(flat(out).count("Send it and note the time. Stop the agent at 10 min, then run its done line."), 4)
+        self.assertNotIn("control: stop it", out)
         for i in runs:
             self.assertIn("python workshop.py done " + i, out)
         for n in (str(keys.index("n3") + 1), str(keys.index("n6") + 1)):   # the control prompts: no skill sentences
@@ -144,10 +147,10 @@ class TaskAllTest(unittest.TestCase):
         out = capture(self.w.show_compare, reg)
         self.assertIn("T6: WITH vs WITHOUT the skill - different task; shares components with T3", flat(out))
         self.assertNotIn("YOUR RESULT", out)
-        self.assertIn("Leakage check: Observed score gains: T3 +60; T6 +40. "
+        self.assertIn("Observed score gains: T3 +60; T6 +40. "
                       "These results neither identify nor rule out answer reuse.", flat(out))
         self.assertNotIn("much larger", out)
-        self.assertEqual(out.count("Leakage check"), 1)
+        self.assertEqual(out.count("Observed score gains"), 1)
 
     def test_failed_control_no_change_column_and_score_only_gains(self):
         reg, ids = self._graded("85", "10", "70", "5", tm=(3, 0.8, 4, 0.5))
@@ -156,9 +159,9 @@ class TaskAllTest(unittest.TestCase):
         self.assertNotIn("Control failed", out)
         self.assertIn("85 FAIL", out)
         self.assertIn("10 FAIL", out)
-        self.assertNotIn("%", out.split("Leakage check")[0].split("Time (min)")[1].split("\n")[0])
+        self.assertNotIn("%", out.split("Observed score gains")[0].split("Time (min)")[1].split("\n")[0])
         self.assertIn("Observed score gains: T3 +75; T6 +65.", out)
-        self.assertEqual(out.count("Leakage check"), 1)
+        self.assertEqual(out.count("Observed score gains"), 1)
 
     def _concl(self, scores):
         reg, ids = self._graded(*scores)
@@ -175,7 +178,7 @@ class TaskAllTest(unittest.TestCase):
                              ((75, 10), ("100", "25", "95", "85"))):
             reg, ids = self._graded(*sc)
             line = self.w.leakage_line(reg, reg.data["runs"][ids["t3"]]["parent"])
-            self.assertEqual(line, "  Leakage check: Observed score gains: T3 %+d; T6 %+d. "
+            self.assertEqual(line, "  Observed score gains: T3 %+d; T6 %+d. "
                              "These results neither identify nor rule out answer reuse." % (g3, g6))
             self.assertNotIn("%", line)
             self.setUp()

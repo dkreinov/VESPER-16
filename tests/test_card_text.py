@@ -21,7 +21,8 @@ class CardText(unittest.TestCase):
         out = capture(self.w, "new", "s1")
         rid = self.w.Registry.load().data["active"]["run_id"]
         name = os.path.basename(os.path.normpath(self.w.Registry.load().data["runs"][rid]["folder"]))
-        self.assertIn("Project name in the app: %s" % name, out)
+        self.assertNotIn("Project name in the app", out)     # the folder path ends with the name
+        self.assertIn(name, out)
 
     def test_stage1_done_has_no_grading_hint(self):
         capture(self.w, "new", "s1")

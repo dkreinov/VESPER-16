@@ -35,8 +35,8 @@ class Narrow(unittest.TestCase):
         self.assertEqual(long_lines(capture(self.w, "new", "s1", "--method", "plain")), [])
         out = capture(self.w, "done", "--no-form")
         self.assertEqual(long_lines(out), [])
-        self.assertRegex(flat(out), r"Time .*Cost .*Memory (off|ON|unknown)")
-        self.assertIn("Score ", out)
+        self.assertRegex(flat(out), r"Time .*Cost ")
+        self.assertIn("Score", out)
         self.assertNotIn("not proof", out)
         self.assertNotIn("run_id", out)                       # no table
 
@@ -70,8 +70,7 @@ class Narrow(unittest.TestCase):
         self.assertEqual(len(ids), 4)
         out = capture(self.w, "done", ids[0], "--no-form")
         self.assertEqual(long_lines(out), [])
-        self.assertIn("Isolation", out)
-        self.assertIn("Score ", out)
+        self.assertIn("FINISHED", out)
 
     def test_show_narrow_terminal_gives_blocks(self):
         fakes.ready_for_s3(self.w)

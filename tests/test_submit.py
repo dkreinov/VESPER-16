@@ -44,7 +44,7 @@ class Submit(unittest.TestCase):
         self.assertNotIn("RESULTS FORM", self.harvest_out)
         out, wb = cap(self.w, "done")           # updates the finished stage 1
         self.assertFalse(wb.called)
-        self.assertIn("Saved. You submit all results at the end:  python workshop.py submit", out)
+        self.assertNotIn("Saved. You submit all results at the end", out)    # said once, in the last NEXT box
         self.assertNotIn(" 1. alias", out)
 
     def test_refuses_when_locked_and_ungraded(self):

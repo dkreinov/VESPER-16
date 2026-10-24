@@ -180,8 +180,9 @@ class TwoRunsTest(unittest.TestCase):
         t6, _ = self._new("T6", "--name", "mira")
         t3, _ = self._new("T3")
         out = capture(run, self.w, "show")
-        self.assertIn("Active: stage 3 of %s (T6). Next:  python workshop.py done %s" % (t6, t6), flat(out))
-        self.assertIn("Active: stage 3 of %s (T3)" % t3, flat(out))
+        self.assertIn("2 agents are still working", flat(out))
+        self.assertIn("python workshop.py done %s" % t6, flat(out))
+        self.assertIn("python workshop.py done %s" % t3, flat(out))
         run(self.w, "done", t6, "--no-form")
         run(self.w, "done", t3, "--no-form")
         out = capture(self.w.show_compare, self.w.Registry.load())
@@ -211,7 +212,6 @@ class FourRunsTest(unittest.TestCase):
         self.assertIn("NEXT: 3 agents are still working.", out)
         self.assertIn("run its line:", out)
         self.assertNotIn("BOTH", out)
-        self.assertIn("After ALL your stage-3 agents are done", out)
         for i in ids[1:]:
             self.assertIn("python workshop.py done %s   %s" % (i, lab[i]), out)
         self.assertNotIn("python workshop.py done %s   " % ids[0], out)
@@ -220,7 +220,6 @@ class FourRunsTest(unittest.TestCase):
         self.assertIn("1 agent is still working", out)
         out = capture(run, self.w, "done", ids[3], "--no-form")
         self.assertNotIn("still working", out)
-        self.assertNotIn("After ALL", out)
         self.assertIn("python workshop.py submit", out)
 
     def test_two_run_case(self):

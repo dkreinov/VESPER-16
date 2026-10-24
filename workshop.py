@@ -12,12 +12,12 @@
   python workshop.py new s3 --task T6       stage 3, run 1: T6 with your name, a NEW agent thread
   python workshop.py new s3 --task T3       stage 3, run 2: T3 again, a SECOND new agent thread
   python workshop.py new s3 --task all --auto   stage 3, the tool runs the 4 agents itself (about 10 min)
-  python workshop.py doctor --check-auto    one tiny agent run: can --auto use the stage-3 model?
+  python workshop.py doctor --check-auto    one tiny agent run: can --auto work, and does its limit hold?
   python workshop.py unlock 4 <password from the slide>    grader (only after the agent is done)
   python workshop.py grade | show | cleanup
 
-The tool never talks to an agent: you paste every prompt. It sends nothing over the network; it only
-opens the results form in your browser. See README.md (Workshop), MANUAL.md and HOMEWORK.md.
+The tool starts an agent only with --auto (after a question); otherwise you paste every prompt. It sends
+nothing over the network; it only opens the results form in your browser. See README.md (Workshop), MANUAL.md and HOMEWORK.md.
 """
 import argparse, csv, difflib, fnmatch, glob, hashlib, io, json, math, os, posixpath, random, re, shutil, subprocess, sys, tempfile, textwrap, time, webbrowser, zipfile
 from urllib.parse import urlencode
@@ -89,7 +89,7 @@ def wrap_line(line, width=MAXW):
     if len(line) <= width or "\x1b" in line:
         return [line]
     body = line.lstrip(" ")
-    if not body or body[0] in "|+=" or " " not in body or _ATOM.match(line) or _DATA_LINE.match(body):
+    if not body or body[0] in "|+=┌─┬┐│├┼┤└┴┘" or " " not in body or _ATOM.match(line) or _DATA_LINE.match(body):
         return [line]
     ind = line[:len(line) - len(body)]
     out, cur = [], ind
@@ -170,7 +170,9 @@ def ws_home(check=False):
         base = os.environ.get("LOCALAPPDATA") if os.name == "nt" else os.path.expanduser("~")
         h = os.path.join(base or os.path.expanduser("~"), "vesper-runs")
     if check and "onedrive" in h.lower():
-        sys.exit("The workshop home %s is on OneDrive. Set VESPER_WS_HOME to a local folder." % h)
+        sys.exit("The workshop home %s is on OneDrive. Set VESPER_WS_HOME to a local folder:\n"
+                 "  PowerShell:  $env:VESPER_WS_HOME = \"C:\\vesper-runs\"\n"
+                 "  bash:        export VESPER_WS_HOME=$HOME/vesper-runs" % h)
     return h
 
 
@@ -340,9 +342,6 @@ METHOD_DESC = {
     "plain": "a plain prompt, no guide",
 }
 
-SMALL_MODEL = {"claude": "Claude Code: Haiku (type /model haiku in the new thread)",
-               "codex": "Codex: gpt-6-luna (choose it in the model menu of the new thread)",
-               "cursor": "Cursor: its cheapest model (model menu of the new chat)"}
 TIME_BOX_MIN = 10
 
 
@@ -400,6 +399,10 @@ def memories_card(reg):
         print(c_next("  " + l))
 
 
+LARGE_SHORT = {"claude": "your default model (Sonnet or Opus, not Haiku)",
+               "codex": "gpt-6.1-sol (the large model; Codex keeps your last model, so check it)",
+               "cursor": "a large model from the menu (not Auto)"}
+STOP_LINE = "Stop the agent at %d min, then run its done line." % TIME_BOX_MIN
 SMALL_SHORT = {"claude": "Haiku (/model haiku)", "codex": "gpt-6-luna, effort high",
                "cursor": "its cheapest model"}
 
@@ -455,6 +458,7 @@ def s3_run_block(n, total, task, folder, prompt, desc=None):
     print(c_prompt((" PROMPT%s " % num).center(72, "-")))
     print(prompt.rstrip("\n"))
     print(c_prompt((" END OF PROMPT%s " % num).center(72, "-")))
+    print("  Send it and note the time. " + STOP_LINE)
 
 
 def gate_on():
@@ -462,7 +466,7 @@ def gate_on():
     return bool(sys.stdout.isatty())
 
 
-def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=False):
+def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=False, after=None):
     """One run as its own page (terminal only). Repeats the steps until the learner answers y."""
     while True:
         clear_screen()
@@ -470,19 +474,18 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
         if extra:
             extra()
         print("\n  1. Open this folder as a NEW project in your agent (choose exactly this folder, not a folder above it):\n\n       %s" % folder)
-        print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
         print("\n  2. Start a NEW thread.")
         n = 3
         if mem:
             print("\n  3. " + c_next("/memories -> turn memory off for this chat."))
             n = 4
         print("\n  %d. Model: %s" % (n, model_line))
-        if ask("\n  Done with these steps? [y/n]: ", "y").lower().startswith("y"):
+        if ask("\n  Done with these steps? [y/n] (n = show them again): ", "y").lower().startswith("y"):
             break
     reg.data["runs"][rid]["settings_confirmed"] = "yes"
     reg.save()
     prompt_block(prompt)
-    print("\n  Paste it and send it.")
+    print("\n  " + (after or "Paste it and send it."))
     if not last:
         ask("\n  Press Enter for the next run: ", "")
 
@@ -507,16 +510,17 @@ def s3_show(reg, rid, n, total, task, folder, prompt, desc=None, extra=None):
     nm = reg.data["runs"][rid].get("name", "")
     head = "STAGE 3 - RUN %d of %d  %s%s" % (n, total, desc, ("   name on T6: " + nm) if nm and task == "T6" else "")
     run_page(reg, rid, head, folder, prompt, model, n >= total, extra=extra,
-             mem=codex_memories_on(reg) and agent in ("codex", ""))
+             mem=codex_memories_on(reg) and agent in ("codex", ""),
+             after="Send it and note the time. " + STOP_LINE)
 
 
 def method_notice(method, when):
-    """Tell the participant which skill-writing method they got, and that the room is split three ways."""
-    print("\n  The room is split into 3 ways to write the skill in stage 2, chosen at random:")
-    for m in METHODS:
-        ln = "     %s %-12s %s" % ("->" if m == method else "  ", m.upper(), METHOD_DESC[m])
-        print(c_bold(ln) if m == method else ln)
-    print(c_bold("  You were selected for %s%s." % (method.upper(), when)) + " At the end we compare the three methods.")
+    """One line: the skill-writing method of this learner (the room is split three ways at random)."""
+    if when:
+        print("\n  Stage-2 method for you: " + c_bold(method.upper())
+              + " (the room is split 3 ways at random).")
+    else:
+        print("\n  Method: " + c_bold(method.upper()) + " - " + METHOD_DESC[method] + ".")
 
 
 def builtin_how(agent, guide):
@@ -541,7 +545,7 @@ def choose_active(reg, acts):
     """Several stage-3 runs are active: ask which agent is done (no TTY: name the run)."""
     print("%d stage-3 runs are active:" % len(acts))
     for i, x in enumerate(acts, 1):
-        print("  %d) %s  %s" % (i, x["run_id"], reg.data["runs"].get(x["run_id"], {}).get("task", "")))
+        print("  %d) %s  %s" % (i, x["run_id"], run_label(reg, x["run_id"]).strip("()")))
     n = ask("Which agent is done? Type its number (Enter = cancel): ", "")
     if n.isdigit() and 1 <= int(n) <= len(acts):
         x = acts[int(n) - 1]
@@ -754,7 +758,9 @@ def _cmd_doctor(a):
         note(2, "FAIL", "the emulator does not run (%s). Antivirus? See MANUAL.md" % e)
     h = ws_home()
     if "onedrive" in h.lower():
-        note(2, "FAIL", "the workshop home is on OneDrive: %s (set VESPER_WS_HOME)" % h)
+        note(2, "FAIL", "the workshop home is on OneDrive: %s" % h)
+        lines.append("          PowerShell: $env:VESPER_WS_HOME = \"C:\\vesper-runs\"")
+        lines.append("          bash: export VESPER_WS_HOME=$HOME/vesper-runs")
     else:
         note(0, "OK", "workshop home " + h)
     if "onedrive" in KIT.lower():
@@ -773,7 +779,10 @@ def _cmd_doctor(a):
                         "answer 'go on'." % (agent, "; ".join(sp)))
     if agent == "codex" and codex_memories_have_vesper():
         note(1, "WARN", MEMORY_WARN)
+    _PROBE.pop(agent, None)
     al, ready = doctor_auto_lines(agent, getattr(a, "check_auto", False))
+    if agent in _PROBE:
+        reg.data.setdefault("auto_probe", {})[agent] = {"pass": _PROBE[agent], "time": time.time()}
     for x in al:
         if x.startswith("  WARN"):
             level = max(level, 1)
@@ -883,11 +892,10 @@ def next_box(cmd, when):
     print(c_next("+" + "-" * w + "+") + "\n")
 
 
-def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False):
+def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False, model=None):
     print("\n  1. Open this folder as a NEW project in your agent (choose exactly this folder, not a folder above it):")
     print("\n       %s" % folder)
-    print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
-    print("\n  2. Start a NEW thread.")
+    print("\n  2. Start a NEW thread." + (("  Model: " + model) if model else ""))
     if mem:
         print("\n  3. " + c_next("Type /memories first and turn off memory for this chat."))
     print("\n  %d. Copy everything between the PROMPT lines and send it." % (4 if mem else 3))
@@ -912,6 +920,14 @@ def create_s3_run(reg, a, task, name=None, control=False):
         else:
             raw = ask("Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
         name = T6F.normalise(raw)
+        if getattr(a, "name_from_alias", False) and name == T6F.DEFAULT_NAME \
+                and raw.strip().upper() != T6F.DEFAULT_NAME:
+            # a Hebrew or other non-Latin alias has no A-Z letters: everyone would get the same nameplate
+            print("  Your alias has no A-Z letters, so your T6 nameplate would be %s, the same for all."
+                  % T6F.DEFAULT_NAME)
+            name = T6F.normalise(ask("  Type a Latin name for T6 (A-Z, up to %d; Enter keeps %s): "
+                                     % (T6F.MAX_LETTERS, T6F.DEFAULT_NAME), ""))
+            a.name_from_alias = False
     name = name or ""
     rid = s3_run_id(reg, parent, ("n" + task[-1]) if control else task)
     if control:       # control run: same folder, no skill, no skill sentences in the prompt
@@ -965,9 +981,9 @@ def new_s3_both(reg, a):
 
 
 ALL_DESC = {"t3": "T3 WITH the skill",
-            "n3": "T3 WITHOUT the skill (control: stop it at 10 min)",
+            "n3": "T3 WITHOUT the skill",
             "t6": "T6 WITH the skill (a different task that shares components with T3)",
-            "n6": "T6 WITHOUT the skill (control: stop it at 10 min)"}
+            "n6": "T6 WITHOUT the skill"}
 ALL_LABEL = {"t3": "(T3 with skill)", "n3": "(T3 without skill)", "t6": "(T6 with skill)", "n6": "(T6 without skill)"}
 ALL_ORDER = ("t3", "n3", "t6", "n6")
 AFTER_ALL = "After ALL your stage-3 agents are done"
@@ -985,9 +1001,9 @@ def still_working_box(reg, left):
     left = sorted(left, key=lambda x: float(x.get("start") or 0))
     lines = ["%s   %s" % (next_cmd(x), run_label(reg, x["run_id"])) for x in left]
     if len(left) == 1:
-        head = "1 agent is still working. When it is done (or at 15 min), run its line:"
+        head = "1 agent is still working. When it is done (or at 10 min), run its line:"
     else:
-        head = ("%d agents are still working. When each one is done (or at 15 min), run its line:"
+        head = ("%d agents are still working. When each is done (or at 10 min), run its line:"
                 % len(left))
     next_box(lines, head)
 
@@ -1010,10 +1026,6 @@ ORDER_KEY = {"T3 with skill": "t3", "T3 without skill": "n3", "T6 with skill": "
 def start_order_keys(seed):
     """start_order as ALL_ORDER keys (t3, n3, t6, n6)."""
     return [ORDER_KEY[x] for x in start_order(seed)]
-
-
-BENCH_LINE = ("  Together, these 4 runs are a small benchmark of your skill: the same task and a different task,"
-              " each with and without it.")
 
 
 def start_order_line(seed):
@@ -1046,6 +1058,47 @@ def new_s3_all(reg, a):
     return 0 if len(made) == 4 else 1
 
 
+S3_KEYS = {"all": ("t3", "n3", "t6", "n6"), "both": ("t3", "t6"), "T3": ("t3",), "T6": ("t6",), "T4": ("t4",)}
+
+
+def s3_complete(reg, parent, task):
+    """True when every requested stage-3 run of this stage-1 parent has a finished row."""
+    have = set()
+    for r in reg.data["rows"].values():
+        run = reg.data["runs"].get(r["run_id"], {})
+        if r["stage"] == "3" and run.get("parent") == parent and r.get("stopped") != "error":
+            have.add(("n" if is_control(run) else "t") + run.get("task", "")[-1:])
+    return bool(have) and all(k in have for k in S3_KEYS.get(task, ()))
+
+
+def repeat_ok(reg, a, task):
+    """Stage 3 of this stage-1 run is already COMPLETE: a repeat attempt is made only on a clear yes
+    (default No; without a terminal only with --yes)."""
+    if not any(r["stage"] == "3" for r in reg.data["rows"].values()):
+        return True
+    parent = ""
+    if a.skill == "own":
+        rows = [r for r in reg.data["rows"].values() if r["stage"] == "2"]
+        if rows:
+            parent = max(rows, key=lambda r: float(r["cutoff"] or 0))["run_id"]
+    if not parent or not s3_complete(reg, parent, task):
+        return True
+    n = {"all": 4, "both": 2}.get(task, 1)
+    if getattr(a, "yes", False):
+        return True
+    if not (sys.stdin and sys.stdin.isatty() and sys.stdout.isatty()):
+        print("Stage 3 of %s is done. To see the done lines:  python workshop.py show\n"
+              "A repeat attempt (%d new run%s) needs a person to say yes. Add --yes to start it."
+              % (parent, n, "" if n == 1 else "s"))
+        return False
+    print("Stage 3 of %s is done. Its results:  python workshop.py show" % parent)
+    q = "Stage 3 is done. Start a repeat attempt (%d new run%s)? [y/N] " % (n, "" if n == 1 else "s")
+    if ask(q, "n").strip().lower() in ("y", "yes"):
+        return True
+    print("Nothing started.")
+    return False
+
+
 def cmd_new(a):
     ws_home(check=True)
     clear_screen()
@@ -1072,6 +1125,8 @@ def cmd_new(a):
         same = []
     if getattr(a, "auto", False) and a.stage != "s3":
         sys.exit("--auto is for stage 3 only:  python workshop.py new s3 --task all --auto")
+    if a.stage == "s3" and not same and not repeat_ok(reg, a, task):
+        return 0
     if a.stage == "s1":
         if task == "T6":
             sys.exit("T6 is a stage-3 task. Stage 1 uses T3:  python workshop.py new s1")
@@ -1123,11 +1178,19 @@ def cmd_new(a):
     reg.save()
     mem = (reg.data.get("agent") or "") in ("codex", "") and codex_memories_on(reg)
     if gate_on():
-        run_page(reg, rid, "STAGE 1 - the agent with NO skill        run %s" % rid, f, prompt, "your default model",
-                 True, extra=lambda: method_notice(method, " (used in stage 2)"), mem=mem)
+        agent1 = reg.data.get("agent") or ""
+        try:
+            run_page(reg, rid, "STAGE 1 - the agent with NO skill        run %s" % rid, f, prompt,
+                     LARGE_SHORT.get(agent1) or "; ".join("%s: %s" % (k, v) for k, v in LARGE_SHORT.items()),
+                     True, extra=lambda: method_notice(method, " (used in stage 2)"), mem=mem)
+        except KeyboardInterrupt:
+            print("\n  Stopped. Run %s stays active. Its prompt:" % rid)
+            prompt_block(prompt)
         next_box(done_cmd, "when the agent says it is done, run:")
         return 0
-    print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd, mem=mem)
+    agent1 = reg.data.get("agent") or ""
+    print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd, mem=mem,
+                 model=LARGE_SHORT.get(agent1) or "; ".join("%s: %s" % (k, v) for k, v in LARGE_SHORT.items()))
     return 0
 
 
@@ -1430,7 +1493,7 @@ def memory_line(row):
 _SKIP_KEYS = ("content", "new_string", "old_string", "text", "new_source")
 _PATH_END = r"\s\"'`|;&()<>,{}\[\]="                 # characters that end a path token
 _TOKEN = re.compile(r"[^%s]+" % _PATH_END)
-_RUN_ID = re.compile(r"^s[123]-[0-9a-f]{4}(?:-[tn][36]-[0-9a-f]{4})?$")
+_RUN_ID = re.compile(r"^(?:judge-)?s[123]-[0-9a-f]{4}(?:-[tn][36]-[0-9a-f]{4})?$")
 _HOME_STORES = (".skills", ".grader", ".snapshots", ".prebuilt", ".guides")   # in the runs home, never for a run
 _PATCH = re.compile(r"\*\*\* begin patch(.*?)(?:\*\*\* end patch|$)", re.I | re.S)
 _WORKDIR = re.compile(r"[\"']?(?:workdir|cwd)[\"']?\s*:\s*[\"']([^\"']+)[\"']", re.I)
@@ -1889,6 +1952,7 @@ def measure_stage(run, t0, t1):
             if 0 < dur <= (t1 - t0) + 1:          # a duration longer than the wall time is wrong: ignore it
                 acts = [t1 - dur, t1]
     res["elapsed_min"] = ("%.1f" % ((max(acts) - min(acts)) / 60)) if len(acts) >= 2 else ""
+    res["last_activity"] = max(acts) if acts else None     # the agent's last sign of work (not the `done` time)
     return res
 
 
@@ -1928,8 +1992,12 @@ def pick_session(run_id, folder=None, since=None):
     if len(s) > 1:
         print("Several agent sessions contain %s:" % run_id)
         for i, x in enumerate(s):
-            print("  %d) %s %s  %s" % (i + 1, x["agent"], x["sid"], x["path"]))
-        n = ask("Which one is this run? [1]: ", "1")
+            try:
+                when = time.strftime("%H:%M", time.localtime(os.path.getmtime(x["path"])))
+            except OSError:
+                when = "?"
+            print("  %d) %s %s  last written %s  %s" % (i + 1, x["agent"], x["sid"], when, x["path"]))
+        n = ask("Which one is this run (usually the newest file)? [1]: ", "1")
         try:
             return s[int(n) - 1]
         except (ValueError, IndexError):
@@ -2081,12 +2149,17 @@ def all_results_text(rows):
     return "\n".join(lines)
 
 
+PARTIAL_STOPS = ("time", "ctrl-c", "partial")
+
+
 def grade_ungraded(reg):
     """Grade every ungraded row (the code of `grade`, short lines)."""
     for r in [r for r in reg.data["rows"].values() if r["grading"] == "ungraded"]:
         snap = snap_path(r["run_id"], r["stage"])
         name = reg.data["runs"].get(r["run_id"], {}).get("name", "")
         score, status = grade_snapshot(r["task"], snap if os.path.exists(snap) else None, name)
+        if status == "graded" and (r.get("stopped") or "") in PARTIAL_STOPS:
+            status = "partial"
         reg.set_row(r["run_id"], r["stage"], {"score": score, "grading": status,
                                               "revision": int(r["revision"] or 1) + 1})
         reg.save()
@@ -2251,32 +2324,82 @@ def ascii_frame(path, frame=300):
 COST_NOTE = "  Estimated cost under the kit's price assumptions."
 OBSERVED_NOTE = "  Observed results: one attempt per condition. Check pass/fail before time or cost; reliability is unknown."
 UNMATCHED_NOTE = "  Settings differ: this is not a matched comparison."
+OVERRUN_NOTE = "  One run was over the time box: this is not a matched comparison."
 FAILED_NOTE = "  At least one attempt failed. Costs describe attempts, not equal-quality savings."
 
 
-SHOW_COLS = [("run_id", 16), ("stage", 5), ("task", 4), ("model", 20), ("elapsed_min", 7), ("emulator_runs", 6),
-             ("tok_in", 9), ("tok_out", 8), ("cost_usd", 7), ("score", 9), ("grading", 9)]
-SHOW_NAMES = {"elapsed_min": "time min", "emulator_runs": "runs", "tok_in": "tokens in", "tok_out": "tokens out",
-              "cost_usd": "cost USD", "run_id": "run"}
+_BOX = "┌─┬┐│├┼┤└┴┘"
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def box_ok():
+    """Box-drawing tables only on a console whose encoding can print them; else the ASCII table."""
+    try:
+        if not sys.stdout.isatty():
+            return False
+        _BOX.encode(sys.stdout.encoding or "ascii")
+        return True
+    except (UnicodeEncodeError, LookupError, AttributeError, ValueError):
+        return False
+
+
+def _vis(t):
+    return len(_ANSI.sub("", str(t)))
+
+
+def _fit(t, w, right):
+    t = str(t)
+    pad = " " * max(0, w - _vis(t))
+    return pad + t if right else t + pad
+
+
+def render_table(head, rows, widths, right=(), indent=2):
+    """Lines of a table; every line is at most 72 characters for the widths the callers use.
+    Box mode: borders, ONE separator (under the header). ASCII mode: header, dashes, rows."""
+    pad = " " * indent
+    rt = lambda k: k in right
+    if box_ok():
+        line = lambda l, m, r: pad + l + m.join("─" * (w + 2) for w in widths) + r
+        row = lambda cells: pad + "│" + "│".join(" " + _fit(c, w, rt(k)) + " " for k, (c, w) in enumerate(zip(cells, widths))) + "│"
+        return ([line("┌", "┬", "┐"), row(head), line("├", "┼", "┤")] + [row(r) for r in rows] + [line("└", "┴", "┘")])
+    row = lambda cells: pad + " ".join(_fit(c, w, rt(k)) for k, (c, w) in enumerate(zip(cells, widths))).rstrip()
+    return [row(head), pad + " ".join("-" * w for w in widths)] + [row(r) for r in rows]
+
+
+SHOW_HEAD = ["run", "st", "task", "min", "runs", "cost", "score"]
+SHOW_WIDTHS = [16, 2, 4, 5, 4, 6, 9]          # the box table is 70 columns wide
 
 
 def run_summary(row, stage=None):
-    """One summary line per run (wrapped to the width), plus a score line for graded stages."""
+    """Time, runs and cost of a stage on short lines. Memory and isolation print only as warnings."""
     el, cost = _val(row, "elapsed_min"), _val(row, "cost_usd")
-    mem = {"yes": "ON", "no": "off"}.get(row.get("memory_used") or "", "unknown")
-    iso = {"not_detected": "OK", "detected": "CHECK (detected)"}.get(row.get("isolation") or "", "unknown")
-    chunks = ["Time %s" % ("unknown" if el is None else "%.1f min" % el),
-              "Cost %s" % ("unknown" if cost is None else "$%.2f (estimate)" % cost),
-              "Memory " + mem, "Isolation " + iso]
-    out = chunk_lines(chunks)
     stage = stage or row.get("stage")
+    em = str(row.get("emulator_runs", "")).strip()
+    chunks = ["Time %s" % ("unknown" if el is None else "%.1f min" % el)]
+    if stage in ("1", "3") and em not in ("", "unknown"):
+        chunks.append("Runs %s%s" % (em, " of 20" if stage == "1" else ""))
+    chunks.append("Cost %s" % ("unknown" if cost is None else "$%.2f (estimate)" % cost))
+    out = chunk_lines(chunks)
     if stage in ("1", "3"):
-        sc = ("%s %s" % (row.get("score", ""), verdict(row))).strip() if _val(row, "score") is not None else "not graded"
-        sl = ["Score " + sc]
-        if str(row.get("emulator_runs", "")).strip() not in ("", "unknown"):
-            sl.append("Runs %s" % row["emulator_runs"])
-        out += chunk_lines(sl)
+        if _val(row, "score") is not None:
+            out += chunk_lines(["Score %s" % ("%s %s" % (row.get("score", ""), verdict(row))).strip()])
+        elif stage == "1":
+            out.append("  Score: graded at the end.")
     return "\n".join(out)
+
+
+def finish_line(label, row, rid="", tail=""):
+    """ONE line when a stage-3 run is finished: label, id, minutes, runs, cost (and a tail)."""
+    el, cost = _val(row, "elapsed_min"), _val(row, "cost_usd")
+    em = str(row.get("emulator_runs", "")).strip()
+    chunks = ["FINISHED  " + label] + ([rid] if rid else [])
+    chunks.append("time unknown" if el is None else "%.1f min" % el)
+    if em not in ("", "unknown"):
+        chunks.append("%s run%s" % (em, "" if em == "1" else "s"))
+    chunks.append("cost unknown" if cost is None else "$%.2f" % cost)
+    if tail:
+        chunks.append(tail)
+    return c_bold("\n".join(chunk_lines(chunks)))
 
 
 def run_warnings(row):
@@ -2288,32 +2411,41 @@ def run_warnings(row):
         out.append("  CHECK: the agent may have read outside the run folder.")
         if row.get("isolation_note"):
             out.append("    " + row["isolation_note"])
+    if str(row.get("stage")) == "1" and re.search(r"luna|haiku", row.get("model") or "", re.I):
+        out.append("  CHECK: stage 1 ran on a small model (%s). Stage 1 needs the large model." % row["model"])
     if row.get("overrun") == "yes":
         out.append("  Over the 10-minute time box: flagged in the results.")
     return out
 
 
 def show_rows(rows, note=True):
-    """Results: a table when the terminal fits it, else one short key: value block per row."""
-    cols = SHOW_COLS
-    table = sum(w for _, w in cols) + 2 * (len(cols) - 1) <= min(term_cols(), MAXW)
-    if table:
-        print("  ".join(n.ljust(w) for n, w in cols))
+    """Results: one table that fits 72 columns (run, task, minutes, runs, cost, score)."""
+    body = []
     for r in rows:
-        tin = sum(int(r.get(k) or 0) for k in ("tok_uncached", "tok_cache_read", "tok_cache_write")
-                  if str(r.get(k, "")).isdigit())
-        mdl = r.get("model", "")
-        if mdl and r.get("effort"):
-            mdl = "%s/%s" % (mdl, r["effort"])
-        sc = ("%s %s" % (r.get("score", ""), verdict(r))).strip()
-        v = dict(r, model=mdl, score=sc, tok_in=M.fmt_k(tin) if tin else "", tok_out=M.fmt_k(int(r["tok_out"])) if str(r.get("tok_out", "")).isdigit() else "")
-        if table:
-            print("  ".join(str(v.get(n, ""))[:w].ljust(w) for n, w in cols))
-            continue
-        print("\n  %s" % v.get("run_id", ""))
-        for n, _ in cols[1:]:
-            if str(v.get(n, "")).strip():
-                print("    %s: %s" % (SHOW_NAMES.get(n, n), v[n]))
+        el, cost = _val(r, "elapsed_min"), _val(r, "cost_usd")
+        sc = ("%s %s" % (r.get("score", ""), verdict(r))).strip() or "-"
+        if r.get("grading") == "partial":
+            sc += "*"
+        em = str(r.get("emulator_runs", "")).strip()
+        body.append([r.get("run_id", ""), r.get("stage", ""), r.get("task", ""), "-" if el is None else "%.1f" % el,
+                     "-" if em in ("", "unknown") else em, "-" if cost is None else "$%.2f" % cost, sc])
+    if term_cols() < 2 + sum(SHOW_WIDTHS) + 3 * len(SHOW_WIDTHS) + 1:
+        for b in body:                           # a narrow window: one short key: value block per run
+            print("\n  %s" % b[0])
+            for k, v in zip(("stage", "task", "min", "runs", "cost", "score"), b[1:]):
+                if v not in ("", "-"):
+                    print("    %s: %s" % (k, v))
+    else:
+        print("\n".join(render_table(SHOW_HEAD, body, SHOW_WIDTHS, right=(3, 4, 5))))
+    models = {}
+    for r in rows:
+        if r.get("model"):
+            m = "%s/%s" % (r["model"], r["effort"]) if r.get("effort") else r["model"]
+            models[m] = models.get(m, 0) + 1
+    for m, n in models.items():
+        print("  Model: %s (%d %s)" % (m, n, "run" if n == 1 else "runs"))
+    if any(r.get("grading") == "partial" for r in rows):
+        print("  * = stopped early; graded as partial work.")
     if note and any(str(r.get("cost_usd", "")).strip() for r in rows):
         print(COST_NOTE)
 
@@ -2340,9 +2472,9 @@ COMPARE = [("Time (min)", ("elapsed_min",), "%.1f"),
 T6_BASELINE = "small model, no skill: 0/12 pass in 5 min"
 
 
-def color_change(ch):
-    """Pad to 10, then colour: real savings green, real increases red, zero plain."""
-    chc = ch.rjust(10)
+def color_change(ch, width=10):
+    """Pad to width, then colour: real savings green, real increases red, zero plain."""
+    chc = ch.rjust(width)
     if ch in ("+0%", "-0%"):
         return chc
     if ch.startswith("-"):
@@ -2387,14 +2519,14 @@ def verdict(row):
 def compare_control(reg, rw, rc, task="T3", note=""):
     """Task WITH the skill (rw) vs WITHOUT the skill (rc, control), same parent."""
     match = settings_match(rw, rc)
-    if match:
+    over = [r for r in (rc, rw) if r.get("overrun") == "yes"]
+    if match and not over:
         banner("%s: WITH vs WITHOUT the skill%s%s" % (task, SAME_LABEL[match], note))
     else:
         banner("%s: WITH vs WITHOUT the skill%s" % (task, note))
-        print(UNMATCHED_NOTE)
-    print("\n" + c_bold("  %-15s %16s %16s %10s" % ("", "without", "with skill", "change")))
-    print("  %-15s %16s %16s %10s" % ("", rc["run_id"], rw["run_id"], ""))
-    print("  " + "-" * 60)
+        print(UNMATCHED_NOTE if not match else OVERRUN_NOTE)
+    head = ["", "without", "with skill", "change"]
+    body = []
     failed = "FAIL" in (verdict(rc), verdict(rw))
     for name, keys, f in COMPARE:
         a, b = _val(rc, *keys), _val(rw, *keys)
@@ -2403,12 +2535,14 @@ def compare_control(reg, rw, rc, task="T3", note=""):
         if name == "Score":
             ca, cb = ("%s %s" % (ca, verdict(rc))).strip(), ("%s %s" % (cb, verdict(rw))).strip()
         ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" and not failed else ""
-        print("  %-15s %16s %16s %s" % (name, ca, cb, color_change(ch)))
+        body.append([name, ca, cb, color_change(ch, 0)])
+        if name == "Score" and over:
+            body.append(["Time box"] + ["over %d min" % TIME_BOX_MIN if r.get("overrun") == "yes" else "ok"
+                                        for r in (rc, rw)] + [""])
+    print("\n" + "\n".join(render_table(head, body, [13, 16, 16, 6], right=(1, 2, 3))))
+    print("  without = %s;  with skill = %s" % (rc["run_id"], rw["run_id"]))
     if failed:
         print("\n" + FAILED_NOTE)
-    if _val(rc, "score") is None or _val(rw, "score") is None:
-        print("\n  Score not graded yet. Run:\n  python workshop.py unlock 4 <password from the slide>\n"
-              "  python workshop.py grade")
 
 
 T6_NOTE = " - different task; shares components with T3"
@@ -2433,7 +2567,7 @@ def leakage_line(reg, parent):
              for t in ("T3", "T6")]
     if None in gains:
         return ""
-    return ("  Leakage check: Observed score gains: T3 %+d; T6 %+d. "
+    return ("  Observed score gains: T3 %+d; T6 %+d. "
             "These results neither identify nor rule out answer reuse." % (round(gains[0]), round(gains[1])))
 
 
@@ -2449,7 +2583,7 @@ def payback(reg, r1, r2, r3, t6=False, shown_table=False):
               "  python workshop.py grade" % (AFTER_ALL if reg.actives("3") else "Now"))
 
 
-def show_compare(reg, s3_id=None, cost_note=True):
+def show_compare(reg, s3_id=None, cost_note=True, brief=False):
     """Real pairs only: the same task on the same model, WITH vs WITHOUT the skill (T3 and T6).
     The stage-1 writer (large model) is never put in a table; it appears in one cost line."""
     rows3 = [r for r in reg.data["rows"].values() if r["stage"] == "3"]
@@ -2464,9 +2598,7 @@ def show_compare(reg, s3_id=None, cost_note=True):
     printed_ll = set()
     if not pick:
         return
-    print("\n" + OBSERVED_NOTE)
-    if cost_note and any(str(r.get("cost_usd", "")).strip() for r in rows3):
-        print(COST_NOTE)
+    tables = 0
     for parent in parents:
         mine = [r for r in rows3 if runs.get(r["run_id"], {}).get("parent") == parent]
         g = {}
@@ -2486,8 +2618,11 @@ def show_compare(reg, s3_id=None, cost_note=True):
             w, ctl = g.get((t, False)), g.get((t, True))
             if w and ctl:
                 compare_control(reg, w, ctl, t, T6_NOTE if t == "T6" else "")
+                tables += 1
                 if t == "T3":
                     shown_t3 = w
+            elif brief:
+                continue                    # `done`: nothing about a pair until both of its runs are in
             elif w:
                 if t in reg_ctl:
                     print("\n  %s: waiting for its control run (%s without skill)" % (t, t))
@@ -2495,6 +2630,8 @@ def show_compare(reg, s3_id=None, cost_note=True):
                     print("\n  %s: no control run" % t)
             elif ctl:
                 print("\n  %s: waiting for the run WITH the skill (%s with skill)" % (t, t))
+        if brief:
+            continue
         ll = leakage_line(reg, parent)
         if ll and ll not in printed_ll:
             printed_ll.add(ll)
@@ -2502,6 +2639,10 @@ def show_compare(reg, s3_id=None, cost_note=True):
         r1, r2 = reg.row(parent, "1"), reg.row(parent, "2")
         if r1 and r2:
             payback(reg, r1, r2, shown_t3 or {}, t6=shown_t3 is None)
+    if tables:                                  # the notes, once, under the tables
+        print("\n" + OBSERVED_NOTE)
+        if cost_note and any(str(r.get("cost_usd", "")).strip() for r in rows3):
+            print(COST_NOTE)
 
 
 def finish_stage(reg, rid, stage, a, grade=True):
@@ -2536,6 +2677,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
             else:
                 m["measurement"] = "none"
     agent = m.pop("agent") or reg.data.get("agent", "")
+    last_act = m.pop("last_activity", None)
     fields = dict(m)
     runs = count_runs(run["folder"], t0, t1)
     if runs is None and run.get("auto"):
@@ -2553,7 +2695,10 @@ def finish_stage(reg, rid, stage, a, grade=True):
             snap, sha = snapshot_solution(rid, run, stage)
             fields["solution_sha"] = sha
             score, status = grade_snapshot(run["task"], snap, run.get("name", ""))
-            fields.update(score=score, grading="partial" if getattr(a, "partial", False) else status)
+            part = bool(getattr(a, "partial", False))
+            if part and not run.get("stopped"):
+                run["stopped"] = "partial"             # a stopped run stays gradable: `grade` marks it partial
+            fields.update(score=score, grading="partial" if part and status == "graded" else status)
         else:
             fields.update(score="", grading="none")
         reg.end_active(rid)
@@ -2565,7 +2710,8 @@ def finish_stage(reg, rid, stage, a, grade=True):
     outside = outside_workdirs(session_paths(run.get("session")), t0, t1, run["folder"])
     fields["isolation"], fields["isolation_note"] = isolation_with_workdirs(iso, iso_note, outside)
     p0 = prompt_time(session_paths(run.get("session")), rid, t0, t1) if stage == "3" and not run.get("auto") else None
-    fields["overrun"] = overrun_flag(stage, t0 if p0 is None else p0, t1)   # 10 min from the prompt, not the set-up
+    # 10 min from the prompt (not the set-up) to the agent's LAST activity (never to `done`: the learner may run it late)
+    fields["overrun"] = overrun_flag(stage, t0 if p0 is None else p0, last_act) if last_act is not None or stage != "3" else ""
     if run.get("auto") and stage == "3":
         fields["overrun"] = "no"           # --auto: the start is the launch and the tool stops the run at the box
     fields["stopped"] = run.get("stopped", "")
@@ -2610,24 +2756,26 @@ def cmd_done(a):
     row = finish_stage(reg, rid, stage, a)
     clear_screen()
     print_wrong_folder(reg.data["runs"][rid], row)
-    banner("STAGE %s FINISHED   run %s" % (stage, rid))
-    print()
-    print(run_summary(row, stage))
+    if stage == "1":
+        banner("STAGE 1 FINISHED   run %s" % rid)
+        print()
+        print(run_summary(row, stage))
+    else:
+        tail = {"time": "(stopped at the time box)", "ctrl-c": "(stopped)", "partial": "(partial)"}.get(
+            row.get("stopped") or "", "")
+        print("\n" + finish_line(run_label(reg, rid).strip("()"), row, rid, tail))
+        if _val(row, "score") is not None:
+            print("\n".join(chunk_lines(["Score %s" % ("%s %s" % (row.get("score", ""), verdict(row))).strip()])))
     warn = run_warnings(row)
     if warn:
         print("\n" + "\n".join(warn))
-    fr = ascii_frame(snap_path(rid, stage))
-    if fr:
-        print("\n" + fr)
-    if row["grading"] == "ungraded" and stage == "3":   # stages 1-2: grading is at the end (the last NEXT box says how)
-        who = AFTER_ALL if stage == "3" and reg.actives("3") else "After the agent is done"
-        print("\nNot graded yet. %s, run:\n  python workshop.py unlock 4 <password from the slide>\n"
-              "  python workshop.py grade" % who)
-    print("\n" + SAVED_LINE)
     if stage == "1":
+        fr = ascii_frame(snap_path(rid, stage))
+        if fr:
+            print("\n" + fr)
         next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
     else:
-        show_compare(reg, rid)
+        show_compare(reg, rid, brief=True)         # only when the pair of this run is complete
         left = reg.actives("3")
         if left:
             still_working_box(reg, left)
@@ -2767,7 +2915,7 @@ REPEAT_NOTE = [
 def harvest_note(share):
     """What the learner reads after harvest: no code, only the measured share and why T6 exists."""
     if share:
-        head = ("  Your skill shares %d%% of its code with your T3 solution (a line match: "
+        head = ("  %d%% of your T3 solution's own lines are in your skill (a line match: "
                 "it cannot tell a useful helper from the answer)." % round(share * 100))
     else:
         head = ("  No copied block of your T3 solution was found in your skill "
@@ -2951,6 +3099,8 @@ def cmd_judge(a):
     shutil.copy2(snap, os.path.join(folder, "t3-solution.vsa"))
     shutil.copy2(os.path.join(KIT, "tasks", "T3.md"), os.path.join(folder, "tasks", "T3.md"))
     shutil.copytree(os.path.join(KIT, "examples"), os.path.join(folder, "kit-examples"))
+    reg.mark_done(folder)
+    reg.save()
     prompt = render_prompt("judge", run_id=rid)
     banner("JUDGE - does your skill hold the T3 answer?        run %s" % rid)
     print("\n  A fresh thread judges the skill. The thread that wrote it would judge its own work,")
@@ -3022,14 +3172,21 @@ def cmd_show(a):
     if not rows:
         print("No results yet.")
     else:
-        show_rows(rows)
-        show_compare(reg, cost_note=False)          # show_rows printed the cost note: once per output
+        cmp = getattr(a, "compare", False) or not reg.actives()
+        show_rows(rows, note=not cmp)
+        if cmp:
+            show_compare(reg)                       # the tables, then the notes once
+        elif any(r["stage"] == "3" for r in rows):
+            print("  The with/without tables: python workshop.py show --compare")
         if not reg.actives() and any(needs_submit(r) for r in rows):
             all_done_box(reg, show=False)
+    left = reg.actives("3")
+    if left:
+        still_working_box(reg, left)
     for x in reg.actives():
-        print("\nActive: stage %s of %s (%s). Next:  %s"
-              % (x["stage"], x["run_id"], reg.data["runs"].get(x["run_id"], {}).get("task", ""), next_cmd(x)))
-    print("\nWorkshop home: %s   results: %s" % (ws_home(), os.path.join(ws_home(), "results.csv")))
+        if x["stage"] != "3":
+            print("\n  Active: stage %s of %s. Next:  %s" % (x["stage"], x["run_id"], next_cmd(x)))
+    print("\n  Results file: %s" % os.path.join(ws_home(), "results.csv"))
     return 0
 
 
@@ -3077,6 +3234,10 @@ def cmd_cleanup(a):
         _remove(p)
     for n in ("registry.json", "registry.json.tmp", "results.csv", ".snapshots", ".guides"):
         _remove(os.path.join(home, n))
+    try:
+        os.rmdir(os.path.join(home, ".skills"))            # the parent of the harvested skills: empty now
+    except OSError:
+        pass
     try:
         os.rmdir(home)
     except OSError:
@@ -3277,6 +3438,7 @@ CMD_MAX = 8000             # cmd.exe cuts a command line at 8191 characters
 # Claude Code (dontAsk = every tool that is not in this list is refused): run the emulator, read, edit and
 # write only below the run folder. "./**" is relative to the working folder (the run folder).
 CLAUDE_TOOLS = ["Bash(bin/vesper:*)", "Bash(./bin/vesper:*)", "Bash(bin/vesper.exe:*)", "Bash(./bin/vesper.exe:*)",
+                "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(mkdir out)", "Bash(mkdir -p out)",
                 "Read", "Glob", "Grep", "Edit(./**)", "Write(./**)", "Skill"]
 
 
@@ -3481,15 +3643,25 @@ def run_capture(cmd, timeout, cwd=None, stdin_text=None):
             pass
 
 
+_PROBE = {}
+
+
 def check_auto_run(agent):
-    """doctor --check-auto: ONE tiny run ("Reply OK") with the stage-3 model. Returns (ok, text)."""
+    """doctor --check-auto: ONE tiny run with the stage-3 model and the real --auto flags. The agent writes
+    out/ok.txt, runs bin/vesper --version and tries to write a file OUTSIDE its folder. PASS only when ok.txt
+    exists (it can work) and the outside file does not (the limit works). Returns (ok, text)."""
     argv, why = find_cli(agent)
     if not argv:
         return False, "error: " + why
     tmp = tempfile.mkdtemp(prefix="vesper-auto-check-")
+    outside = os.path.join(user_home(), "vesper-probe-%s.txt" % new_code())
     try:
+        os.makedirs(os.path.join(tmp, "bin"))
+        shutil.copy2(vesper_bin(), os.path.join(tmp, "bin"))
+        prompt = ("Write the word OK into out/ok.txt, run bin/vesper --version, then try to write the word NO "
+                  "into %s . Reply DONE." % outside.replace("\\", "/"))
         try:
-            cmd, stdin_text = build_auto_cmd(agent, argv, AUTO_MODEL[agent], tmp, "Reply OK")
+            cmd, stdin_text = build_auto_cmd(agent, argv, AUTO_MODEL[agent], tmp, prompt)
             rc, text = run_capture(cmd, AUTO_CHECK_SEC, cwd=tmp, stdin_text=stdin_text)
         except (OSError, LaunchError) as e:
             return False, "error: %s" % e
@@ -3497,12 +3669,23 @@ def check_auto_run(agent):
             return False, "error: no answer in %d s" % AUTO_CHECK_SEC
         if FREE_PLAN_RE.search(text):
             return False, FREE_PLAN_MSG
+        wrote_ok = os.path.isfile(os.path.join(tmp, "out", "ok.txt"))
+        wrote_out = os.path.exists(outside)
+        _PROBE[agent] = bool(wrote_ok and not wrote_out)
+        if wrote_out:
+            return False, "FAIL: the agent wrote a file OUTSIDE its folder (no safe limit)"
+        if rc == 0 and wrote_ok:
+            return True, "PASS (%s wrote out/ok.txt; a write outside its folder was blocked)" % AUTO_MODEL[agent]
         if rc == 0:
-            return True, "OK (model %s answered)" % AUTO_MODEL[agent]
+            return False, "FAIL: the agent could not write out/ok.txt (its permissions are too narrow)"
         lines = [x.strip() for x in text.splitlines() if x.strip() and "warn" not in x.lower()]
         return False, "error: " + (anon(lines[-1])[:50] if lines else "exit code %d" % rc)
     finally:
         rmtree(tmp)
+        try:
+            os.remove(outside)
+        except OSError:
+            pass
 
 
 def _doctor_wrap(lines):
@@ -3531,6 +3714,8 @@ def doctor_auto_lines(agent, check=False):
     if check:
         ok, text = check_auto_run(agent)
         lines.append("  %-5s --check-auto %s (%s): %s" % ("OK" if ok else "WARN", agent, AUTO_MODEL[agent], text))
+        if agent in _PROBE:
+            lines.append("          The limit test ran with the real --auto flags.")
         if text == FREE_PLAN_MSG:
             lines.append("          Named models need a paid plan.")
             lines.append("          Use the manual flow, or upgrade the plan.")
@@ -3551,19 +3736,31 @@ def auto_setup(reg, a):
     a.auto_agent = agent
     a.auto_argv = find_cli(agent)[0]
     a.auto_model = getattr(a, "model", None) or AUTO_MODEL[agent]
+    a.auto_verified = bool(((reg.data.get("auto_probe") or {}).get(agent) or {}).get("pass"))
 
 
-# What the agent may do in an --auto run (one line of at most 72 characters each; shown before the start).
-AUTO_SAFETY = {"codex": "Codex runs in a sandbox: it can change files only in its run folder.",
-               "claude": "Claude may only run bin/vesper and edit files in its run folder.",
-               "cursor": "Cursor runs in Cursor's sandbox (--sandbox enabled)."}
+# The flags that limit an --auto agent (one line of at most 72 characters each; shown before the start).
+# They say what is ASKED. The screen says "verified" only after `doctor --check-auto` passed here.
+AUTO_SAFETY = {"codex": "Codex starts in a sandbox: it may change files in its run folder only.",
+               "claude": "Claude may only run bin/vesper (and ls, cat) and edit its run folder.",
+               "cursor": "Cursor starts with its sandbox on (--sandbox enabled)."}
+NOT_VERIFIED = "Not verified on this computer: run  doctor --check-auto"
+VERIFIED = "Verified here (doctor --check-auto): a write outside the folder failed."
+READ_NOTE = "It can read other folders on this disk; the isolation check looks for that."
+
+
+def auto_limit_lines(a):
+    """The safety lines of the --auto warning: the limit that is asked, and only what the probe verified."""
+    return ["  " + AUTO_SAFETY.get(a.auto_agent, ""),
+            "  " + (VERIFIED if getattr(a, "auto_verified", False) else NOT_VERIFIED),
+            "  " + READ_NOTE]
 
 
 def auto_confirm(a, n):
     """The warning screen before --auto starts n agents. Default No; without a terminal only --yes starts."""
     word = "the agent" if n == 1 else "the %d agents" % n
     print("\n  --auto starts %s with no window. What they may do:" % word)
-    print("  " + AUTO_SAFETY.get(a.auto_agent, ""))
+    print("\n".join(auto_limit_lines(a)))
     print("  The tool stops each agent at %d min. Ctrl+C stops all of them." % TIME_BOX_MIN)
     if getattr(a, "yes", False):
         return True
@@ -3707,6 +3904,9 @@ def agent_error(it):
     return ""
 
 
+_FAIL_HINT = [False]
+
+
 def auto_error(reg, it, reason):
     """A failed --auto run: record stopped=error and the first error line, do NOT grade, keep the run active
     (the learner does it by hand). Returns the row."""
@@ -3725,9 +3925,11 @@ def auto_error(reg, it, reason):
         revision=int((prev or {}).get("revision") or 0) + 1))
     reg.save()
     reg.write_csv()
-    print("\n" + c_err("  RUN FAILED  %s" % it["label"]))
-    print(c_err("  RUN FAILED: %s. Do this run by hand: python workshop.py new s3 --task %s (shows its page)"
-                % (note.rstrip(". "), it.get("task") or "all")))
+    print("\n" + c_err("  RUN FAILED  %s: %s" % (it["label"], note.rstrip(". "))))
+    if not _FAIL_HINT[0]:
+        _FAIL_HINT[0] = True                      # the fix line once, not once per run
+        print(c_err("  Do the failed runs by hand: python workshop.py new s3 --task %s (shows their pages)"
+                    % (it.get("task") or "all")))
     return reg.row(rid, "3")
 
 
@@ -3750,11 +3952,11 @@ def auto_finish(reg, it):
     except Exception as e:  # noqa: BLE001  (one run must not stop the others)
         print(c_err("  %s: the finish failed (%s). Later:  python workshop.py done %s" % (it["label"], e, rid)))
         return None
-    print("\n" + c_bold("  FINISHED  %s   (%s)" % (it["label"], it["state"])))
+    tail = {"stopped": "(stopped at %d min)" % TIME_BOX_MIN, "killed": "(stopped by Ctrl+C)"}.get(it["state"], "")
+    print("\n" + finish_line(it["label"], row, "", tail))
     if it["state"] == "done" and it["rc"]:
         print(c_err("  The agent ended with exit code %s; see agent-output.jsonl in the run folder." % it["rc"]))
     print_wrong_folder(run, row)
-    print(run_summary(row, "3"))
     warn = run_warnings(row)
     if warn:
         print("\n".join(warn))
@@ -3768,7 +3970,7 @@ def auto_start_screen(a, items):
     print(c_banner(WIDE))
     eff = ", effort high" if a.auto_agent == "codex" else ""
     print("  Agent: %s   Model: %s%s" % (a.auto_agent, a.auto_model, eff))
-    print("  " + AUTO_SAFETY.get(a.auto_agent, ""))
+    print("\n".join(auto_limit_lines(a)))
     print("  Time box %d min: the tool stops any agent still working." % TIME_BOX_MIN)
     print("  Do not type in these folders. Ctrl+C stops all agents.")
     print("  Start order:")
@@ -3779,6 +3981,7 @@ def run_auto(reg, a, items):
     """Start the agents in order, print a status block every AUTO_TICK seconds, stop each at the time box,
     finish each run when it ends. Ctrl+C: kill all, keep the finished results."""
     box = AUTO_BOX_SEC if AUTO_BOX_SEC is not None else TIME_BOX_MIN * 60
+    _FAIL_HINT[0] = False
     auto_start_screen(a, items)
     try:
         for it in items:
@@ -3879,13 +4082,14 @@ def s3_pages(reg, a, entries, seed, total=None):
     order = [k for k in start_order_keys(seed) if k in entries]
     total = total or len(order)
     labels = [x for x in start_order(seed) if ORDER_KEY[x] in entries]
-    print("  Start in this order: " + " ".join("%d. %s" % (i, x) for i, x in enumerate(labels, 1)))
-    print(BENCH_LINE)
+    order_line = lambda: print("  Start in this order: " + " ".join(
+        "%d. %s" % (i, x) for i, x in enumerate(labels, 1)))
+    if not gate_on():
+        order_line()                       # a terminal clears the screen at each page: the order is on page 1
     for i, k in enumerate(order, 1):
         rid, f, p = entries[k]
         s3_show(reg, rid, i, total, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k],
-                extra=(lambda: print("  Start in this order: " + " ".join(
-                    "%d. %s" % (j, x) for j, x in enumerate(labels, 1)))) if gate_on() else None)
+                extra=order_line if gate_on() and i == 1 else None)
     next_box(["python workshop.py done %s   %s" % (entries[k][0], ALL_LABEL[k]) for k in order],
              "when an agent is done (or at 10 min), run its line:")
     return order
@@ -3978,7 +4182,7 @@ def parse(argv):
     s.add_argument("--agent", choices=["codex", "claude", "cursor", "other"])
     s.add_argument("--alias")
     s.add_argument("--check-auto", action="store_true",
-                   help="ONE tiny agent run (Reply OK) with the stage-3 model: can --auto use it?")
+                   help="ONE tiny agent run with the stage-3 model and the --auto flags: can it work, and is it limited?")
     s.set_defaults(func=cmd_doctor)
     s = sub.add_parser("new")
     s.add_argument("stage", choices=["s1", "s3"])
@@ -4016,6 +4220,7 @@ def parse(argv):
     s.add_argument("password")
     s.set_defaults(func=cmd_unlock)
     s = sub.add_parser("show")
+    s.add_argument("--compare", action="store_true", help="also the with/without tables while agents work")
     s.set_defaults(func=cmd_show)
     s = sub.add_parser("form", help="open the results form again for a finished stage")
     s.add_argument("run_id", nargs="?", help="default: the last finished stage")

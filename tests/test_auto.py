@@ -15,7 +15,7 @@ import measure  # noqa: E402
 
 ENV_KEYS = ("VESPER_CODEX_EXE", "VESPER_CURSOR_EXE", "VESPER_CLAUDE_EXE", "FAKE_SLEEP", "FAKE_SLOW_KEYS",
             "FAKE_SLOW_SEC", "FAKE_CHILD", "FAKE_FREEPLAN", "FAKE_VERSION", "FAKE_LOGIN", "FAKE_INIT_MODEL",
-            "FAKE_FAIL", "FAKE_NO_USAGE", "LOCALAPPDATA")
+            "FAKE_FAIL", "FAKE_NO_USAGE", "FAKE_PROBE_NOWRITE", "FAKE_PROBE_OUTSIDE", "LOCALAPPDATA")
 
 
 def make_echo_cmd(d, name="agent.cmd"):
@@ -243,7 +243,7 @@ class AutoCodex(AutoBase):
         with mock.patch.object(self.w, "start_agent", side_effect=OSError("boom")):
             out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
         self.assertIn("could not start: boom", out)
-        self.assertIn("RUN FAILED: could not start: boom. Do this run by hand:", flat(out))
+        self.assertIn("RUN FAILED  T3 with skill: could not start: boom", flat(out))
         reg, _ = self.runs3()
         self.assertEqual(len(reg.actives("3")), 1)
         self.assertEqual(rc, 1)
@@ -271,8 +271,10 @@ class AutoClaude(AutoBase):
         self.assertEqual(tools, self.w.CLAUDE_TOOLS)               # the last flag: nothing after the list
         self.assertIn("Bash(bin/vesper:*)", tools)
         self.assertIn("Bash(./bin/vesper:*)", tools)
-        self.assertFalse([t for t in tools if t.startswith("Bash") and "vesper" not in t])   # no free Bash
-        self.assertIn("Claude may only run bin/vesper and edit files in its run folder.", out)
+        ro = ("Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(mkdir out)", "Bash(mkdir -p out)")
+        self.assertFalse([t for t in tools if t.startswith("Bash") and "vesper" not in t and t not in ro])  # no free Bash
+        self.assertFalse([t for t in tools if "python" in t or t == "Bash"])
+        self.assertIn("Claude may only run bin/vesper (and ls, cat) and edit its run folder.", out)
         r = self.rows3()[rid]
         self.assertEqual(r["agent"], "claude")
         self.assertEqual(r["model"], "claude-haiku-5-5")
@@ -318,14 +320,14 @@ class AutoCursor(AutoBase):
         r = next(iter(self.rows3().values()))
         self.assertEqual(r["model"], "auto")
         self.assertEqual(r["cost_usd"], "")
-        self.assertIn("Cost unknown", out)
+        self.assertIn("cost unknown", out)
 
     def test_free_plan_error_is_detected(self):
         os.environ["FAKE_FREEPLAN"] = "1"
         self.w.AUTO_MIN_SEC = 0                                     # the error text alone is enough
         out, rc = capture(self.w, "new", "s3", "--task", "T3", "--auto", "--yes")
-        self.assertIn("RUN FAILED: ActionRequiredError: Named models unavailable", flat(out))
-        self.assertIn("Do this run by hand: python workshop.py new s3 --task T3 (shows its page)", flat(out))
+        self.assertIn("RUN FAILED  T3 with skill: ActionRequiredError: Named models unavailable", flat(out))
+        self.assertIn("Do the failed runs by hand: python workshop.py new s3 --task T3 (shows their pages)", flat(out))
         self.assertEqual(long_lines(out), [])
         self.assertEqual(rc, 1)
         reg, runs = self.runs3()
@@ -429,7 +431,7 @@ class AutoConfirm(AutoBase):
         out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--name", "MIRA")
         self.assertEqual(rc, 1)
         self.assertIn("--auto starts the 4 agents with no window. What they may do:", out)
-        self.assertIn("  Codex runs in a sandbox: it can change files only in its run folder.", out)
+        self.assertIn("  Codex starts in a sandbox: it may change files in its run folder only.", out)
         self.assertIn("Not started: no terminal to answer. Add --yes to start them.", out)
         self.assertEqual(self.runs3()[1], {})                       # no run folder was made
         self.assertEqual(long_lines(out), [])
@@ -466,9 +468,9 @@ class AutoErrors(AutoBase):
         self.w.AUTO_MIN_SEC = 60                                    # the fake agent ends after 0.2 s
         out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
         self.assertEqual(rc, 1)
-        self.assertEqual(len(re.findall(r"RUN FAILED: the agent ended after \d+ s \(exit code 0\)\.", flat(out))), 4)
-        self.assertEqual(flat(out).count("Do this run by hand: python workshop.py new s3 --task all "
-                                         "(shows its page)"), 4)
+        self.assertEqual(len(re.findall(r"RUN FAILED  [^:]+: the agent ended after \d+ s \(exit code 0\)", flat(out))), 4)
+        self.assertEqual(flat(out).count("Do the failed runs by hand: python workshop.py new s3 --task all "
+                                         "(shows their pages)"), 1)          # the fix line once, not per run
         self.assertIn("4 runs failed. Do them by hand:", flat(out))
         self.assertNotIn("FINISHED", out)
         self.assertEqual(long_lines(out), [])
@@ -797,7 +799,7 @@ class DoctorAuto(unittest.TestCase):
         os.environ["VESPER_CURSOR_EXE"] = FAKE
         with mock.patch.object(self.w.shutil, "which", return_value=None):
             out = self.doctor("cursor", "--check-auto")
-            self.assertIn("--check-auto cursor (gpt-5.6-luna-high): OK", out)
+            self.assertIn("--check-auto cursor (gpt-5.6-luna-high): PASS", out)
             os.environ["FAKE_FREEPLAN"] = "1"
             out = self.doctor("cursor", "--check-auto")
             self.assertIn("--check-auto cursor (gpt-5.6-luna-high): free plan: only Auto", out)
