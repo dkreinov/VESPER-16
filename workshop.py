@@ -3830,7 +3830,7 @@ def auto_setup(reg, a):
 # The flags that limit an --auto agent (one line of at most 72 characters each; shown before the start).
 # They say what is ASKED. The screen says "verified" only after `doctor --check-auto` passed here.
 AUTO_SAFETY = {"codex": "Codex starts in a sandbox: it may change files in its run folder only.",
-               "claude": "Claude may only run bin/vesper (and ls, cat, grep) and edit its run folder.",
+               "claude": "Claude may only run bin/vesper (and ls, cat) and edit its run folder.",
                "cursor": "Cursor may only run bin/vesper and use files in its run folder."}
 NOT_VERIFIED = "Not verified on this computer: run  doctor --check-auto"
 VERIFIED = "Verified by doctor --check-auto: a write outside failed."

@@ -15,7 +15,7 @@ import measure  # noqa: E402
 
 ENV_KEYS = ("VESPER_CODEX_EXE", "VESPER_CURSOR_EXE", "VESPER_CLAUDE_EXE", "FAKE_SLEEP", "FAKE_SLOW_KEYS",
             "FAKE_SLOW_SEC", "FAKE_CHILD", "FAKE_FREEPLAN", "FAKE_VERSION", "FAKE_LOGIN", "FAKE_INIT_MODEL",
-            "FAKE_FAIL", "FAKE_NO_USAGE", "FAKE_PROBE_NOWRITE", "FAKE_PROBE_NOVERSION", "FAKE_PROBE_OUTSIDE", "LOCALAPPDATA")
+            "FAKE_FAIL", "FAKE_LIMIT", "FAKE_NO_USAGE", "FAKE_PROBE_NOWRITE", "FAKE_PROBE_NOVERSION", "FAKE_PROBE_OUTSIDE", "LOCALAPPDATA")
 
 
 def make_echo_cmd(d, name="agent.cmd"):
@@ -281,7 +281,7 @@ class AutoClaude(AutoBase):
               "Bash(find:*)", "Bash(pwd)", "Bash(mkdir out)", "Bash(mkdir -p out)")
         self.assertFalse([t for t in tools if t.startswith("Bash") and "vesper" not in t and t not in ro])  # no free Bash
         self.assertFalse([t for t in tools if "python" in t or t == "Bash"])
-        self.assertIn("Claude may only run bin/vesper (and ls, cat, grep) and edit its run folder.", out)
+        self.assertIn("Claude may only run bin/vesper (and ls, cat) and edit its run folder.", out)
         r = self.rows3()[rid]
         self.assertEqual(r["agent"], "claude")
         self.assertEqual(r["model"], "claude-haiku-5-5")
