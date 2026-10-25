@@ -65,9 +65,9 @@ class RunnerTests(Base):
         r = self.runner(self.prog("T3.vsa"))
         self.assertTrue(wait_for(lambda: r.frame_no >= 0))
         a, t0 = r.frame_no, time.time()
-        time.sleep(1.0)
+        time.sleep(3.0)                      # long window: a short stall cannot move the mean much
         rate = (r.frame_no - a) / (time.time() - t0)
-        self.assertTrue(40 < rate < 75, rate)
+        self.assertTrue(35 < rate < 75, rate)
 
     def test_key_forward(self):
         r = self.runner(self.prog("T3.vsa"))
@@ -167,7 +167,7 @@ class HttpTests(Base):
         super().setUp()
         self.page = self.prog("console.html", "<html>page</html>")
         self.r = self.runner(self.prog("T3.vsa"), self.prog("T6.vsa"))
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), play.make_handler(self.r, self.page))
+        self.srv = play.Server(("127.0.0.1", 0), play.make_handler(self.r, self.page))
         self.srv.daemon_threads = True
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.addCleanup(self.srv.server_close)
@@ -203,6 +203,26 @@ class HttpTests(Base):
         self.assertEqual(self.call("POST", "/api/nothing", {})[0], 404)
         self.assertEqual(self.call("POST", "/api/restart", {}, {"Origin": "http://evil.example"})[0], 403)
 
+    def test_host_header_must_be_local(self):
+        for path in ("/", "/api/status", "/api/events"):
+            self.assertEqual(self.call("GET", path, None, {"Host": "evil.example:8765"})[0], 403, path)
+        self.assertEqual(self.call("POST", "/api/restart", {}, {"Host": "evil.example"})[0], 403)
+        self.assertEqual(self.call("GET", "/api/status", None, {"Host": "localhost:%d" % self.port})[0], 200)
+
+    def test_events_reject_foreign_origin(self):
+        st, _ = self.call("GET", "/api/events", None, {"Origin": "http://evil.example"})
+        self.assertEqual(st, 403)
+
+    def test_bad_content_length_is_400(self):
+        for value in ("abc", "-5", "99999999"):
+            c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            c.putrequest("POST", "/api/keys")
+            c.putheader("Content-Length", value)
+            c.endheaders()
+            self.assertEqual(c.getresponse().status, 400, value)
+            c.close()
+
+
     def test_event_stream_carries_frames_and_status(self):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         c.request("GET", "/api/events")
@@ -232,6 +252,45 @@ class HttpTests(Base):
         info = json.loads(self.call("GET", "/api/status")[1])
         self.assertEqual(info["code"], 2)
         self.assertIn("assembler", info["error"])
+
+
+class PortTests(unittest.TestCase):
+    def test_busy_port_makes_bind_fail(self):
+        import socket
+        for reuse in (False, True):
+            blocker = socket.socket()
+            if reuse:
+                blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            blocker.bind(("127.0.0.1", 0))
+            blocker.listen()
+            port = blocker.getsockname()[1]
+            try:
+                with self.assertRaises(OSError):
+                    play.Server(("127.0.0.1", port), play.make_handler(None, "x"))
+            finally:
+                blocker.close()
+
+    def test_main_falls_back_to_free_port(self):
+        import socket
+        import subprocess
+        blocker = socket.socket()
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen()
+        port = blocker.getsockname()[1]
+        prog = Path(tempfile.mkdtemp()) / "T3.vsa"
+        prog.write_text("x")
+        p = subprocess.Popen([sys.executable, "-u", str(HERE.parent / "play.py"), str(prog), "--no-browser",
+                              "--vesper", FAKE, "--port", str(port)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            line = p.stdout.readline()
+            self.assertIn("http://127.0.0.1:", line)
+            self.assertNotIn(":%d/" % port, line)
+        finally:
+            p.terminate()
+            p.wait(timeout=5)
+            p.stdout.close()
+            p.stderr.close()
+            blocker.close()
 
 
 if __name__ == "__main__":

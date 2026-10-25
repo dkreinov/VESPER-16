@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Binary safety check: old and new vesper must behave the same for `run` and `asm`.
+"""Binary safety check: an old and a new vesper must behave the same for `run` and `asm`.
+(The public vesper is the old binary again, so old == current is expected to pass trivially.)
 
 Compares stdout, exit code and every output file (frame PNGs, raw dump, GIF), byte for byte.
 
@@ -8,7 +9,7 @@ Compares stdout, exit code and every output file (frame PNGs, raw dump, GIF), by
 
 --keys-helper: path of a helper module that writes the test input files (kept outside this repo).
 It must provide make_cases(outdir, nframes, seed, count) -> [{"name", "keyfile", "lines"}].
---programs: directories with .vsa files (examples, reference, mutants).
+--programs: directories with .vsa files (for example the examples folder).
 """
 import argparse, glob, hashlib, importlib.util, json, os, shutil, subprocess, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +36,8 @@ def run_one(binary, args, work):
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work)
     full = [a.replace("@W", work) for a in args]
-    p = subprocess.run([binary] + full, capture_output=True, timeout=300)
+    env = dict(os.environ, VESPER_NO_LOG="1")   # never append to the kit's usage log
+    p = subprocess.run([binary] + full, capture_output=True, timeout=300, env=env)
     return p.returncode, p.stdout, p.stderr, tree_hash(work)
 
 
@@ -89,10 +91,7 @@ def main():
         shutil.rmtree(os.path.join(work, "n_" + safe), ignore_errors=True)
         diffs = []
         if o[0] != w[0]: diffs.append("exit %s != %s" % (o[0], w[0]))
-        # the usage text gained one `vesper play` line on purpose; ignore only that line
-        strip = lambda b: [l for l in b.splitlines() if b"vesper play" not in l]
-        if strip(o[1]) != strip(w[1]): diffs.append("stdout differs")
-        elif o[1] != w[1] and b"vesper play" not in w[1]: diffs.append("stdout differs")
+        if o[1] != w[1]: diffs.append("stdout differs")
         if o[2] != w[2]: diffs.append("stderr differs")
         if o[3] != w[3]: diffs.append("output files differ (%d vs %d files)" % (len(o[3]), len(w[3])))
         return tag, diffs, o[0], len(o[3])

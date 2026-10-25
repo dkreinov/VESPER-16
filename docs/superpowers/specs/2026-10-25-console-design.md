@@ -12,15 +12,18 @@ other machine detail. Python and HTML know only the public button names
 
 ## Parts
 
-1. **`vesper play <prog> [--frames N] [--seed N]`** — new mode in the C emulator
-   (source: `../agents-skills-workshop/experiments/04-blackbox-console/private/src/vesper.c`).
+1. **`vesper-play <prog>` (`vesper-play play <prog> [--frames N] [--seed N]`)** — a separate emulator
+   binary with a `play` mode, built from the emulator source with a build switch. The public
+   `bin/vesper` and `bin/vesper.exe` are the original binaries and are not changed; workshop run
+   folders get only those, never the play binary. The play binary lives in `console/bin/`.
    - stdin: one text line per frame: space-separated public button names held in that frame
      (empty line = none). EOF = stop.
    - stdout: for every frame, exactly 64*48*3 = 9216 bytes RGB, row 0 first. Frame 0 is sent
      before the first stdin line is read (same frame-0 semantics as `run`).
    - On assembler or runtime error: print the SAME error text that `run` prints to stderr, exit
      with the same code. Never print machine state.
-   - `run` and `asm` code paths unchanged. Windows: stdin/stdout in binary mode, flush every frame.
+   - `run` and `asm` code paths unchanged. `play` writes no usage-log line; `--version` ends with
+     `+play`. A key line of any length is one frame. Windows: stdin/stdout in binary mode, flush every frame.
 2. **`console/play.py <prog.vsa> [--vesper PATH]`** — Python 3.9+, stdlib only.
    Starts `vesper play`, serves `console.html` on 127.0.0.1 (free port), opens the browser.
    Browser → server: held buttons (WebSocket-free: simple long-poll or SSE + POST is fine).
@@ -31,7 +34,7 @@ other machine detail. Python and HTML know only the public button names
    - LIVE mode when served by play.py; REPLAY mode when opened as a file (drop an `out/` folder of
      `frame_*.png` or a `--gif` file, like `player.html`).
    - Look: re-drawn pixel console in the deck style (grey body, stepped pixel edges, orange rim
-     light), background = workbench art (`effective-skills/vesper-directions/assets/pixel.png`,
+     light), background = workbench art (`console/assets/workbench.webp`,
      dimmed, blurred, embedded as data URI, compressed ≤ 400 KB). Screen exactly 4:3, integer pixel
      scale, `image-rendering: pixelated`. Subtle LCD grid + glow, toggle G.
    - D-pad, A, B, SELECT, START press down 2 px and glow orange while held, only
@@ -45,23 +48,24 @@ other machine detail. Python and HTML know only the public button names
    - Keys: arrows = D-pad, Z = A, X = B, Enter = START, Shift = SELECT. Deck keys: Space
      play/pause (replay), R restart, M motion off (no slide/splash/pulse), F fullscreen,
      B blank, G LCD effect, 1/2 cartridge, L try live (when served).
-4. **Deck copy** — `presentations/effective-skills/vesper-console/`: built `console.html` with two
-   embedded reference replays (T3 and T6, recorded with `vesper run` using a hand-made key file
-   that shows the games well; T6 name "VESPER"). Only new files in a new folder; nothing existing
-   is edited.
+4. **Deck copy** — a folder outside this repository: built `console.html` with two embedded
+   replays (T3 and T6, recorded with `vesper-play`). Recordings and screenshots of finished
+   solutions stay in that folder and never enter this repository.
 
 ## Tests (must pass before anything ships)
 
-1. Binary safety: old vs new binary, `vesper run` on examples + `private/grader/reference/*.vsa`
-   + `private/grader/mutants/*.vsa` with ≥ 20 key files (random, long holds, empty, all buttons):
-   stdout, exit code and every frame byte-identical. Script: `console/tests/compare_binaries.py`.
-2. `play` vs `run`: same program + keys → identical frames (from PNG decode) for T3, T4, T6
-   references. Error programs → same text and code.
-3. `play.py` unit test with a fake emulator: key forward, frame forward, error path, restart.
+1. Binary safety: the public `bin/vesper(.exe)` must equal the original binaries (sha256 against
+   the commit before the console work). `console/tests/compare_binaries.py` compares two
+   binaries on any program folders and key files (stdout, exit code, every output file).
+2. `play` vs `run`: same program + keys → identical frames (from PNG decode) for T3, T4, T6.
+   Assembler errors and run-time errors → same text and code, and the frames before the error.
+   Long key line = one frame; no usage-log line. Script: `console/tests/test_play_vs_run.py`.
+3. `play.py` unit test with a fake emulator: key forward, frame forward, error path, restart,
+   port fallback, Host/Origin checks, bad Content-Length.
 4. Browser screenshots 1280×720: boot, T3 live, T6 replay, error screen, motion off.
-5. Leak review by an independent agent over every shipped new file.
+5. Leak review by an independent reviewer over every shipped new file.
 
 ## Delivery
 
-Branch `console` in `vesper-16` and in `agents-skills-workshop`. New binaries go into
-`vesper-16/bin/` on the branch only. Nothing is pushed or merged until the user says so.
+Branch `console`. The play binaries go into `console/bin/` on the branch only; `bin/` is unchanged.
+Nothing is pushed or merged until the user says so.

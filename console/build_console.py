@@ -12,7 +12,7 @@ DIR/demos.json:
 
     {"carts": [{"label": "T3 SQUASH", "rgb": "t3.rgb", "buttons": "t3.buttons.txt"}, ...]}
 
-Each .rgb file holds 64*48*3 bytes per frame (the stdout of `vesper play`).
+Each .rgb file holds 64*48*3 bytes per frame (the stdout of `vesper-play play`).
 Each buttons file has one line of button names per frame step: line k = held in frame k+1.
 Only DIR is written. Nothing from DIR is copied into this repository.
 """

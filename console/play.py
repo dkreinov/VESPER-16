@@ -32,7 +32,7 @@ TITLES = {"T3": "SQUASH", "T6": "NAMEPLATE"}
 
 
 def default_vesper():
-    return ROOT / "bin" / ("vesper.exe" if os.name == "nt" else "vesper")
+    return HERE / "bin" / ("vesper-play.exe" if os.name == "nt" else "vesper-play")
 
 
 def cart_label(path):
@@ -233,6 +233,18 @@ class Runner:
             self._set_state("ended", code)
 
 
+class Server(ThreadingHTTPServer):
+    """A busy port must fail the bind, so that the port fallback works on every OS."""
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def server_bind(self):
+        if os.name == "nt":
+            import socket
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def make_handler(runner, page_path):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -252,11 +264,23 @@ def make_handler(runner, page_path):
             self.end_headers()
             self.wfile.write(body)
 
+        def _host_ok(self):
+            """Only 127.0.0.1 and localhost may be the Host (blocks DNS rebinding)."""
+            host = (self.headers.get("Host") or "").strip().lower()
+            name = host[1:host.find("]")] if host.startswith("[") else host.rsplit(":", 1)[0] if ":" in host else host
+            return name in ("127.0.0.1", "localhost")
+
         def _origin_ok(self):
             origin = self.headers.get("Origin")
             return origin is None or origin.split("://", 1)[-1] == self.headers.get("Host")
 
         def do_GET(self):
+            if not self._host_ok():
+                self._send(403, {"ok": False, "error": "bad host"})
+                return
+            if not self._origin_ok():
+                self._send(403, {"ok": False, "error": "bad origin"})
+                return
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html", "/console.html"):
                 try:
@@ -271,10 +295,17 @@ def make_handler(runner, page_path):
                 self._send(404, {"ok": False, "error": "not found"})
 
         def do_POST(self):
-            if not self._origin_ok():
+            if not self._host_ok() or not self._origin_ok():
                 self._send(403, {"ok": False, "error": "bad origin"})
                 return
-            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                if n < 0 or n > 65536:
+                    raise ValueError("bad Content-Length")
+            except ValueError:
+                self._send(400, {"ok": False, "error": "bad Content-Length"})
+                self.close_connection = True
+                return
             try:
                 body = json.loads(self.rfile.read(n) or b"{}")
                 if not isinstance(body, dict):
@@ -337,7 +368,7 @@ def make_handler(runner, page_path):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="VESPER-16 pixel console")
     ap.add_argument("programs", nargs="+", help="one or two .vsa programs (keys 1 and 2 switch)")
-    ap.add_argument("--vesper", default=None, help="path to the vesper program (default: bin/vesper[.exe])")
+    ap.add_argument("--vesper", default=None, help="path to the emulator with play mode (default: console/bin/vesper-play[.exe])")
     ap.add_argument("--no-browser", action="store_true", help="do not open the browser")
     ap.add_argument("--port", type=int, default=8765, help="port (default: 8765, or any free port if it is busy)")
     args = ap.parse_args(argv)
@@ -351,12 +382,12 @@ def main(argv=None):
 
     runner = Runner(args.programs, vesper)
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(runner, HERE / "console.html"))
+        server = Server(("127.0.0.1", args.port), make_handler(runner, HERE / "console.html"))
     except OSError:
         if args.port == 0:
             raise
         print(f"port {args.port} is busy, using a free port", file=sys.stderr)
-        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(runner, HERE / "console.html"))
+        server = Server(("127.0.0.1", 0), make_handler(runner, HERE / "console.html"))
     server.daemon_threads = True
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     runner.start(0)

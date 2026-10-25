@@ -1,6 +1,8 @@
 """Screenshots of the console with the real emulator. Starts play.py itself.
 
-    python console/tests/shoot_real.py T3.vsa T6.vsa broken.vsa console/checks
+    python console/tests/shoot_real.py PROG1.vsa PROG2.vsa BROKEN.vsa OUTDIR
+
+Play-mode screenshots show the output of finished programs: write OUTDIR outside this repository.
 """
 import re
 import subprocess

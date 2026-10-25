@@ -13,7 +13,9 @@ Give two programs to switch between them with the keys 1 and 2:
 
     python console/play.py solutions/T3.vsa solutions/T6.vsa
 
-Options: `--vesper PATH` (use another emulator file), `--no-browser` (only print the address), `--port N` (default 8765).
+The console runs the play emulator `console/bin/vesper-play` (`vesper-play.exe` on Windows). It is a separate file from `bin/vesper`.
+
+Options: `--vesper PATH` (use another play emulator file), `--no-browser` (only print the address), `--port N` (default 8765).
 Press Ctrl+C in the terminal to stop.
 
 If your program has an error, the console shows a red light and a dark screen.
@@ -49,6 +51,7 @@ When the page is served by `play.py`, you can still drop frames. Press L to go b
 ## Files
 
 - `play.py` - the launcher and small web server.
+- `bin/` - the play emulator for Windows and Linux (x86-64).
 - `console.html` - the page (one file, works offline). Built from `console.src.html`.
 - `build_console.py` - rebuilds `console.html` with the background picture from `assets/workbench.webp`.
 - `tests/` - tests and a fake emulator for them.

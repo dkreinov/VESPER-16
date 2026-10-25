@@ -7,3 +7,5 @@ prices.json
 __pycache__/
 doctor-report.txt
 charts-out/
+console/checks/real-*
+console/checks/3b-*
