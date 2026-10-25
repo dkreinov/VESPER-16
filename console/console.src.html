@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VESPER-16 console</title>
+<style>
+  :root {
+    --p: 4px;                 /* one art pixel; set by script (integer) */
+    --s: 8px;                 /* one screen pixel = 2 art pixels */
+    --glow: rgba(60,80,140,.25);
+    --ink: #e9e4da; --muted: #a39d92; --orange: #ff9a2e; --green: #46e070; --red: #ff3040;
+    --body: #7f7a74; --body-hi: #9d978e; --body-lo: #66625c; --body-dk: #4d4a45;
+    --plastic: #26262f; --cap: #3b3b49; --edge: #14141a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #090b14; color: var(--ink);
+    font: 16px/1.3 ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace; }
+  body::before { content: ""; position: fixed; inset: -4%; z-index: 0;
+    background: #0b0d18 url("__WORKBENCH_DATA_URI__") 62% 50% / cover no-repeat;
+    filter: blur(9px) brightness(.5) saturate(.85); }
+  body::after { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 46%, rgba(9,11,20,0) 25%, rgba(9,11,20,.72) 100%); }
+  #app { position: relative; z-index: 1; height: 100%; display: grid; grid-template-rows: 36px 1fr 84px; padding: 0 16px; }
+
+  /* ---------- top bar */
+  #top { display: flex; align-items: center; gap: 18px; letter-spacing: .08em; font-weight: 700; white-space: nowrap; overflow: hidden; }
+  #status { display: flex; align-items: center; gap: 10px; }
+  #dot { width: 12px; height: 12px; background: #555; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
+  #dot.live { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  #dot.replay { background: var(--orange); box-shadow: 0 0 10px var(--orange); }
+  #dot.err { background: var(--red); box-shadow: 0 0 10px var(--red); }
+  #frame { color: var(--muted); font-weight: 400; }
+  #spacer { flex: 1; }
+  .tab { appearance: none; border: 2px solid rgba(255,255,255,.16); background: rgba(10,12,22,.55); color: var(--muted);
+    font: inherit; font-weight: 700; padding: 1px 10px; cursor: pointer; letter-spacing: .06em; }
+  .tab b { color: var(--orange); margin-right: 6px; }
+  .tab.on { color: var(--ink); border-color: var(--orange); }
+  .tag { color: var(--orange); font-weight: 700; }
+
+  /* ---------- stage and parts */
+  #mid { display: grid; place-items: center; min-height: 0; }
+  #stage { position: relative; width: calc(var(--p) * 244); height: calc(var(--p) * 142); }
+  .a { position: absolute; left: calc(var(--x) * var(--p)); top: calc(var(--y) * var(--p));
+       width: calc(var(--w) * var(--p)); height: calc(var(--h) * var(--p)); }
+  .l { position: absolute; left: calc(var(--x) * var(--p)); top: calc(var(--y) * var(--p)); image-rendering: pixelated; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  #glow { image-rendering: auto !important; }
+  #rig { filter: drop-shadow(0 calc(var(--p) * 3) calc(var(--p) * 5) rgba(0,0,0,.65)) drop-shadow(0 0 calc(var(--p) * 10) rgba(255,120,20,.10)); }
+  .rim { background: linear-gradient(90deg, #ff8a22 0%, #ffb15c 55%, #ff9a2e 100%); animation: rim 5s ease-in-out infinite; }
+  @keyframes rim { 0%,100% { opacity: .75; } 50% { opacity: 1; } }
+  .body { background: var(--body); overflow: hidden; }
+  .tex { position: absolute; inset: 0; background-image: conic-gradient(rgba(255,255,255,.045) 25%, transparent 0 50%, rgba(255,255,255,.045) 0 75%, transparent 0);
+         background-size: calc(var(--p) * 2) calc(var(--p) * 2); }
+  .hi { background: var(--body-hi); }
+  .lo { background: var(--body-lo); }
+  .dk { background: var(--body-dk); }
+  .slot { background: #1f1d1c; box-shadow: inset 0 var(--p) 0 #0f0e0e; }
+  .plate { background: #76716b; box-shadow: inset 0 var(--p) 0 #5e5a55, inset 0 calc(var(--p) * -1) 0 #9a948c; }
+  .bezel { background: #1a1c28; box-shadow: inset 0 var(--p) 0 #07080d, inset 0 calc(var(--p) * -1) 0 #343748,
+           inset 0 0 calc(var(--p) * 5) var(--glow); }
+  #bezelframe { background: #5f5b56; }
+  #led { background: #3a2a10; }
+  #led.live { background: var(--green); box-shadow: 0 0 calc(var(--p) * 3) var(--green); animation: led 2.4s ease-in-out infinite; }
+  #led.replay { background: var(--orange); box-shadow: 0 0 calc(var(--p) * 3) var(--orange); animation: led 2.4s ease-in-out infinite; }
+  #led.err { background: var(--red); box-shadow: 0 0 calc(var(--p) * 4) var(--red); }
+  @keyframes led { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
+
+  /* cartridge */
+  #cart { transition: transform .3s cubic-bezier(.5,0,.8,.6), opacity .3s; }
+  #cart.out { transform: translateY(calc(var(--p) * -14)); opacity: 0; }
+  #cart.pre { transition: none; transform: translateY(calc(var(--p) * -14)); opacity: 0; }
+  #cart:not(.out):not(.pre) { transition: transform .3s cubic-bezier(.2,.5,.3,1), opacity .2s; }
+  .cartbody { background: #3c404e; filter: drop-shadow(0 calc(var(--p) * 1) 0 rgba(0,0,0,.5)); }
+  .cartbody .cap { position: absolute; left: 0; right: 0; top: 0; height: calc(var(--p) * 1); background: #5a6074; }
+  .cartbody .rimtop { position: absolute; left: 0; right: 0; top: 0; height: calc(var(--p) * 1); background: rgba(255,154,46,.75); }
+  .sticker { background: #e6dcc6; box-shadow: inset 0 calc(var(--p) * -1) 0 #bcb39d; display: grid; place-items: center; }
+  .ridge { background: #2c2f3b; }
+
+  /* buttons */
+  .bw { cursor: pointer; touch-action: none; }
+  .bw .btn { position: absolute; inset: 0; background: linear-gradient(var(--cap) 0 var(--p), var(--plastic) 0 calc(100% - var(--p)), var(--edge) 0 100%); }
+  .bw.down { filter: drop-shadow(0 0 calc(var(--p) * 2) rgba(255,140,26,.95)); }
+  .bw.down .btn { transform: translateY(max(2px, calc(var(--p) * .5)));
+    background: linear-gradient(#ffc27a 0 var(--p), #e8761c 0 calc(100% - var(--p)), #8a3f0a 0 100%); }
+  body.replay .bw { cursor: default; }
+  .dimple { background: #1c1c24; }
+  .spr { position: absolute; image-rendering: pixelated; }
+  .pill .btn { background: linear-gradient(#34343f 0 var(--p), #1d1d25 0 100%); }
+  .engr { position: absolute; image-rendering: pixelated; left: calc(var(--x) * var(--p)); top: calc(var(--y) * var(--p)); opacity: .9; }
+
+  /* screen */
+  #screen { background: #000; overflow: hidden; }
+  #screen canvas { position: absolute; left: 0; top: 0; }
+  #lcd { width: calc(var(--s) * 64); height: calc(var(--s) * 48); }
+  #glow { width: calc(var(--s) * 64); height: calc(var(--s) * 48); image-rendering: auto; opacity: .45; mix-blend-mode: screen; }
+  #grid { position: absolute; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(0,0,0,.30) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.30) 1px, transparent 1px);
+    background-size: var(--s) var(--s); }
+  #sheen { position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(115deg, rgba(255,255,255,.07) 0%, rgba(255,255,255,0) 38%),
+                radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 62%, rgba(0,0,0,.35) 100%); }
+  body.nolcd #grid, body.nolcd #sheen, body.nolcd #glow { display: none; }
+  #dim { position: absolute; inset: 0; background: rgba(40,0,0,.0); pointer-events: none; transition: background .4s; }
+  body.err #dim { background: rgba(40,0,4,.45); }
+  body.nomotion *, body.nomotion *::before { animation: none !important; transition: none !important; }
+
+  /* ---------- footer */
+  #foot { padding-top: 6px; overflow: hidden; text-align: center; }
+  #hint { font-size: 15px; color: var(--muted); line-height: 1.7; text-shadow: 0 1px 2px #000; }
+  kbd { font: inherit; font-weight: 700; color: var(--ink); background: rgba(10,12,22,.7); border: 1px solid rgba(255,255,255,.25);
+        border-bottom-width: 3px; padding: 0 6px; margin: 0 2px; }
+  #tools { display: none; align-items: center; justify-content: center; gap: 10px; margin-top: 4px; }
+  body.replay #tools { display: flex; }
+  .btn2 { appearance: none; border: 2px solid rgba(255,255,255,.22); background: rgba(10,12,22,.65); color: var(--ink);
+    font: inherit; font-size: 14px; font-weight: 700; padding: 2px 12px; cursor: pointer; letter-spacing: .04em; }
+  .btn2:hover { border-color: var(--orange); }
+  .btn2 input { display: none; }
+  #scrub { width: min(40vw, 460px); accent-color: var(--orange); }
+  #errbox { display: none; text-align: left; max-width: 900px; margin: 0 auto; background: rgba(40,4,10,.82);
+    border: 2px solid var(--red); padding: 4px 12px; height: 72px; overflow: hidden; }
+  #errbox b { color: var(--red); letter-spacing: .08em; }
+  #errbox pre { margin: 2px 0 0; font: inherit; font-size: 15px; line-height: 1.3; white-space: pre-wrap; color: #ffd7d9; max-height: 3.9em; overflow: hidden; }
+  body.err #errbox { display: block; }
+  body.err #hint, body.err #tools { display: none; }
+  #veil { position: fixed; inset: 0; z-index: 5; display: none; place-items: center; background: rgba(6,8,16,.7);
+    font-size: 30px; font-weight: 700; letter-spacing: .12em; color: var(--orange); border: 4px dashed var(--orange); }
+  body.drag #veil { display: grid; }
+</style>
+</head>
+<body class="replay">
+<div id="app">
+  <div id="top">
+    <div id="status"><span id="dot"></span><span id="mode">REPLAY</span><span id="frame"></span></div>
+    <span id="spacer"></span>
+    <span id="tabs"></span>
+    <span id="tags"></span>
+  </div>
+
+  <div id="mid">
+    <div id="stage">
+      <div class="a" id="rig" style="--x:0;--y:10;--w:244;--h:132">
+        <div class="a rim" data-r="8" style="--x:0;--y:0;--w:244;--h:132"></div>
+        <div class="a body" data-r="8" style="--x:1;--y:1;--w:243;--h:131">
+          <div class="tex"></div>
+          <div class="a hi" style="--x:8;--y:0;--w:228;--h:2"></div>
+          <div class="a lo" style="--x:0;--y:121;--w:244;--h:11"></div>
+          <div class="a dk" style="--x:0;--y:120;--w:244;--h:1"></div>
+        </div>
+        <div class="a slot" style="--x:82;--y:0;--w:80;--h:4"></div>
+
+        <!-- D-pad -->
+        <div class="a plate" data-r="23" style="--x:2;--y:43;--w:47;--h:47"></div>
+        <div class="a bw" data-btn="UP"    style="--x:18;--y:45;--w:15;--h:14"><div class="btn" data-r="1"></div></div>
+        <div class="a bw" data-btn="DOWN"  style="--x:18;--y:74;--w:15;--h:14"><div class="btn" data-r="1"></div></div>
+        <div class="a bw" data-btn="LEFT"  style="--x:4;--y:59;--w:14;--h:15"><div class="btn" data-r="1"></div></div>
+        <div class="a bw" data-btn="RIGHT" style="--x:33;--y:59;--w:14;--h:15"><div class="btn" data-r="1"></div></div>
+        <div class="a" style="--x:18;--y:59;--w:15;--h:15;background:#26262f"></div>
+        <div class="a dimple" data-r="3" style="--x:22;--y:63;--w:7;--h:7"></div>
+
+        <!-- bezel and screen -->
+        <div class="a bezel" data-r="3" style="--x:52;--y:12;--w:140;--h:108"></div>
+        <div class="a" id="screen" style="--x:58;--y:18;--w:128;--h:96">
+          <canvas id="lcd" width="64" height="48"></canvas>
+          <canvas id="glow" width="16" height="12"></canvas>
+          <div id="grid"></div><div id="sheen"></div><div id="dim"></div>
+        </div>
+        <div class="a" id="led" style="--x:58;--y:5;--w:4;--h:4"></div>
+
+        <!-- A / B -->
+        <div class="a bw" data-btn="B" style="--x:201;--y:66;--w:16;--h:16"><div class="btn" data-r="8"></div></div>
+        <div class="a bw" data-btn="A" style="--x:221;--y:52;--w:16;--h:16"><div class="btn" data-r="8"></div></div>
+
+        <!-- SELECT / START -->
+        <div class="a bw pill" data-btn="SELECT" style="--x:199;--y:98;--w:16;--h:6"><div class="btn" data-r="2"></div></div>
+        <div class="a bw pill" data-btn="START"  style="--x:221;--y:98;--w:16;--h:6"><div class="btn" data-r="2"></div></div>
+
+        <!-- speaker + logo -->
+        <div class="a dk" style="--x:166;--y:124;--w:1;--h:5"></div><div class="a dk" style="--x:170;--y:124;--w:1;--h:5"></div>
+        <div class="a dk" style="--x:174;--y:124;--w:1;--h:5"></div><div class="a dk" style="--x:178;--y:124;--w:1;--h:5"></div>
+        <div class="a dk" style="--x:182;--y:124;--w:1;--h:5"></div><div class="a dk" style="--x:186;--y:124;--w:1;--h:5"></div>
+      </div>
+
+      <!-- cartridge, in front of the body, going into the slot -->
+      <div class="a" id="cart" style="--x:84;--y:0;--w:76;--h:14">
+        <div class="a cartbody" data-r="3" style="--x:0;--y:0;--w:76;--h:14">
+          <div class="cap"></div>
+          <div class="a sticker" data-r="1" style="--x:6;--y:3;--w:64;--h:7"><canvas id="label"></canvas></div>
+          <div class="a ridge" style="--x:6;--y:11;--w:64;--h:1"></div>
+          <div class="a ridge" style="--x:6;--y:13;--w:64;--h:1"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="foot">
+    <div id="hint"></div>
+    <div id="tools">
+      <label class="btn2">Open folder<input type="file" id="dirInput" webkitdirectory directory multiple></label>
+      <label class="btn2">Open PNG files / GIF<input type="file" id="fileInput" accept=".png,.gif,image/png,image/gif" multiple></label>
+      <button class="btn2" id="playBtn">Pause</button>
+      <input type="range" id="scrub" min="0" max="0" value="0" disabled>
+    </div>
+    <div id="errbox"><b id="errhead">ERROR</b><pre id="errtext"></pre></div>
+  </div>
+</div>
+<div id="veil">DROP FRAMES OR A GIF</div>
+
+<script>
+(() => {
+"use strict";
+const W = 64, H = 48;
+const $ = id => document.getElementById(id);
+const root = document.documentElement;
+
+/* ---------- tiny 3x5 pixel font ---------- */
+const FONT = {};
+(function () {
+  const g = {
+    A: ".#.|#.#|###|#.#|#.#", B: "##.|#.#|##.|#.#|##.", C: ".##|#..|#..|#..|.##", D: "##.|#.#|#.#|#.#|##.",
+    E: "###|#..|##.|#..|###", F: "###|#..|##.|#..|#..", G: ".##|#..|#.#|#.#|.##", H: "#.#|#.#|###|#.#|#.#",
+    I: "###|.#.|.#.|.#.|###", J: "..#|..#|..#|#.#|.#.", K: "#.#|#.#|##.|#.#|#.#", L: "#..|#..|#..|#..|###",
+    M: "#.#|###|###|#.#|#.#", N: "###|#.#|#.#|#.#|#.#", O: ".#.|#.#|#.#|#.#|.#.", P: "##.|#.#|##.|#..|#..",
+    Q: ".#.|#.#|#.#|###|.##", R: "##.|#.#|##.|#.#|#.#", S: ".##|#..|.#.|..#|##.", T: "###|.#.|.#.|.#.|.#.",
+    U: "#.#|#.#|#.#|#.#|###", V: "#.#|#.#|#.#|#.#|.#.", W: "#.#|#.#|###|###|#.#", X: "#.#|#.#|.#.|#.#|#.#",
+    Y: "#.#|#.#|.#.|.#.|.#.", Z: "###|..#|.#.|#..|###",
+    0: "###|#.#|#.#|#.#|###", 1: ".#.|##.|.#.|.#.|###", 2: "##.|..#|.#.|#..|###", 3: "##.|..#|.#.|..#|##.",
+    4: "#.#|#.#|###|..#|..#", 5: "###|#..|##.|..#|##.", 6: ".##|#..|###|#.#|###", 7: "###|..#|.#.|.#.|.#.",
+    8: "###|#.#|###|#.#|###", 9: "###|#.#|###|..#|##.",
+    "-": "...|...|###|...|...", ".": "...|...|...|...|.#.", ":": "...|.#.|...|.#.|...", "_": "...|...|...|...|###",
+    "/": "..#|..#|.#.|#..|#..", "?": "##.|..#|.#.|...|.#.", "!": ".#.|.#.|.#.|...|.#.", " ": "...|...|...|...|...",
+  };
+  for (const k in g) FONT[k] = g[k].split("|");
+})();
+const textCols = s => Math.max(0, s.length * 4 - 1);
+/* draw text into an RGBA buffer (w px wide); only rows < maxY */
+function putText(buf, w, str, x0, y0, k, rgb, maxY) {
+  str = String(str).toUpperCase();
+  for (let ci = 0; ci < str.length; ci++) {
+    const gl = FONT[str[ci]] || FONT["?"];
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) {
+      if (gl[r][c] !== "#") continue;
+      for (let dy = 0; dy < k; dy++) for (let dx = 0; dx < k; dx++) {
+        const x = x0 + (ci * 4 + c) * k + dx, y = y0 + r * k + dy;
+        if (x < 0 || y < 0 || x >= w || y >= H || (maxY !== undefined && y >= maxY)) continue;
+        const i = (y * w + x) * 4;
+        buf[i] = rgb[0]; buf[i + 1] = rgb[1]; buf[i + 2] = rgb[2]; buf[i + 3] = 255;
+      }
+    }
+  }
+}
+const centerX = (str, k) => Math.floor((W - (textCols(str) * k)) / 2);
+function fill(buf, rgb) { for (let i = 0; i < buf.length; i += 4) { buf[i] = rgb[0]; buf[i + 1] = rgb[1]; buf[i + 2] = rgb[2]; buf[i + 3] = 255; } }
+/* a small canvas holding text, 1 canvas px = 1 font px */
+function drawLabel(cv, str, rgb) {
+  const cols = textCols(str);
+  cv.width = Math.max(1, cols); cv.height = 5; cv.dataset.cols = cols;
+  const c = cv.getContext("2d"), im = c.createImageData(cv.width, 5);
+  putText(im.data, cv.width, str, 0, 0, 1, rgb);
+  // putText clamps y to H; fine since 5 < H, but width must match
+  c.putImageData(im, 0, 0);
+}
+function sprite(parent, rows, rgb, x, y, k) {
+  const cv = document.createElement("canvas");
+  cv.width = rows[0].length; cv.height = rows.length; cv.className = "spr"; cv.dataset.k = k;
+  cv.style.left = `calc(${x} * var(--p))`; cv.style.top = `calc(${y} * var(--p))`;
+  const c = cv.getContext("2d"); c.fillStyle = rgb;
+  rows.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === "#") c.fillRect(i, j, 1, 1); }));
+  parent.appendChild(cv); sized.push(cv);
+  return cv;
+}
+const sized = [];   // canvases scaled in layout(): width = cols * k
+function engrave(str, x, y, rgb) {
+  const cv = document.createElement("canvas");
+  cv.className = "engr"; cv.style.setProperty("--x", x); cv.style.setProperty("--y", y); cv.dataset.k = "half";
+  drawLabel(cv, str, rgb);
+  $("rig").appendChild(cv); sized.push(cv);
+}
+
+/* ---------- layout: integer pixel scale, stepped corners ---------- */
+function stepPoly(w, h, R, p) {
+  const o = [];
+  for (let i = 0; i < R; i++) o.push(Math.max(0, Math.round(R - Math.sqrt(R * R - (R - i - 0.5) ** 2))));
+  const pts = [];
+  for (let i = R - 1; i >= 0; i--) pts.push([o[i], i + 1], [o[i], i]);
+  for (let i = 0; i < R; i++) pts.push([w - o[i], i], [w - o[i], i + 1]);
+  for (let i = R - 1; i >= 0; i--) pts.push([w - o[i], h - i - 1], [w - o[i], h - i]);
+  for (let i = 0; i < R; i++) pts.push([o[i], h - i], [o[i], h - i - 1]);
+  return "polygon(" + pts.map(([x, y]) => `${x * p}px ${y * p}px`).join(",") + ")";
+}
+function layout() {
+  const vw = innerWidth, vh = innerHeight;
+  const availH = vh - $("top").offsetHeight - $("foot").offsetHeight - 14, availW = vw - 32;
+  let p = Math.floor(Math.min(availH / 142, availW / 244));
+  p = Math.max(1, Math.min(p, 12));
+  root.style.setProperty("--p", p + "px"); root.style.setProperty("--s", 2 * p + "px");
+  document.querySelectorAll("[data-r]").forEach(el => {
+    const cs = getComputedStyle(el);
+    const w = Math.round(parseFloat(cs.width) / p), h = Math.round(parseFloat(cs.height) / p);
+    el.style.clipPath = stepPoly(w, h, +el.dataset.r, p);
+  });
+  const half = Math.max(1, Math.floor(p / 2));
+  sized.forEach(cv => {
+    const px = cv.dataset.k === "half" ? half : p * +cv.dataset.k;   // css pixels per canvas pixel
+    cv.style.width = cv.width * px + "px"; cv.style.height = cv.height * px + "px";
+  });
+  const lab = $("label");
+  lab.style.width = lab.width * p + "px"; lab.style.height = 5 * p + "px";
+}
+
+/* ---------- parts built by script ---------- */
+const arm = {};
+document.querySelectorAll("[data-btn]").forEach(el => { arm[el.dataset.btn] = el; });
+const ARROW = "#4a4a5c";
+sprite(arm.UP,    ["..#..", ".###.", "#####"], ARROW, 5, 6, 1);
+sprite(arm.DOWN,  ["#####", ".###.", "..#.."], ARROW, 5, 5, 1);
+sprite(arm.LEFT,  ["..#", ".##", "###", ".##", "..#"], ARROW, 5, 5, 1);
+sprite(arm.RIGHT, ["#..", "##.", "###", "##.", "#.."], ARROW, 6, 5, 1);
+const ENG = [52, 48, 42];
+engrave("B", 208, 84, ENG); engrave("A", 228, 70, ENG);
+engrave("SELECT", 199, 106, ENG); engrave("START", 222, 106, ENG);
+(function () {  // VESPER-16 logo, engraved
+  const cv = document.createElement("canvas"); cv.className = "l"; cv.style.setProperty("--x", 52); cv.style.setProperty("--y", 124);
+  drawLabel(cv, "VESPER-16", [58, 55, 50]); cv.dataset.k = 1; $("rig").appendChild(cv); sized.push(cv);
+})();
+const labelCv = $("label");
+
+/* ---------- state ---------- */
+const S = {
+  live: false, mode: "replay", motion: true, lcd: true, blank: false,
+  state: "idle", code: null, error: "", carts: [], cart: 0, replayName: "",
+  cur: null, errImg: null, frameNo: -1, swapping: false, splashStart: 0, splashEnd: 0,
+  frames: [], ri: 0, playing: true, rlast: 0, racc: 0,
+  kb: new Map(), ptr: new Set(),
+};
+const lcd = $("lcd"), lctx = lcd.getContext("2d"), gctx = $("glow").getContext("2d");
+const out = new ImageData(W, H);
+const BLACK = new Uint8ClampedArray(W * H * 4); for (let i = 3; i < BLACK.length; i += 4) BLACK[i] = 255;
+
+function paint(src) {
+  out.data.set(src);
+  lctx.putImageData(out, 0, 0);
+  gctx.drawImage(lcd, 0, 0, 16, 12);
+}
+function avgGlow(src) {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < src.length; i += 4 * 11) { r += src[i]; g += src[i + 1]; b += src[i + 2]; n++; }
+  const m = 255 * n; const lum = (r + g + b) / (3 * m);
+  const k = 2.4 * Math.min(1, lum * 3 + .1);
+  root.style.setProperty("--glow", `rgba(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)},${Math.min(.55, .12 + lum * k).toFixed(2)})`);
+}
+
+/* ---------- splash, idle, error pictures ---------- */
+function splashActive() { return S.motion && performance.now() < S.splashEnd; }
+function splashFrame(now) {
+  const t = now - S.splashStart, buf = new Uint8ClampedArray(W * H * 4);
+  fill(buf, [9, 11, 22]);
+  const sweep = Math.max(0, Math.min(H + 2, (t - 250) / 650 * (H + 2)));
+  putText(buf, W, "VESPER", centerX("VESPER", 2), 9, 2, [200, 206, 214], sweep);
+  putText(buf, W, "16", centerX("16", 4), 22, 4, [255, 140, 26], sweep);
+  if (sweep < H) {   // scan line
+    const y = Math.floor(sweep);
+    for (let x = 0; x < W; x++) { const i = (y * W + x) * 4; buf[i] = 255; buf[i + 1] = 150; buf[i + 2] = 60; }
+  }
+  const prog = Math.max(0, Math.min(1, (t - 600) / 700));   // load bar
+  for (let x = 10; x < 54; x++) for (const y of [44, 45]) {
+    const i = (y * W + x) * 4, on = x - 10 < prog * 44;
+    buf[i] = on ? 255 : 30; buf[i + 1] = on ? 140 : 34; buf[i + 2] = on ? 26 : 50;
+  }
+  return buf;
+}
+function idleFrame() {
+  const buf = new Uint8ClampedArray(W * H * 4); fill(buf, [9, 11, 22]);
+  const a = S.mode === "replay" ? "DROP" : "NO", b = S.mode === "replay" ? "FRAMES" : "SIGNAL";
+  putText(buf, W, a, centerX(a, 2), 14, 2, [90, 98, 120]);
+  putText(buf, W, b, centerX(b, 2), 26, 2, [90, 98, 120]);
+  return buf;
+}
+function errorFrame() {
+  if (S.errImg) return S.errImg;
+  const buf = new Uint8ClampedArray(W * H * 4); fill(buf, [6, 2, 4]);
+  if (S.cur) for (let i = 0; i < buf.length; i += 4) {
+    buf[i] = S.cur[i] * .28; buf[i + 1] = S.cur[i + 1] * .12; buf[i + 2] = S.cur[i + 2] * .14;
+  }
+  const bar = (y0, y1) => { for (let y = y0; y < y1; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4; buf[i] = 20; buf[i + 1] = 2; buf[i + 2] = 6; } };
+  bar(15, 33);
+  putText(buf, W, "ERROR", centerX("ERROR", 2), 18, 2, [255, 64, 72]);
+  putText(buf, W, "R TO RESTART", centerX("R TO RESTART", 1), 29, 1, [200, 140, 144]);
+  return (S.errImg = buf);
+}
+
+function render() {
+  let src;
+  if (S.blank || S.swapping) src = BLACK;
+  else if (splashActive()) src = splashFrame(performance.now());
+  else if (S.mode === "live" && S.state === "error") src = errorFrame();
+  else if (S.cur) src = S.cur;
+  else src = idleFrame();
+  paint(src);
+}
+let looping = false;
+function loop() {
+  if (looping) return;
+  looping = true;
+  const step = () => {
+    render();
+    if (splashActive() || S.swapping) requestAnimationFrame(step); else looping = false;
+  };
+  requestAnimationFrame(step);
+}
+function startSplash() {
+  if (!S.motion) { render(); return; }
+  S.splashStart = performance.now(); S.splashEnd = S.splashStart + 1500; loop();
+}
+
+/* ---------- hud ---------- */
+function pad(n, w) { return String(n).padStart(w, "0"); }
+function updateHud() {
+  const err = S.mode === "live" && S.state === "error";
+  document.body.classList.toggle("replay", S.mode === "replay");
+  document.body.classList.toggle("err", err);
+  document.body.classList.toggle("nomotion", !S.motion);
+  document.body.classList.toggle("nolcd", !S.lcd);
+  const dot = $("dot"), led = $("led");
+  const cls = err ? "err" : S.mode === "live" ? "live" : "replay";
+  dot.className = cls; led.className = S.swapping ? "" : cls;
+  let m = S.mode === "live" ? "LIVE" : "REPLAY";
+  if (err) m = "ERROR"; else if (S.mode === "live" && S.state === "ended") m = "LIVE - ENDED";
+  $("mode").textContent = m;
+  if (S.mode === "live") $("frame").textContent = S.frameNo >= 0 ? "FRAME " + pad(S.frameNo, 6) : "";
+  else $("frame").textContent = S.frames.length ? `FRAME ${S.ri} / ${S.frames.length - 1}` : "NO FRAMES";
+  const tags = [];
+  if (!S.motion) tags.push("MOTION OFF"); if (S.blank) tags.push("BLANK"); if (!S.lcd) tags.push("LCD OFF");
+  $("tags").innerHTML = tags.map(t => `<span class="tag">${t}</span>`).join(" &nbsp; ");
+  $("playBtn").textContent = S.playing ? "Pause" : "Play";
+  if (err) {
+    $("errhead").textContent = `ERROR - exit code ${S.code} - press R to restart`;
+    $("errtext").textContent = S.error;
+  }
+  hints();
+}
+function hints() {
+  const k = t => `<kbd>${t}</kbd>`;
+  let h;
+  if (S.mode === "live") {
+    h = `${k("&larr;&uarr;&darr;&rarr;")} D-pad ${k("Z")} A ${k("X")} B ${k("Enter")} START ${k("Shift")} SELECT<br>` +
+        `${S.carts.length > 1 ? k("1") + k("2") + " cartridge " : ""}${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank`;
+  } else {
+    h = `${k("Space")} play/pause ${k("&larr;")}${k("&rarr;")} step ${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank${S.live ? " " + k("L") + " live" : ""}`;
+  }
+  if ($("hint").dataset.h !== h) { $("hint").innerHTML = h; $("hint").dataset.h = h; }
+}
+function setLabel() {
+  let txt = "NO CART";
+  if (S.mode === "live" && S.carts[S.cart]) txt = S.carts[S.cart].label;
+  else if (S.mode === "replay" && S.replayName) txt = S.replayName;
+  drawLabel(labelCv, txt.toUpperCase().slice(0, 15), [48, 44, 40]);
+  layout();
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", +t.dataset.i === S.cart));
+}
+function buildTabs() {
+  $("tabs").innerHTML = "";
+  if (S.carts.length < 2) return;
+  S.carts.forEach((c, i) => {
+    const b = document.createElement("button");
+    b.className = "tab"; b.dataset.i = i; b.innerHTML = `<b>${i + 1}</b>${c.label}`;
+    b.onclick = () => { b.blur(); swapCart(i); };
+    $("tabs").appendChild(b);
+  });
+}
+
+/* ---------- live connection ---------- */
+let sending = false, dirty = false;
+function post(path, body) {
+  return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}), keepalive: true }).catch(() => {});
+}
+function heldSet() { return new Set([...S.kb.values(), ...S.ptr]); }
+function pushKeys() {
+  const held = [...heldSet()];
+  document.querySelectorAll("[data-btn]").forEach(el => el.classList.toggle("down", S.mode === "live" && held.includes(el.dataset.btn)));
+  if (!S.live) return;
+  const list = S.mode === "live" ? held : [];
+  if (sending) { dirty = true; return; }
+  sending = true;
+  post("/api/keys", { held: list }).then(() => { sending = false; if (dirty) { dirty = false; pushKeys(); } });
+}
+function connect() {
+  const es = new EventSource("/api/events");
+  es.addEventListener("status", e => {
+    const st = JSON.parse(e.data), was = S.state;
+    S.state = st.state; S.code = st.code; S.error = st.error;
+    if (JSON.stringify(st.carts) !== JSON.stringify(S.carts.map(c => ({ file: c.file, label: c.label })))) { S.carts = st.carts; buildTabs(); }
+    if (!S.swapping) { S.cart = st.cart; }
+    if (S.state !== "error") S.errImg = null;
+    if (st.state === "running" && was === "error") { S.cur = null; }
+    setLabel(); updateHud(); render();
+  });
+  es.addEventListener("frame", e => {
+    const bin = atob(e.data), d = S.cur && !S.curShared ? S.cur : new Uint8ClampedArray(W * H * 4);
+    for (let i = 0, j = 0, n = W * H; i < n; i++, j += 3) { const o = i * 4; d[o] = bin.charCodeAt(j); d[o + 1] = bin.charCodeAt(j + 1); d[o + 2] = bin.charCodeAt(j + 2); d[o + 3] = 255; }
+    S.cur = d; S.frameNo = +e.lastEventId;
+    if (S.mode === "live") {
+      if (!(S.frameNo & 7)) avgGlow(d);
+      if (!S.swapping && !splashActive()) render();
+      updateHudFast();
+    }
+  });
+  es.onerror = () => { /* the browser reconnects on its own */ };
+}
+function updateHudFast() { $("frame").textContent = "FRAME " + pad(S.frameNo, 6); }
+
+/* ---------- actions ---------- */
+function restart() {
+  if (S.mode === "live") {
+    S.cur = null; S.errImg = null; S.frameNo = -1;
+    post("/api/restart"); startSplash();
+  } else { S.ri = 0; S.playing = true; showReplay(); }
+  updateHud();
+}
+function swapCart(i) {
+  if (!S.live || S.swapping || i === S.cart || i < 0 || i >= S.carts.length) return;
+  S.mode = "live"; S.swapping = true; S.cur = null; S.errImg = null; S.frameNo = -1; S.state = "running";
+  post("/api/cart", { index: i });
+  const cartEl = $("cart");
+  const finish = () => {
+    S.cart = i; setLabel();
+    cartEl.classList.add("pre"); void cartEl.offsetWidth; cartEl.classList.remove("out", "pre");
+    setTimeout(() => { S.swapping = false; startSplash(); updateHud(); }, S.motion ? 300 : 0);
+  };
+  updateHud();
+  if (!S.motion) { finish(); return; }
+  cartEl.classList.add("out"); loop();
+  setTimeout(finish, 300);
+}
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen(); else root.requestFullscreen().catch(() => {});
+}
+
+/* ---------- replay: PNG folder or GIF (decoders as in player.html) ---------- */
+function toRGBA(img) {
+  const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+  const cx = c.getContext("2d"); cx.drawImage(img, 0, 0);
+  const sx = img.width / W, sy = img.height / H, src = cx.getImageData(0, 0, img.width, img.height).data;
+  const o = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const si = (Math.floor(y * sy + sy / 2) * img.width + Math.floor(x * sx + sx / 2)) * 4, di = (y * W + x) * 4;
+    o[di] = src[si]; o[di + 1] = src[si + 1]; o[di + 2] = src[si + 2]; o[di + 3] = 255;
+  }
+  return o;
+}
+function loadImage(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = rej; img.src = url;
+  });
+}
+function decodeGif(buf) {
+  const b = new Uint8Array(buf); let p = 0;
+  const u16 = () => { const v = b[p] | (b[p + 1] << 8); p += 2; return v; };
+  if (String.fromCharCode(...b.slice(0, 3)) !== "GIF") throw new Error("not a GIF");
+  p = 6; const sw = u16(), sh = u16(), flags = b[p++]; p += 2;
+  let gct = null;
+  if (flags & 0x80) { const n = 2 << (flags & 7); gct = b.slice(p, p + n * 3); p += n * 3; }
+  const canvasBuf = new Uint8ClampedArray(sw * sh * 4), outFrames = []; let transparent = -1;
+  while (p < b.length) {
+    const t = b[p++];
+    if (t === 0x3B) break;
+    if (t === 0x21) {
+      const label = b[p++];
+      if (label === 0xF9) { const len = b[p], pf = b[p + 1]; transparent = (pf & 1) ? b[p + 4] : -1; p += len + 1; }
+      while (b[p] !== 0) p += b[p] + 1;
+      p++; continue;
+    }
+    if (t !== 0x2C) throw new Error("bad GIF block");
+    const ix = u16(), iy = u16(), iw = u16(), ih = u16(), f2 = b[p++];
+    let ct = gct;
+    if (f2 & 0x80) { const n = 2 << (f2 & 7); ct = b.slice(p, p + n * 3); p += n * 3; }
+    const interlaced = !!(f2 & 0x40), minCode = b[p++], chunks = [];
+    while (b[p] !== 0) { chunks.push(b.slice(p + 1, p + 1 + b[p])); p += b[p] + 1; }
+    p++;
+    const data = new Uint8Array(chunks.reduce((a, c) => a + c.length, 0));
+    { let o = 0; for (const c of chunks) { data.set(c, o); o += c.length; } }
+    const clear = 1 << minCode, eoi = clear + 1;
+    let size = minCode + 1, next = eoi + 1, prev = null, dict = [];
+    const reset = () => { dict = []; for (let i = 0; i < clear; i++) dict[i] = [i]; dict[clear] = []; dict[eoi] = null; size = minCode + 1; next = eoi + 1; prev = null; };
+    reset();
+    const pixels = new Uint8Array(iw * ih); let pi = 0, bit = 0; const total = data.length * 8;
+    while (bit + size <= total) {
+      let code = 0;
+      for (let i = 0; i < size; i++, bit++) if (data[bit >> 3] & (1 << (bit & 7))) code |= 1 << i;
+      if (code === clear) { reset(); continue; }
+      if (code === eoi) break;
+      let entry;
+      if (code < next && dict[code]) entry = dict[code]; else if (prev) entry = prev.concat([prev[0]]); else break;
+      for (const v of entry) if (pi < pixels.length) pixels[pi++] = v;
+      if (prev && next < 4096) { dict[next++] = prev.concat([entry[0]]); if (next === (1 << size) && size < 12) size++; }
+      prev = entry;
+    }
+    const rowOrder = [];
+    if (interlaced) { for (const [s0, st] of [[0, 8], [4, 8], [2, 4], [1, 2]]) for (let r = s0; r < ih; r += st) rowOrder.push(r); }
+    else for (let r = 0; r < ih; r++) rowOrder.push(r);
+    for (let r = 0; r < ih; r++) for (let x = 0; x < iw; x++) {
+      const idx = pixels[r * iw + x]; if (idx === transparent) continue;
+      const di = ((iy + rowOrder[r]) * sw + ix + x) * 4;
+      canvasBuf[di] = ct[idx * 3]; canvasBuf[di + 1] = ct[idx * 3 + 1]; canvasBuf[di + 2] = ct[idx * 3 + 2]; canvasBuf[di + 3] = 255;
+    }
+    const c = document.createElement("canvas"); c.width = sw; c.height = sh;
+    c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(canvasBuf), sw, sh), 0, 0);
+    outFrames.push(c);
+  }
+  return outFrames;
+}
+async function loadFiles(list) {
+  const files = [...list], gif = files.find(f => /\.gif$/i.test(f.name));
+  let frames = [], name = "";
+  try {
+    if (gif) {
+      frames = decodeGif(await gif.arrayBuffer()).map(toRGBA); name = gif.name.replace(/\.gif$/i, "");
+    } else {
+      const pngs = files.filter(f => /\.png$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      for (const f of pngs) frames.push(toRGBA(await loadImage(f)));
+      name = ((pngs[0] && pngs[0].webkitRelativePath) || "").split("/")[0] || "FRAMES";
+    }
+  } catch (e) { frames = []; }
+  if (!frames.length) return;
+  S.frames = frames; S.ri = 0; S.playing = frames.length > 1; S.mode = "replay"; S.replayName = name;
+  S.racc = 0; S.rlast = performance.now(); S.cur = frames[0];
+  $("scrub").max = frames.length - 1; $("scrub").disabled = frames.length < 2;
+  setLabel(); showReplay(); startSplash(); updateHud(); replayLoop();
+}
+function showReplay() {
+  S.cur = S.frames[S.ri] || null; $("scrub").value = S.ri;
+  avgGlow(S.cur || BLACK);
+  if (!splashActive() && !S.swapping) render();
+  updateHud();
+}
+let rloop = false;
+function replayLoop() {
+  if (rloop) return; rloop = true;
+  const step = now => {
+    if (S.mode === "replay" && S.playing && S.frames.length > 1 && !splashActive()) {
+      S.racc += now - S.rlast;
+      const n = Math.floor(S.racc / (1000 / 60));
+      if (n > 0) { S.racc -= n * (1000 / 60); S.ri = (S.ri + n) % S.frames.length; showReplay(); }
+    }
+    S.rlast = now; requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+$("dirInput").onchange = e => loadFiles(e.target.files);
+$("fileInput").onchange = e => loadFiles(e.target.files);
+$("scrub").oninput = e => { S.playing = false; S.ri = +e.target.value; showReplay(); };
+$("playBtn").onclick = () => { S.playing = !S.playing; $("playBtn").blur(); updateHud(); };
+
+/* drag and drop of a folder, files or a GIF */
+let dragN = 0;
+addEventListener("dragenter", e => { e.preventDefault(); dragN++; document.body.classList.add("drag"); });
+addEventListener("dragleave", e => { e.preventDefault(); if (--dragN <= 0) { dragN = 0; document.body.classList.remove("drag"); } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", async e => {
+  e.preventDefault(); dragN = 0; document.body.classList.remove("drag");
+  const entries = [...(e.dataTransfer.items || [])].map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+  if (entries.some(en => en.isDirectory)) {
+    const files = [];
+    const walk = en => new Promise(res => {
+      if (en.isFile) en.file(f => { try { Object.defineProperty(f, "webkitRelativePath", { value: en.fullPath.replace(/^\//, "") }); } catch (_) {} files.push(f); res(); });
+      else { const rd = en.createReader(); const batch = () => rd.readEntries(async ents => { if (!ents.length) { res(); return; } for (const x of ents) await walk(x); batch(); }); batch(); }
+    });
+    for (const en of entries) await walk(en);
+    loadFiles(files);
+  } else loadFiles(e.dataTransfer.files);
+});
+
+/* ---------- keys ---------- */
+const KEYMAP = { ArrowUp: "UP", ArrowDown: "DOWN", ArrowLeft: "LEFT", ArrowRight: "RIGHT", KeyZ: "A", KeyX: "B", Enter: "START", ShiftLeft: "SELECT", ShiftRight: "SELECT" };
+addEventListener("keydown", e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target && e.target.tagName === "INPUT" && e.target.type === "range" && !(e.code in KEYMAP)) return;
+  const btn = KEYMAP[e.code];
+  if (e.code.startsWith("Arrow") || e.code === "Space" || e.code === "Enter") e.preventDefault();
+  if (S.mode === "replay" && e.code.startsWith("Arrow")) {
+    if (e.repeat && !S.frames.length) return;
+    if (S.frames.length && (e.code === "ArrowLeft" || e.code === "ArrowRight")) {
+      S.playing = false; S.ri = (S.ri + (e.code === "ArrowRight" ? 1 : -1) + S.frames.length) % S.frames.length; showReplay();
+    }
+    return;
+  }
+  if (btn) { S.kb.set(e.code, btn); pushKeys(); return; }
+  if (e.repeat) return;
+  switch (e.code) {
+    case "Space": if (S.mode === "replay") { S.playing = !S.playing; updateHud(); } break;
+    case "KeyR": restart(); break;
+    case "KeyM": S.motion = !S.motion; if (!S.motion) { S.splashEnd = 0; } updateHud(); render(); break;
+    case "KeyF": toggleFullscreen(); break;
+    case "KeyB": S.blank = !S.blank; updateHud(); render(); break;
+    case "KeyG": S.lcd = !S.lcd; updateHud(); break;
+    case "Digit1": swapCart(0); break;
+    case "Digit2": swapCart(1); break;
+    case "KeyL": if (S.live && S.mode !== "live") { S.mode = "live"; setLabel(); updateHud(); render(); pushKeys(); } break;
+    case "Home": if (S.mode === "replay") { S.ri = 0; showReplay(); } break;
+    case "End": if (S.mode === "replay" && S.frames.length) { S.ri = S.frames.length - 1; showReplay(); } break;
+  }
+});
+addEventListener("keyup", e => {
+  if (!KEYMAP[e.code]) return;
+  S.kb.delete(e.code);       // a button stays held while its other key (e.g. the other Shift) is down
+  pushKeys();
+});
+addEventListener("blur", () => { S.kb.clear(); S.ptr.clear(); pushKeys(); });
+document.querySelectorAll("[data-btn]").forEach(el => {
+  const b = el.dataset.btn;
+  el.addEventListener("pointerdown", e => { if (S.mode !== "live") return; e.preventDefault(); el.setPointerCapture(e.pointerId); S.ptr.add(b); pushKeys(); });
+  const up = () => { if (S.ptr.delete(b)) pushKeys(); };
+  el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+});
+
+/* ---------- start ---------- */
+addEventListener("resize", layout);
+document.addEventListener("fullscreenchange", () => setTimeout(layout, 50));
+layout(); setLabel(); updateHud(); startSplash(); render();
+if (location.protocol === "http:" || location.protocol === "https:") {
+  fetch("/api/status", { cache: "no-store" }).then(r => r.ok ? r.json() : Promise.reject()).then(st => {
+    S.live = true; S.mode = "live"; S.carts = st.carts; S.cart = st.cart; S.state = st.state; S.code = st.code; S.error = st.error;
+    buildTabs(); setLabel(); updateHud(); connect(); replayLoop();
+  }).catch(() => {});
+}
+window.__vesper = S;   // handy for the page's own checks
+})();
+</script>
+</body>
+</html>

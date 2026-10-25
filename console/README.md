@@ -1,0 +1,54 @@
+# VESPER-16 pixel console
+
+A pixel handheld in your browser. It shows your program live, or plays back saved frames.
+You need Python 3.9 or newer. You need no other package.
+
+## Live: play your program
+
+1. Open a terminal in the `vesper-16` folder.
+2. Run: `python console/play.py solutions/T3.vsa`
+3. The browser opens. Click the page once, then use the keys below.
+
+Give two programs to switch between them with the keys 1 and 2:
+
+    python console/play.py solutions/T3.vsa solutions/T6.vsa
+
+Options: `--vesper PATH` (use another emulator file), `--no-browser` (only print the address), `--port N`.
+Press Ctrl+C in the terminal to stop.
+
+If your program has an error, the console shows a red light and a dark screen.
+The error text from the emulator shows under the console. Fix the file, then press R.
+
+## Replay: look at saved frames
+
+1. Open `console/console.html` in the browser (double-click the file).
+2. Drop a folder of `frame_NNNN.png` files on the page, or drop a `.gif` file.
+   You can also use the "Open folder" and "Open PNG files / GIF" buttons.
+3. Press Space to pause or play. Use the left and right arrows to step.
+
+In replay the buttons on the console do not move. Replay never reads your key file.
+When the page is served by `play.py`, you can still drop frames. Press L to go back to live.
+
+## Keys
+
+| Key | Action |
+| --- | --- |
+| Arrow keys | D-pad |
+| Z / X | A / B |
+| Enter | START |
+| Shift | SELECT |
+| 1 / 2 | Change cartridge |
+| R | Restart (live) or go to frame 0 (replay) |
+| Space | Play / pause (replay) |
+| M | Motion off (no slide, splash or pulse) |
+| F | Full screen |
+| B | Blank screen |
+| G | LCD grid and glow on or off |
+| L | Back to live (when served by `play.py`) |
+
+## Files
+
+- `play.py` - the launcher and small web server.
+- `console.html` - the page (one file, works offline). Built from `console.src.html`.
+- `build_console.py` - rebuilds `console.html` with the background picture from `assets/workbench.webp`.
+- `tests/` - tests and a fake emulator for them.
