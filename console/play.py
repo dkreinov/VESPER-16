@@ -339,7 +339,7 @@ def main(argv=None):
     ap.add_argument("programs", nargs="+", help="one or two .vsa programs (keys 1 and 2 switch)")
     ap.add_argument("--vesper", default=None, help="path to the vesper program (default: bin/vesper[.exe])")
     ap.add_argument("--no-browser", action="store_true", help="do not open the browser")
-    ap.add_argument("--port", type=int, default=0, help="port (default: any free port)")
+    ap.add_argument("--port", type=int, default=8765, help="port (default: 8765, or any free port if it is busy)")
     args = ap.parse_args(argv)
 
     for p in args.programs:
@@ -350,7 +350,13 @@ def main(argv=None):
         print(f"warning: emulator not found: {vesper}", file=sys.stderr)
 
     runner = Runner(args.programs, vesper)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(runner, HERE / "console.html"))
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(runner, HERE / "console.html"))
+    except OSError:
+        if args.port == 0:
+            raise
+        print(f"port {args.port} is busy, using a free port", file=sys.stderr)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(runner, HERE / "console.html"))
     server.daemon_threads = True
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     runner.start(0)

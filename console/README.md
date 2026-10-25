@@ -13,7 +13,7 @@ Give two programs to switch between them with the keys 1 and 2:
 
     python console/play.py solutions/T3.vsa solutions/T6.vsa
 
-Options: `--vesper PATH` (use another emulator file), `--no-browser` (only print the address), `--port N`.
+Options: `--vesper PATH` (use another emulator file), `--no-browser` (only print the address), `--port N` (default 8765).
 Press Ctrl+C in the terminal to stop.
 
 If your program has an error, the console shows a red light and a dark screen.
@@ -52,3 +52,7 @@ When the page is served by `play.py`, you can still drop frames. Press L to go b
 - `console.html` - the page (one file, works offline). Built from `console.src.html`.
 - `build_console.py` - rebuilds `console.html` with the background picture from `assets/workbench.webp`.
 - `tests/` - tests and a fake emulator for them.
+
+## For the presenter
+
+`python console/build_console.py --deck DIR` builds `DIR/VESPER-Console.html` from recorded frames and button lines listed in `DIR/demos.json`. It writes only into DIR. See the docstring in `build_console.py`.

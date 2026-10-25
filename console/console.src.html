@@ -6,6 +6,7 @@
 <title>VESPER-16 console</title>
 <style>
   :root {
+    --f: clamp(12px, min(1.3vw, 2.3vh), 30px);   /* text size: follows the window */
     --p: 4px;                 /* one art pixel; set by script (integer) */
     --s: 8px;                 /* one screen pixel = 2 art pixels */
     --glow: rgba(60,80,140,.25);
@@ -15,25 +16,25 @@
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; overflow: hidden; background: #090b14; color: var(--ink);
-    font: 16px/1.3 ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace; }
+    font: var(--f)/1.3 ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace; }
   body::before { content: ""; position: fixed; inset: -4%; z-index: 0;
     background: #0b0d18 url("__WORKBENCH_DATA_URI__") 62% 50% / cover no-repeat;
     filter: blur(9px) brightness(.5) saturate(.85); }
   body::after { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
     background: radial-gradient(ellipse at 50% 46%, rgba(9,11,20,0) 25%, rgba(9,11,20,.72) 100%); }
-  #app { position: relative; z-index: 1; height: 100%; display: grid; grid-template-rows: 36px 1fr 84px; padding: 0 16px; }
+  #app { position: relative; z-index: 1; height: 100%; display: grid; grid-template-rows: calc(var(--f) * 2.3) 1fr calc(var(--f) * 5.8); padding: 0 16px; }
 
   /* ---------- top bar */
   #top { display: flex; align-items: center; gap: 18px; letter-spacing: .08em; font-weight: 700; white-space: nowrap; overflow: hidden; }
   #status { display: flex; align-items: center; gap: 10px; }
-  #dot { width: 12px; height: 12px; background: #555; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
+  #dot { width: .75em; height: .75em; background: #555; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
   #dot.live { background: var(--green); box-shadow: 0 0 10px var(--green); }
   #dot.replay { background: var(--orange); box-shadow: 0 0 10px var(--orange); }
   #dot.err { background: var(--red); box-shadow: 0 0 10px var(--red); }
   #frame { color: var(--muted); font-weight: 400; }
   #spacer { flex: 1; }
   .tab { appearance: none; border: 2px solid rgba(255,255,255,.16); background: rgba(10,12,22,.55); color: var(--muted);
-    font: inherit; font-weight: 700; padding: 1px 10px; cursor: pointer; letter-spacing: .06em; }
+    font: inherit; font-weight: 700; padding: 1px .6em; cursor: pointer; letter-spacing: .06em; }
   .tab b { color: var(--orange); margin-right: 6px; }
   .tab.on { color: var(--ink); border-color: var(--orange); }
   .tag { color: var(--orange); font-weight: 700; }
@@ -106,25 +107,28 @@
   body.nomotion *, body.nomotion *::before { animation: none !important; transition: none !important; }
 
   /* ---------- footer */
-  #foot { padding-top: 6px; overflow: hidden; text-align: center; }
-  #hint { font-size: 15px; color: var(--muted); line-height: 1.7; text-shadow: 0 1px 2px #000; }
+  #foot { padding-top: .3em; overflow: hidden; text-align: center; }
+  #hint { font-size: .95em; color: var(--muted); line-height: 1.7; text-shadow: 0 1px 2px #000; }
   kbd { font: inherit; font-weight: 700; color: var(--ink); background: rgba(10,12,22,.7); border: 1px solid rgba(255,255,255,.25);
-        border-bottom-width: 3px; padding: 0 6px; margin: 0 2px; }
+        border-bottom-width: 3px; padding: 0 .4em; margin: 0 .12em; }
   #tools { display: none; align-items: center; justify-content: center; gap: 10px; margin-top: 4px; }
   body.replay #tools { display: flex; }
+  body.deck #tools { display: none; }
+  #note:empty { display: none; }
+  #note { color: var(--orange); font-weight: 700; text-shadow: 0 1px 2px #000; }
   .btn2 { appearance: none; border: 2px solid rgba(255,255,255,.22); background: rgba(10,12,22,.65); color: var(--ink);
-    font: inherit; font-size: 14px; font-weight: 700; padding: 2px 12px; cursor: pointer; letter-spacing: .04em; }
+    font: inherit; font-size: .9em; font-weight: 700; padding: 2px .8em; cursor: pointer; letter-spacing: .04em; }
   .btn2:hover { border-color: var(--orange); }
   .btn2 input { display: none; }
   #scrub { width: min(40vw, 460px); accent-color: var(--orange); }
-  #errbox { display: none; text-align: left; max-width: 900px; margin: 0 auto; background: rgba(40,4,10,.82);
-    border: 2px solid var(--red); padding: 4px 12px; height: 72px; overflow: hidden; }
+  #errbox { display: none; text-align: left; max-width: 60em; margin: 0 auto; background: rgba(40,4,10,.82);
+    border: 2px solid var(--red); padding: .25em .8em; height: calc(var(--f) * 5.2); overflow: hidden; }
   #errbox b { color: var(--red); letter-spacing: .08em; }
-  #errbox pre { margin: 2px 0 0; font: inherit; font-size: 15px; line-height: 1.3; white-space: pre-wrap; color: #ffd7d9; max-height: 3.9em; overflow: hidden; }
+  #errbox pre { margin: 2px 0 0; font: inherit; font-size: .95em; line-height: 1.3; white-space: pre-wrap; color: #ffd7d9; max-height: 3.4em; overflow: hidden; }
   body.err #errbox { display: block; }
   body.err #hint, body.err #tools { display: none; }
   #veil { position: fixed; inset: 0; z-index: 5; display: none; place-items: center; background: rgba(6,8,16,.7);
-    font-size: 30px; font-weight: 700; letter-spacing: .12em; color: var(--orange); border: 4px dashed var(--orange); }
+    font-size: 2em; font-weight: 700; letter-spacing: .12em; color: var(--orange); border: 4px dashed var(--orange); }
   body.drag #veil { display: grid; }
 </style>
 </head>
@@ -195,6 +199,7 @@
 
   <div id="foot">
     <div id="hint"></div>
+    <div id="note"></div>
     <div id="tools">
       <label class="btn2">Open folder<input type="file" id="dirInput" webkitdirectory directory multiple></label>
       <label class="btn2">Open PNG files / GIF<input type="file" id="fileInput" accept=".png,.gif,image/png,image/gif" multiple></label>
@@ -206,6 +211,7 @@
 </div>
 <div id="veil">DROP FRAMES OR A GIF</div>
 
+<script id="deckdata" type="application/json">__DECK_DATA__</script>
 <script>
 (() => {
 "use strict";
@@ -446,7 +452,8 @@ function hints() {
     h = `${k("&larr;&uarr;&darr;&rarr;")} D-pad ${k("Z")} A ${k("X")} B ${k("Enter")} START ${k("Shift")} SELECT<br>` +
         `${S.carts.length > 1 ? k("1") + k("2") + " cartridge " : ""}${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank`;
   } else {
-    h = `${k("Space")} play/pause ${k("&larr;")}${k("&rarr;")} step ${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank${S.live ? " " + k("L") + " live" : ""}`;
+    if (S.deck) h = `${k("Space")} play/pause ${k("&larr;")}${k("&rarr;")} step ${k("1")}${k("2")} cartridge ${k("R")} restart ${k("L")} live<br>${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank`;
+    else h = `${k("Space")} play/pause ${k("&larr;")}${k("&rarr;")} step ${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank${S.live ? " " + k("L") + " live" : ""}`;
   }
   if ($("hint").dataset.h !== h) { $("hint").innerHTML = h; $("hint").dataset.h = h; }
 }
@@ -476,6 +483,7 @@ function post(path, body) {
 }
 function heldSet() { return new Set([...S.kb.values(), ...S.ptr]); }
 function pushKeys() {
+  if (S.deck && S.mode !== "live") return;
   const held = [...heldSet()];
   document.querySelectorAll("[data-btn]").forEach(el => el.classList.toggle("down", S.mode === "live" && held.includes(el.dataset.btn)));
   if (!S.live) return;
@@ -518,7 +526,9 @@ function restart() {
   updateHud();
 }
 function swapCart(i) {
-  if (!S.live || S.swapping || i === S.cart || i < 0 || i >= S.carts.length) return;
+  if (S.swapping || i === S.cart || i < 0 || i >= S.carts.length) return;
+  if (S.deck) { swapDeck(i); return; }
+  if (!S.live) return;
   S.mode = "live"; S.swapping = true; S.cur = null; S.errImg = null; S.frameNo = -1; S.state = "running";
   post("/api/cart", { index: i });
   const cartEl = $("cart");
@@ -531,6 +541,63 @@ function swapCart(i) {
   if (!S.motion) { finish(); return; }
   cartEl.classList.add("out"); loop();
   setTimeout(finish, 300);
+}
+/* ---------- deck: recorded demos with the button presses ---------- */
+const BTN_ORDER = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "SELECT", "START"];
+function setDown(list) {
+  document.querySelectorAll("[data-btn]").forEach(el => el.classList.toggle("down", list.includes(el.dataset.btn)));
+}
+async function inflate(b64) {
+  const bin = atob(b64), u = new Uint8Array(bin.length);
+  for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i);
+  const st = new Blob([u]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(st).arrayBuffer());
+}
+async function decodeCart(c) {          // data = deflate(frame 0, then XOR of each frame with the one before, then one button byte per frame)
+  const raw = await inflate(c.data), n = c.frames, FB = W * H * 3, prev = new Uint8Array(FB), frames = [], btns = [];
+  for (let f = 0; f < n; f++) {
+    const rgba = new Uint8ClampedArray(W * H * 4), base = f * FB;
+    for (let i = 0; i < FB; i++) prev[i] ^= raw[base + i];
+    for (let i = 0, j = 0, o = 0; i < W * H; i++, j += 3, o += 4) { rgba[o] = prev[j]; rgba[o + 1] = prev[j + 1]; rgba[o + 2] = prev[j + 2]; rgba[o + 3] = 255; }
+    frames.push(rgba);
+    const m = raw[n * FB + f]; btns.push(BTN_ORDER.filter((_, b) => (m >> b) & 1));
+  }
+  return { frames, btns };
+}
+async function loadDeckCart(i) {
+  const d = await S.deckCarts[i];
+  S.frames = d.frames; S.btns = d.btns; S.ri = 0; S.playing = true; S.mode = "replay"; S.replayName = S.carts[i].label;
+  S.racc = 0; S.rlast = performance.now(); S.cur = d.frames[0];
+  $("scrub").max = d.frames.length - 1; $("scrub").disabled = false;
+}
+function swapDeck(i) {
+  S.swapping = true; updateHud();
+  const cartEl = $("cart"), loaded = loadDeckCart(i);
+  const finish = async () => {
+    await loaded; S.cart = i; S.ri = 0; S.racc = 0; setLabel(); showReplay();
+    cartEl.classList.add("pre"); void cartEl.offsetWidth; cartEl.classList.remove("out", "pre");
+    setTimeout(() => { S.swapping = false; startSplash(); updateHud(); }, S.motion ? 300 : 0);
+  };
+  if (!S.motion) { finish(); return; }
+  cartEl.classList.add("out"); loop();
+  setTimeout(finish, 300);
+}
+let noteTimer = 0;
+function note(t) { $("note").textContent = t; clearTimeout(noteTimer); noteTimer = setTimeout(() => { $("note").textContent = ""; }, 6000); }
+function tryLive() {
+  const port = new URLSearchParams(location.search).get("port") || "8765", url = `http://127.0.0.1:${port}/`;
+  note("Looking for the live console ...");
+  fetch(url + "api/status", { mode: "no-cors", cache: "no-store" })
+    .then(() => { location.href = url; })
+    .catch(() => note(`Start play.py for live: python console/play.py PROGRAM --port ${port}`));
+}
+async function initDeck(deck) {
+  S.deck = true; document.body.classList.add("deck");
+  S.carts = deck.carts.map(c => ({ file: "", label: c.label }));
+  S.deckCarts = deck.carts.map(decodeCart);
+  buildTabs(); S.cart = 0;
+  await loadDeckCart(0);
+  setLabel(); showReplay(); startSplash(); updateHud(); replayLoop();
 }
 function toggleFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen(); else root.requestFullscreen().catch(() => {});
@@ -631,6 +698,7 @@ async function loadFiles(list) {
 }
 function showReplay() {
   S.cur = S.frames[S.ri] || null; $("scrub").value = S.ri;
+  if (S.deck && S.btns) setDown(S.btns[S.ri] || []);
   avgGlow(S.cur || BLACK);
   if (!splashActive() && !S.swapping) render();
   updateHud();
@@ -639,7 +707,7 @@ let rloop = false;
 function replayLoop() {
   if (rloop) return; rloop = true;
   const step = now => {
-    if (S.mode === "replay" && S.playing && S.frames.length > 1 && !splashActive()) {
+    if (S.mode === "replay" && S.playing && S.frames.length > 1 && !splashActive() && !S.swapping) {
       S.racc += now - S.rlast;
       const n = Math.floor(S.racc / (1000 / 60));
       if (n > 0) { S.racc -= n * (1000 / 60); S.ri = (S.ri + n) % S.frames.length; showReplay(); }
@@ -697,7 +765,7 @@ addEventListener("keydown", e => {
     case "KeyG": S.lcd = !S.lcd; updateHud(); break;
     case "Digit1": swapCart(0); break;
     case "Digit2": swapCart(1); break;
-    case "KeyL": if (S.live && S.mode !== "live") { S.mode = "live"; setLabel(); updateHud(); render(); pushKeys(); } break;
+    case "KeyL": if (S.deck) tryLive(); else if (S.live && S.mode !== "live") { S.mode = "live"; setLabel(); updateHud(); render(); pushKeys(); } break;
     case "Home": if (S.mode === "replay") { S.ri = 0; showReplay(); } break;
     case "End": if (S.mode === "replay" && S.frames.length) { S.ri = S.frames.length - 1; showReplay(); } break;
   }
@@ -719,6 +787,7 @@ document.querySelectorAll("[data-btn]").forEach(el => {
 addEventListener("resize", layout);
 document.addEventListener("fullscreenchange", () => setTimeout(layout, 50));
 layout(); setLabel(); updateHud(); startSplash(); render();
+{ const deck = JSON.parse($("deckdata").textContent); if (deck) initDeck(deck); }
 if (location.protocol === "http:" || location.protocol === "https:") {
   fetch("/api/status", { cache: "no-store" }).then(r => r.ok ? r.json() : Promise.reject()).then(st => {
     S.live = true; S.mode = "live"; S.carts = st.carts; S.cart = st.cart; S.state = st.state; S.code = st.code; S.error = st.error;
