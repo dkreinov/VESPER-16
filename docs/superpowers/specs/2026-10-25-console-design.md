@@ -34,7 +34,7 @@ other machine detail. Python and HTML know only the public button names
      light), background = workbench art (`effective-skills/vesper-directions/assets/pixel.png`,
      dimmed, blurred, embedded as data URI, compressed ≤ 400 KB). Screen exactly 4:3, integer pixel
      scale, `image-rendering: pixelated`. Subtle LCD grid + glow, toggle G.
-   - D-pad, A, B, SELECT, START press down 2 px and glow orange while held (live and replay is
+   - D-pad, A, B, SELECT, START press down 2 px and glow orange while held, only
      in LIVE mode. REPLAY mode does not read key files (that would need the format), so the
      buttons stay still there.
    - Cartridge label on top edge: "T3 SQUASH" / "T6 NAMEPLATE" (or the file name). Keys 1/2 slide
