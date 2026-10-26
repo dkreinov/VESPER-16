@@ -47,7 +47,13 @@ other machine detail. Python and HTML know only the public button names
      the console. R restarts.
    - Keys: arrows = D-pad, Z = A, X = B, Enter = START, Shift = SELECT. Deck keys: Space
      play/pause (replay), R restart, M motion off (no slide/splash/pulse), F fullscreen,
-     B blank, G LCD effect, 1/2 cartridge, L try live (when served).
+     B blank, G LCD effects, 1/2 cartridge, L try live (when served), +/- speed.
+   Afterglow and speed: with LCD effects on, each displayed frame is `max(new, previous * 0.70)` per
+   channel (frame-driven, about 100 ms to fade, static pixels exact; paused or stepped frames are
+   exact; restart and cartridge swap clear it). Keys + and - (also numpad) step the rate through
+   30, 60, 90, 120 fps. Live: `POST /api/speed {fps}` (400 for other values, same Host/Origin
+   checks), status carries `fps`; replay and deck: the playback rate. The page knows only button
+   names and RGB frames.
 4. **Deck copy** — a folder outside this repository: built `console.html` with two embedded
    replays (T3 and T6, recorded with `vesper-play`). Recordings and screenshots of finished
    solutions stay in that folder and never enter this repository.

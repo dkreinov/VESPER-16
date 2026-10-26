@@ -45,8 +45,11 @@ When the page is served by `play.py`, you can still drop frames. Press L to go b
 | M | Motion off (no slide, splash or pulse) |
 | F | Full screen |
 | B | Blank screen |
-| G | LCD grid and glow on or off |
+| G | All LCD effects on or off (grid, glow, afterglow) |
+| + / = and - / _ (also numpad) | Speed 30, 60, 90 or 120 fps (live and replay). The status line shows it when it is not 60. |
 | L | Back to live (when served by `play.py`) |
+
+Afterglow: each screen pixel fades from its old colour over about 100 ms (6 emulator frames), so a one-frame touch shows as a short flash. It follows the emulator frames, not the clock. When paused, stepping or scrubbing, the page shows the exact frame. Static pixels keep their exact colour.
 
 ## Files
 

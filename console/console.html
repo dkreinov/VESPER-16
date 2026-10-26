@@ -338,7 +338,24 @@ const S = {
   cur: null, errImg: null, frameNo: -1, swapping: false, splashStart: 0, splashEnd: 0,
   frames: [], ri: 0, playing: true, rlast: 0, racc: 0,
   kb: new Map(), ptr: new Set(),
+  fps: 60, ph: null, ghost: null,
 };
+const SPEEDS = [30, 60, 90, 120];
+/* Afterglow (LCD ghosting). Frame-driven: one step per emulator frame, never per wall-clock tick.
+   out = max(new, previous * GLOW_DECAY) per channel. A static pixel equals its own new value, so it stays exact. */
+const GLOW_DECAY = 0.70;   /* per frame: 1-frame flash = 70, 49, 34, 24, 17 % ...; about 100 ms (6 frames) to fade out */
+function glowStep(src) {   /* src: RGBA, returns the displayed RGBA (reused buffer) */
+  if (!S.ph) { S.ph = new Float32Array(W * H * 3); S.ghost = new Uint8ClampedArray(W * H * 4); for (let i = 3; i < S.ghost.length; i += 4) S.ghost[i] = 255; for (let i = 0, j = 0; i < S.ph.length; i += 3, j += 4) { S.ph[i] = src[j]; S.ph[i + 1] = src[j + 1]; S.ph[i + 2] = src[j + 2]; } }
+  const ph = S.ph, g = S.ghost;
+  for (let i = 0, j = 0; i < ph.length; i += 3, j += 4) {
+    for (let c = 0; c < 3; c++) {
+      const n = src[j + c], d = ph[i + c] * GLOW_DECAY, v = n > d ? n : d;
+      ph[i + c] = v; g[j + c] = Math.round(v);
+    }
+  }
+  return g;
+}
+function glowReset() { S.ph = null; S.ghost = null; }
 const lcd = $("lcd"), lctx = lcd.getContext("2d"), gctx = $("glow").getContext("2d");
 const out = new ImageData(W, H);
 const BLACK = new Uint8ClampedArray(W * H * 4); for (let i = 3; i < BLACK.length; i += 4) BLACK[i] = 255;
@@ -400,7 +417,7 @@ function render() {
   if (S.blank || S.swapping) src = BLACK;
   else if (splashActive()) src = splashFrame(performance.now());
   else if (S.mode === "live" && S.state === "error") src = errorFrame();
-  else if (S.cur) src = S.cur;
+  else if (S.cur) src = (S.lcd && S.ghost) ? S.ghost : S.cur;
   else src = idleFrame();
   paint(src);
 }
@@ -437,6 +454,7 @@ function updateHud() {
   else $("frame").textContent = S.frames.length ? `FRAME ${S.ri} / ${S.frames.length - 1}` : "NO FRAMES";
   const tags = [];
   if (!S.motion) tags.push("MOTION OFF"); if (S.blank) tags.push("BLANK"); if (!S.lcd) tags.push("LCD OFF");
+  if (S.fps !== 60) tags.push("&times;" + S.fps / 60);
   $("tags").innerHTML = tags.map(t => `<span class="tag">${t}</span>`).join(" &nbsp; ");
   $("playBtn").textContent = S.playing ? "Pause" : "Play";
   if (err) {
@@ -450,10 +468,10 @@ function hints() {
   let h;
   if (S.mode === "live") {
     h = `${k("&larr;&uarr;&darr;&rarr;")} D-pad ${k("Z")} A ${k("X")} B ${k("Enter")} START ${k("Shift")} SELECT<br>` +
-        `${S.carts.length > 1 ? k("1") + k("2") + " cartridge " : ""}${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank`;
+        `${S.carts.length > 1 ? k("1") + k("2") + " cartridge " : ""}${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD effects ${k("B")} blank ${k("+")}${k("-")} speed`;
   } else {
-    if (S.deck) h = `${k("Space")} play/pause ${k("&larr;")}${k("&rarr;")} step ${k("1")}${k("2")} cartridge ${k("R")} restart ${k("L")} live<br>${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank`;
-    else h = `${k("Space")} play/pause ${k("&larr;")}${k("&rarr;")} step ${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD ${k("B")} blank${S.live ? " " + k("L") + " live" : ""}`;
+    if (S.deck) h = `${k("Space")} play/pause ${k("&larr;")}${k("&rarr;")} step ${k("1")}${k("2")} cartridge ${k("R")} restart ${k("L")} live<br>${k("M")} motion ${k("F")} full screen ${k("G")} LCD effects ${k("B")} blank ${k("+")}${k("-")} speed`;
+    else h = `${k("Space")} play/pause ${k("&larr;")}${k("&rarr;")} step ${k("R")} restart ${k("M")} motion ${k("F")} full screen ${k("G")} LCD effects ${k("B")} blank ${k("+")}${k("-")} speed${S.live ? " " + k("L") + " live" : ""}`;
   }
   if ($("hint").dataset.h !== h) { $("hint").innerHTML = h; $("hint").dataset.h = h; }
 }
@@ -497,16 +515,18 @@ function connect() {
   es.addEventListener("status", e => {
     const st = JSON.parse(e.data), was = S.state;
     S.state = st.state; S.code = st.code; S.error = st.error;
+    if (st.fps && S.mode === "live") S.fps = st.fps;
     if (JSON.stringify(st.carts) !== JSON.stringify(S.carts.map(c => ({ file: c.file, label: c.label })))) { S.carts = st.carts; buildTabs(); }
     if (!S.swapping) { S.cart = st.cart; }
     if (S.state !== "error") S.errImg = null;
-    if (st.state === "running" && was === "error") { S.cur = null; }
+    if (st.state === "running" && was === "error") { S.cur = null; glowReset(); }
     setLabel(); updateHud(); render();
   });
   es.addEventListener("frame", e => {
     const bin = atob(e.data), d = S.cur && !S.curShared ? S.cur : new Uint8ClampedArray(W * H * 4);
     for (let i = 0, j = 0, n = W * H; i < n; i++, j += 3) { const o = i * 4; d[o] = bin.charCodeAt(j); d[o + 1] = bin.charCodeAt(j + 1); d[o + 2] = bin.charCodeAt(j + 2); d[o + 3] = 255; }
     S.cur = d; S.frameNo = +e.lastEventId;
+    if (S.lcd) glowStep(d);
     if (S.mode === "live") {
       if (!(S.frameNo & 7)) avgGlow(d);
       if (!S.swapping && !splashActive()) render();
@@ -520,16 +540,16 @@ function updateHudFast() { $("frame").textContent = "FRAME " + pad(S.frameNo, 6)
 /* ---------- actions ---------- */
 function restart() {
   if (S.mode === "live") {
-    S.cur = null; S.errImg = null; S.frameNo = -1;
+    S.cur = null; S.errImg = null; S.frameNo = -1; glowReset();
     post("/api/restart"); startSplash();
-  } else { S.ri = 0; S.playing = true; showReplay(); }
+  } else { S.ri = 0; S.playing = true; glowReset(); showReplay(); }
   updateHud();
 }
 function swapCart(i) {
   if (S.swapping || i === S.cart || i < 0 || i >= S.carts.length) return;
   if (S.deck) { swapDeck(i); return; }
   if (!S.live) return;
-  S.mode = "live"; S.swapping = true; S.cur = null; S.errImg = null; S.frameNo = -1; S.state = "running";
+  S.mode = "live"; S.swapping = true; S.cur = null; glowReset(); S.errImg = null; S.frameNo = -1; S.state = "running";
   post("/api/cart", { index: i });
   const cartEl = $("cart");
   const finish = () => {
@@ -567,14 +587,14 @@ async function decodeCart(c) {          // data = deflate(frame 0, then XOR of e
 async function loadDeckCart(i) {
   const d = await S.deckCarts[i];
   S.frames = d.frames; S.btns = d.btns; S.ri = 0; S.playing = true; S.mode = "replay"; S.replayName = S.carts[i].label;
-  S.racc = 0; S.rlast = performance.now(); S.cur = d.frames[0];
+  S.racc = 0; S.rlast = performance.now(); S.cur = d.frames[0]; glowReset();
   $("scrub").max = d.frames.length - 1; $("scrub").disabled = false;
 }
 function swapDeck(i) {
   S.swapping = true; updateHud();
   const cartEl = $("cart"), loaded = loadDeckCart(i);
   const finish = async () => {
-    await loaded; S.cart = i; S.ri = 0; S.racc = 0; setLabel(); showReplay();
+    await loaded; S.cart = i; S.ri = 0; S.racc = 0; glowReset(); setLabel(); showReplay();
     cartEl.classList.add("pre"); void cartEl.offsetWidth; cartEl.classList.remove("out", "pre");
     setTimeout(() => { S.swapping = false; startSplash(); updateHud(); }, S.motion ? 300 : 0);
   };
@@ -692,15 +712,24 @@ async function loadFiles(list) {
   } catch (e) { frames = []; }
   if (!frames.length) return;
   S.frames = frames; S.ri = 0; S.playing = frames.length > 1; S.mode = "replay"; S.replayName = name;
-  S.racc = 0; S.rlast = performance.now(); S.cur = frames[0];
+  S.racc = 0; S.rlast = performance.now(); S.cur = frames[0]; glowReset();
   $("scrub").max = frames.length - 1; $("scrub").disabled = frames.length < 2;
   setLabel(); showReplay(); startSplash(); updateHud(); replayLoop();
 }
-function showReplay() {
+function showReplay(adv) {   /* adv: frames the player just stepped over while playing; 0 = exact frame (pause, step, scrub) */
   S.cur = S.frames[S.ri] || null; $("scrub").value = S.ri;
+  if (adv && S.cur && S.lcd) {
+    for (let k = adv - 1; k >= 1; k--) glowStep(S.frames[(S.ri - k + S.frames.length) % S.frames.length]);
+    glowStep(S.cur);
+  } else glowReset();
   if (S.deck && S.btns) setDown(S.btns[S.ri] || []);
   avgGlow(S.cur || BLACK);
   if (!splashActive() && !S.swapping) render();
+  updateHud();
+}
+function togglePlay() {   /* pausing shows the exact frame, without afterglow */
+  S.playing = !S.playing;
+  if (!S.playing) { glowReset(); render(); }
   updateHud();
 }
 let rloop = false;
@@ -709,8 +738,8 @@ function replayLoop() {
   const step = now => {
     if (S.mode === "replay" && S.playing && S.frames.length > 1 && !splashActive() && !S.swapping) {
       S.racc += now - S.rlast;
-      const n = Math.floor(S.racc / (1000 / 60));
-      if (n > 0) { S.racc -= n * (1000 / 60); S.ri = (S.ri + n) % S.frames.length; showReplay(); }
+      const dt = 1000 / S.fps, n = Math.floor(S.racc / dt);
+      if (n > 0) { S.racc -= n * dt; S.ri = (S.ri + n) % S.frames.length; showReplay(Math.min(n, 6)); }
     }
     S.rlast = now; requestAnimationFrame(step);
   };
@@ -719,7 +748,7 @@ function replayLoop() {
 $("dirInput").onchange = e => loadFiles(e.target.files);
 $("fileInput").onchange = e => loadFiles(e.target.files);
 $("scrub").oninput = e => { S.playing = false; S.ri = +e.target.value; showReplay(); };
-$("playBtn").onclick = () => { S.playing = !S.playing; $("playBtn").blur(); updateHud(); };
+$("playBtn").onclick = () => { togglePlay(); $("playBtn").blur(); };
 
 /* drag and drop of a folder, files or a GIF */
 let dragN = 0;
@@ -740,6 +769,15 @@ addEventListener("drop", async e => {
   } else loadFiles(e.dataTransfer.files);
 });
 
+/* ---------- speed ---------- */
+function changeSpeed(dir) {
+  const i = Math.max(0, Math.min(SPEEDS.length - 1, SPEEDS.indexOf(S.fps) + dir));
+  if (SPEEDS[i] === S.fps) return;
+  S.fps = SPEEDS[i]; S.racc = 0;
+  if (S.live && S.mode === "live") post("/api/speed", { fps: S.fps });
+  updateHud();
+}
+
 /* ---------- keys ---------- */
 const KEYMAP = { ArrowUp: "UP", ArrowDown: "DOWN", ArrowLeft: "LEFT", ArrowRight: "RIGHT", KeyZ: "A", KeyX: "B", Enter: "START", ShiftLeft: "SELECT", ShiftRight: "SELECT" };
 addEventListener("keydown", e => {
@@ -757,15 +795,17 @@ addEventListener("keydown", e => {
   if (btn) { S.kb.set(e.code, btn); pushKeys(); return; }
   if (e.repeat) return;
   switch (e.code) {
-    case "Space": if (S.mode === "replay") { S.playing = !S.playing; updateHud(); } break;
+    case "Space": if (S.mode === "replay") togglePlay(); break;
     case "KeyR": restart(); break;
     case "KeyM": S.motion = !S.motion; if (!S.motion) { S.splashEnd = 0; } updateHud(); render(); break;
     case "KeyF": toggleFullscreen(); break;
     case "KeyB": S.blank = !S.blank; updateHud(); render(); break;
-    case "KeyG": S.lcd = !S.lcd; updateHud(); break;
+    case "KeyG": S.lcd = !S.lcd; glowReset(); if (S.lcd && S.mode === "live" && S.cur) glowStep(S.cur); updateHud(); render(); break;
+    case "Equal": case "NumpadAdd": changeSpeed(1); break;
+    case "Minus": case "NumpadSubtract": changeSpeed(-1); break;
     case "Digit1": swapCart(0); break;
     case "Digit2": swapCart(1); break;
-    case "KeyL": if (S.deck) tryLive(); else if (S.live && S.mode !== "live") { S.mode = "live"; setLabel(); updateHud(); render(); pushKeys(); } break;
+    case "KeyL": if (S.deck) tryLive(); else if (S.live && S.mode !== "live") { S.mode = "live"; glowReset(); post("/api/speed", { fps: S.fps }); setLabel(); updateHud(); render(); pushKeys(); } break;
     case "Home": if (S.mode === "replay") { S.ri = 0; showReplay(); } break;
     case "End": if (S.mode === "replay" && S.frames.length) { S.ri = S.frames.length - 1; showReplay(); } break;
   }
@@ -790,7 +830,7 @@ layout(); setLabel(); updateHud(); startSplash(); render();
 { const deck = JSON.parse($("deckdata").textContent); if (deck) initDeck(deck); }
 if (location.protocol === "http:" || location.protocol === "https:") {
   fetch("/api/status", { cache: "no-store" }).then(r => r.ok ? r.json() : Promise.reject()).then(st => {
-    S.live = true; S.mode = "live"; S.carts = st.carts; S.cart = st.cart; S.state = st.state; S.code = st.code; S.error = st.error;
+    S.live = true; S.mode = "live"; if (st.fps) S.fps = st.fps; S.carts = st.carts; S.cart = st.cart; S.state = st.state; S.code = st.code; S.error = st.error;
     buildTabs(); setLabel(); updateHud(); connect(); replayLoop();
   }).catch(() => {});
 }

@@ -69,6 +69,29 @@ class RunnerTests(Base):
         rate = (r.frame_no - a) / (time.time() - t0)
         self.assertTrue(35 < rate < 75, rate)
 
+    def test_speed_changes_pacing(self):
+        r = self.runner(self.prog("T3.vsa"))
+        self.assertTrue(wait_for(lambda: r.frame_no >= 0))
+        r.set_fps(30)
+        time.sleep(0.2)
+        a, t0 = r.frame_no, time.time()
+        time.sleep(2.0)
+        slow = (r.frame_no - a) / (time.time() - t0)
+        self.assertTrue(18 < slow < 42, slow)
+        r.set_fps(90)
+        time.sleep(0.2)
+        a, t0 = r.frame_no, time.time()
+        time.sleep(2.0)
+        fast = (r.frame_no - a) / (time.time() - t0)
+        self.assertTrue(fast > slow * 1.8, (slow, fast))
+
+    def test_set_fps_validates(self):
+        r = self.runner(self.prog("T3.vsa"))
+        for bad in (0, 45, -60, 60.5, "60", None, True, [60]):
+            with self.assertRaises(ValueError):
+                r.set_fps(bad)
+        self.assertEqual(r.fps, 60)
+
     def test_key_forward(self):
         r = self.runner(self.prog("T3.vsa"))
         self.assertTrue(wait_for(lambda: r.frame_no >= 2))
@@ -181,6 +204,20 @@ class HttpTests(Base):
         data = resp.read()
         c.close()
         return resp.status, data
+
+    def test_api_speed(self):
+        self.assertEqual(self.call("POST", "/api/speed", {"fps": 90})[0], 200)
+        self.assertEqual(self.r.fps, 90)
+        self.assertEqual(json.loads(self.call("GET", "/api/status")[1])["fps"], 90)
+        for body in ({"fps": 45}, {"fps": "60"}, {"fps": True}, {}, {"fps": None}):
+            self.assertEqual(self.call("POST", "/api/speed", body)[0], 400, body)
+        self.assertEqual(self.r.fps, 90)
+        self.assertEqual(self.call("POST", "/api/speed", {"fps": 60}, {"Origin": "http://evil.example"})[0], 403)
+        self.assertEqual(self.call("POST", "/api/speed", {"fps": 60}, {"Host": "evil.example"})[0], 403)
+        self.assertEqual(self.r.fps, 90)
+        self.assertEqual(self.call("POST", "/api/speed", {"fps": 120})[0], 200)
+        self.assertEqual(self.call("POST", "/api/speed", {"fps": 30})[0], 200)
+        self.assertEqual(self.r.fps, 30)
 
     def test_page_and_status(self):
         st, data = self.call("GET", "/")

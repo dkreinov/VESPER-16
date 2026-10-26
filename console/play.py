@@ -26,6 +26,7 @@ W, H = 64, 48
 FRAME_BYTES = W * H * 3
 BUTTONS = ("UP", "DOWN", "LEFT", "RIGHT", "A", "B", "SELECT", "START")
 FPS = 60
+SPEEDS = (30, 60, 90, 120)
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 TITLES = {"T3": "SQUASH", "T6": "NAMEPLATE"}
@@ -74,6 +75,15 @@ class Runner:
         wanted = set(names)
         self.held = [b for b in BUTTONS if b in wanted]
 
+    def set_fps(self, fps):
+        if isinstance(fps, bool) or not isinstance(fps, int) or fps not in SPEEDS:
+            raise ValueError("fps must be one of " + ", ".join(map(str, SPEEDS)))
+        with self.cond:
+            self.fps = fps
+            self.status_seq += 1
+            self.seq += 1
+            self.cond.notify_all()
+
     def status(self):
         with self.cond:
             return self._status_locked()
@@ -87,6 +97,7 @@ class Runner:
             "code": self.code,
             "error": self.error,
             "epoch": self.gen,
+            "fps": self.fps,
         }
 
     def start(self, index=None):
@@ -320,6 +331,8 @@ def make_handler(runner, page_path):
                     if not isinstance(held, list):
                         raise ValueError("held must be a list")
                     runner.set_held([b for b in held if b in BUTTONS])
+                elif path == "/api/speed":
+                    runner.set_fps(body.get("fps"))
                 elif path == "/api/restart":
                     runner.restart()
                 elif path == "/api/cart":
