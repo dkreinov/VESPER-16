@@ -863,18 +863,138 @@ class DoctorAuto(unittest.TestCase):
         with mock.patch.object(self.w.shutil, "which", return_value=None):
             self.doctor("codex")
         reg = self.w.Registry.load()
+        reg.data["auto_check"] = {"codex": self.w.check_record("codex", True, "PASS")}
         box = io.StringIO()
         with contextlib.redirect_stdout(box):
             self.w.s3_choice_box(reg, "stage 3. Choose one:")
         lines = box.getvalue()
         self.assertLess(lines.index("--task all --auto"), lines.index("--task all  "))
         self.assertEqual(long_lines(lines), [])
-        reg.data["auto_ready"] = {"codex": False}
+        reg.data["auto_check"] = {"codex": self.w.check_record("codex", False, "FAIL: x")}
         box = io.StringIO()
         with contextlib.redirect_stdout(box):
             self.w.s3_choice_box(reg, "stage 3. Choose one:")
         lines = box.getvalue()
         self.assertGreater(lines.index("--task all --auto"), lines.index("--task all  "))
+
+
+class BackgroundCheck(unittest.TestCase):
+    """new s1 starts the --auto check in the background; harvest/judge show its stored result."""
+
+    def setUp(self):
+        self.saved = {k: os.environ.get(k) for k in ENV_KEYS + ("VESPER_NO_BG_CHECK",)}
+        self.w, self.home = fresh_ws()
+        os.environ["LOCALAPPDATA"] = os.path.join(self.home, "localappdata")
+        os.environ["VESPER_CODEX_EXE"] = FAKE
+        os.environ["VESPER_CURSOR_EXE"] = FAKE
+        os.environ.pop("VESPER_NO_BG_CHECK", None)
+        capture(self.w, "doctor", "--agent", "codex", "--alias", "t")
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def new_s1(self, launcher):
+        with mock.patch.object(self.w, "bg_launch", launcher),                 mock.patch.object(self.w.shutil, "which", return_value=None):
+            return capture(self.w, "new", "s1", "--method", "plain")[0]
+
+    def box(self, reg):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.w.s3_choice_box(reg, "stage 3. Choose one:")
+        return out.getvalue()
+
+    def test_new_s1_starts_exactly_one_check(self):
+        calls = []
+        out = self.new_s1(lambda argv, log: calls.append((argv, log)))
+        self.assertEqual(len(calls), 1)
+        argv, log = calls[0]
+        self.assertEqual(argv[1:3], [os.path.abspath(self.w.__file__), "bgcheck"])
+        self.assertEqual(argv[3:5], ["--agent", "codex"])
+        self.assertEqual(argv[5], "--delay")
+        self.assertTrue(0 <= int(argv[6]) <= 300)
+        self.assertEqual(os.path.dirname(log), self.w.ws_home())
+        self.assertTrue(os.path.exists(self.w.bg_lock_path()))        # the lock is held until the check ends
+        self.assertNotIn("background", out.lower())
+        self.assertNotIn("bgcheck", out)
+        # a second start while the lock exists: no second check
+        reg = self.w.Registry.load()
+        self.assertTrue(self.w.bg_running())
+        self.w.maybe_start_bg_check()
+        self.assertEqual(len(calls), 1)
+
+    def test_launcher_flags(self):
+        with mock.patch.object(self.w.subprocess, "Popen") as pop:
+            self.w.bg_launch(["x"], os.path.join(self.home, "bg.log"))
+        kw = pop.call_args[1]
+        self.assertEqual(kw["stdin"], self.w.subprocess.DEVNULL)
+        if os.name == "nt":
+            self.assertEqual(kw["creationflags"], 0x8 | 0x200 | 0x08000000)
+        else:
+            self.assertTrue(kw["start_new_session"])
+
+    def test_no_cli_no_start(self):
+        calls = []
+        os.environ.pop("VESPER_CODEX_EXE")
+        self.new_s1(lambda argv, log: calls.append(argv))
+        self.assertEqual(calls, [])
+        self.assertFalse(os.path.exists(self.w.bg_lock_path()))
+
+    def test_stored_result_no_start(self):
+        reg = self.w.Registry.load()
+        reg.data["auto_check"] = {"codex": self.w.check_record("codex", True, "PASS")}
+        reg.save()
+        calls = []
+        self.new_s1(lambda argv, log: calls.append(argv))
+        self.assertEqual(calls, [])
+
+    def test_launcher_crash_never_breaks_new_s1(self):
+        def boom(argv, log):
+            raise OSError("no process for you")
+        out = self.new_s1(boom)
+        self.assertIn("python workshop.py done", out)
+        self.assertFalse(os.path.exists(self.w.bg_lock_path()))        # no dead lock
+
+    def test_bgcheck_command_stores_result_and_cleans(self):
+        open(self.w.bg_lock_path(), "w").close()
+        capture(self.w, "bgcheck", "--agent", "codex")
+        rec = self.w.stored_check(self.w.Registry.load(), "codex")
+        self.assertTrue(rec["ok"])
+        self.assertTrue(rec["probe"])
+        self.assertFalse(os.path.exists(self.w.bg_lock_path()))
+        self.assertEqual([n for n in os.listdir(self.w.ws_home()) if n.startswith(".check-auto")], [])
+
+    def test_harvest_box_pass_fail_running_never(self):
+        reg = self.w.Registry.load()
+        p = self.box(reg)                                              # never ran: both, manual first, no reason
+        self.assertNotIn("not ready", p)
+        self.assertGreater(p.index("--task all --auto"), p.index("--task all  "))
+        open(self.w.bg_lock_path(), "w").close()                      # still running: the same
+        self.assertEqual(self.box(reg), p)
+        reg.data["auto_check"] = {"codex": self.w.check_record("codex", True, "PASS")}
+        p = self.box(reg)
+        self.assertLess(p.index("--task all --auto"), p.index("--task all  "))
+        self.assertNotIn("not ready", p)
+        reg.data["agent"] = "cursor"
+        reg.data["auto_check"] = {"cursor": self.w.check_record("cursor", False, self.w.FREE_PLAN_MSG)}
+        p = self.box(reg)
+        self.assertGreater(p.index("--task all --auto"), p.index("--task all  "))
+        self.assertIn("  --auto not ready: Cursor free plan (only Auto). Use the app.", p)
+        self.assertEqual(long_lines(p), [])
+        for txt in ("FAIL: the agent wrote a file OUTSIDE its folder", "error: " + "x" * 80, ""):
+            reg.data["auto_check"] = {"cursor": self.w.check_record("cursor", False, txt)}
+            line = [x for x in self.box(reg).splitlines() if "not ready" in x][0]
+            self.assertLessEqual(len(line), 72)
+
+    def test_old_model_result_is_ignored(self):
+        reg = self.w.Registry.load()
+        rec = self.w.check_record("codex", True, "PASS")
+        rec["model"] = "old-model"
+        reg.data["auto_check"] = {"codex": rec}
+        self.assertIsNone(self.w.stored_check(reg, "codex"))
 
 
 class ChartsAuto(unittest.TestCase):

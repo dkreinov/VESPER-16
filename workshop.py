@@ -797,9 +797,12 @@ def _cmd_doctor(a):
     if agent == "codex" and codex_memories_have_vesper():
         note(1, "WARN", MEMORY_WARN)
     _PROBE.pop(agent, None)
+    _CHECK.pop(agent, None)
     al, ready = doctor_auto_lines(agent, getattr(a, "check_auto", False))
     if agent in _PROBE:
         reg.data.setdefault("auto_probe", {})[agent] = {"pass": _PROBE[agent], "time": time.time()}
+    if agent in _CHECK:
+        reg.data.setdefault("auto_check", {})[agent] = check_record(agent, *_CHECK[agent], probe=_PROBE.get(agent))
     for x in al:
         if x.startswith("  WARN"):
             level = max(level, 1)
@@ -1198,6 +1201,8 @@ def cmd_new(a):
     reg.data["runs"][rid]["folder"] = f
     reg.start_active(rid, "1" if a.stage == "s1" else "3")
     reg.save()
+    if a.stage == "s1":
+        maybe_start_bg_check()
     mem = (reg.data.get("agent") or "") in ("codex", "") and codex_memories_on(reg)
     if gate_on():
         agent1 = reg.data.get("agent") or ""
@@ -3276,8 +3281,11 @@ def cmd_cleanup(a):
             print("  skipped (outside the workshop home, or a link): " + p)
             continue
         _remove(p)
-    for n in ("registry.json", "registry.json.tmp", "results.csv", ".snapshots", ".guides"):
+    for n in ("registry.json", "registry.json.tmp", "results.csv", ".snapshots", ".guides",
+              BG_FILE, BG_FILE + ".tmp", BG_LOCK, BG_LOG):
         _remove(os.path.join(home, n))
+    for p in glob.glob(os.path.join(glob.escape(home), ".check-auto-*")):    # a killed check leaves its probe folder
+        _remove(p)
     try:
         os.rmdir(os.path.join(home, ".skills"))            # the parent of the harvested skills: empty now
     except OSError:
@@ -3723,6 +3731,7 @@ def run_capture(cmd, timeout, cwd=None, stdin_text=None):
 
 
 _PROBE = {}
+_CHECK = {}                # agent -> (ok, text) of the last check_auto_run in this process
 
 
 def check_auto_run(agent):
@@ -3803,6 +3812,7 @@ def doctor_auto_lines(agent, check=False):
         lines += ["          " + x for x in fix]
     if check:
         ok, text = check_auto_run(agent)
+        _CHECK[agent] = (ok, text)
         lines.append("  %-5s --check-auto %s (%s): %s" % ("OK" if ok else "WARN", agent, AUTO_MODEL[agent], text))
         if agent in _PROBE:
             lines.append("          The limit test ran with the real --auto flags.")
@@ -3826,7 +3836,8 @@ def auto_setup(reg, a):
     a.auto_agent = agent
     a.auto_argv = find_cli(agent)[0]
     a.auto_model = getattr(a, "model", None) or AUTO_MODEL[agent]
-    a.auto_verified = bool(((reg.data.get("auto_probe") or {}).get(agent) or {}).get("pass"))
+    a.auto_verified = bool(((reg.data.get("auto_probe") or {}).get(agent) or {}).get("pass")
+                           or (stored_check(reg, agent) or {}).get("probe"))
 
 
 # The flags that limit an --auto agent (one line of at most 72 characters each; shown before the start).
@@ -4159,16 +4170,152 @@ def auto_end_screen(reg, items, show=True):
 
 
 def s3_choice_box(reg, when):
-    """The NEXT box with both ways to run stage 3. --auto goes first only when doctor said it is ready."""
+    """The NEXT box with both ways to run stage 3. --auto goes first only when the stored --auto check
+    (doctor --check-auto, or the background check of stage 1) PASSed. After a FAIL: the manual flow first and
+    one short reason line. No result yet (still running, or never ran): both ways, manual first, no reason."""
     agent = reg.data.get("agent") or ""
     auto = ["python workshop.py new s3 --task all --auto", "   the tool runs the 4 agents, about 10 min"]
     manual = ["python workshop.py new s3 --task all", "   you open 4 threads in your agent app"]
     if agent and agent not in AUTO_AGENTS:
         next_box(manual, when)
-    elif (reg.data.get("auto_ready") or {}).get(agent):
+        return
+    rec = stored_check(reg, agent) if agent else None
+    if rec and rec.get("ok"):
         next_box(auto + manual, when)
+        return
+    if rec:
+        print("\n" + check_reason_line(agent, rec.get("text") or ""))
+    next_box(manual + auto, when)
+
+
+# ------------------------------------------------------------------ the --auto check in the background
+BG_DELAY_MAX = 300         # seconds: a random start delay spreads the learners of one room
+BG_STALE_SEC = 900         # a lock older than this is a dead check
+BG_FILE = "auto-check.json"
+BG_LOCK = ".bg-check.lock"
+BG_LOG = "bg-check.log"
+
+
+def check_record(agent, ok, text, probe=None):
+    return {"model": AUTO_MODEL.get(agent, ""), "ok": bool(ok), "text": text, "probe": probe, "time": time.time()}
+
+
+def stored_check(reg, agent):
+    """The newest stored --auto check for this agent and its stage-3 model (registry: doctor --check-auto;
+    auto-check.json: the background check), or None."""
+    recs = []
+    r = (reg.data.get("auto_check") or {}).get(agent)
+    if isinstance(r, dict):
+        recs.append(r)
+    try:
+        with open(os.path.join(ws_home(), BG_FILE), encoding="utf-8") as f:
+            r = (json.load(f) or {}).get(agent)
+        if isinstance(r, dict):
+            recs.append(r)
+    except (OSError, ValueError, AttributeError):
+        pass
+    recs = [r for r in recs if r.get("model") == AUTO_MODEL.get(agent)]
+    return max(recs, key=lambda r: r.get("time") or 0) if recs else None
+
+
+def check_reason_line(agent, text):
+    """One line, at most 72 characters: why --auto is not ready."""
+    t = (text or "").strip()
+    if t == FREE_PLAN_MSG:
+        why = "%s free plan (only Auto)" % agent.capitalize()
+    elif "OUTSIDE" in t:
+        why = "no safe limit for the agent"
+    elif "bin/vesper" in t:
+        why = "the agent did not run bin/vesper"
+    elif "out/ok.txt" in t:
+        why = "agent permissions too narrow"
     else:
-        next_box(manual + auto, when)
+        why = re.sub(r"^(FAIL|error):\s*", "check error: ", t) if t else "the check did not pass"
+    head, tail = "  --auto not ready: ", ". Use the app."
+    return head + why[:MAXW - len(head) - len(tail)].rstrip(" .:") + tail
+
+
+def bg_lock_path():
+    return os.path.join(ws_home(), BG_LOCK)
+
+
+def bg_running():
+    """True while a fresh lock exists (a stale lock is removed)."""
+    p = bg_lock_path()
+    try:
+        age = time.time() - os.path.getmtime(p)
+    except OSError:
+        return False
+    if age < BG_STALE_SEC:
+        return True
+    try:
+        os.remove(p)
+    except OSError:
+        pass
+    return False
+
+
+def bg_launch(argv, log_path):
+    """Start argv detached: no console window, no link to the learner's terminal, output into log_path."""
+    kw = {}
+    if os.name == "nt":
+        kw["creationflags"] = (getattr(subprocess, "DETACHED_PROCESS", 0x8)
+                               | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
+                               | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    else:
+        kw["start_new_session"] = True
+    with open(log_path, "ab") as log:
+        subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, **kw)
+
+
+def maybe_start_bg_check():
+    """new s1: if the agent CLI is found and no --auto check result is stored, start the check in the
+    background (random delay 0-300 s, one at a time). Prints nothing, never blocks, never fails."""
+    try:
+        if os.environ.get("VESPER_NO_BG_CHECK"):
+            return
+        reg = Registry.load()
+        agent = reg.data.get("agent") or ""
+        if agent not in AUTO_AGENTS or not find_cli(agent)[0]:
+            return
+        if stored_check(reg, agent) or bg_running():
+            return
+        os.makedirs(ws_home(), exist_ok=True)
+        fd = os.open(bg_lock_path(), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        try:
+            argv = [sys.executable, os.path.abspath(__file__), "bgcheck", "--agent", agent,
+                    "--delay", "%d" % random.randint(0, BG_DELAY_MAX)]
+            bg_launch(argv, os.path.join(ws_home(), BG_LOG))
+        except BaseException:
+            _remove(bg_lock_path())
+            raise
+    except Exception:
+        pass
+
+
+def cmd_bgcheck(a):
+    """Internal (started by new s1): wait, run the --auto check once, store the result, remove the lock."""
+    try:
+        if a.delay > 0:
+            _sleep(a.delay)
+        _PROBE.pop(a.agent, None)
+        ok, text = check_auto_run(a.agent)
+        path = os.path.join(ws_home(), BG_FILE)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data[a.agent] = check_record(a.agent, ok, text, _PROBE.get(a.agent))
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+        replace_file(path + ".tmp", path)
+    finally:
+        _remove(bg_lock_path())
+    return 0
 
 
 # ------------------------------------------------------------------ stage 3 pages and resume
@@ -4285,6 +4432,10 @@ def parse(argv):
     s.add_argument("--check-auto", action="store_true",
                    help="ONE tiny agent run with the stage-3 model and the --auto flags: can it work, and is it limited?")
     s.set_defaults(func=cmd_doctor)
+    s = sub.add_parser("bgcheck", help=argparse.SUPPRESS)       # internal: the stage-1 background --auto check
+    s.add_argument("--agent", required=True, choices=list(AUTO_AGENTS))
+    s.add_argument("--delay", type=float, default=0)
+    s.set_defaults(func=cmd_bgcheck)
     s = sub.add_parser("new")
     s.add_argument("stage", choices=["s1", "s3"])
     s.add_argument("--task", default="T3", choices=["T3", "T4", "T6", "both", "all"],

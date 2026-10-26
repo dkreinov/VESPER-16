@@ -146,7 +146,7 @@ stopped run as partial work (`stopped = ctrl-c`). The manual flow (without `--au
   edit and write files in its run folder); Cursor never gets `--force`: each Cursor run folder has
   `.cursor/cli.json` (allow `bin/vesper`, read and write inside the folder), plus `--sandbox enabled` on macOS/Linux
   (the sandbox does not exist on Windows). The tool says a limit is verified only after
-  `doctor --check-auto` passed on this computer (otherwise: "Not verified on this computer"). The agents can read
+  `doctor --check-auto` passed on this computer (otherwise: "Not verified on this computer"). The tool checks `--auto` readiness in the background during stage 1 (nothing to do or read for you), and the stage-3 NEXT box uses that result. The agents can read
   other folders on this disk; the isolation check looks for that. The prompt goes on stdin (Codex, Claude Code), so a
   `.cmd` launcher (npm) gets every flag.
 - **Failed run:** an agent that ends within 60 seconds, or with an error and no tool call, or with a known error
