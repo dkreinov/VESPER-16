@@ -2956,8 +2956,9 @@ REPEAT_NOTE = [
     "    1. Memory: the agent remembers the earlier session.",
     "       (This is why memory is off in stage 3.)",
     "    2. The skill holds parts of the T3 answer itself.",
-    "  So a T3 pass alone proves little. T6 is a different task: a gain",
-    "  there shows knowledge that transfers.",
+    "  So a T3 pass alone proves little. T6 is the next feature on the",
+    "  same console: a boot screen with your name and a test ball. A gain",
+    "  there shows that the console knowledge in your skill transfers.",
 ]
 
 
