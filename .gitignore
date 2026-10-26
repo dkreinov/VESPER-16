@@ -9,3 +9,4 @@ doctor-report.txt
 charts-out/
 console/checks/real-*
 console/checks/3b-*
+console/checks/10-small-error*
