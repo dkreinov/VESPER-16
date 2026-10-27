@@ -90,7 +90,7 @@ class AutoCodex(AutoBase):
         self.assertEqual(r["stopped"], "limit")
         self.assertEqual(r["error_note"], "Codex spend cap reached")
         self.assertNotEqual(r["grading"], "none")
-        self.assertIn("Your plan limit stopped the agent.", flat(out))
+        self.assertIn("A usage limit stopped the agent.", flat(out))
         self.assertEqual(long_lines(out), [])
     def test_all_four_run_and_finish(self):
         out, rc = capture(self.w, "new", "s3", "--task", "all", "--auto", "--yes", "--name", "MIRA")
@@ -269,7 +269,7 @@ class AutoClaude(AutoBase):
         self.assertEqual(r["stopped"], "limit")
         self.assertEqual(r["error_note"], "Claude usage limit reached")
         self.assertNotEqual(r["grading"], "none")
-        self.assertIn("Your plan limit stopped the agent.", flat(out))
+        self.assertIn("A usage limit stopped the agent.", flat(out))
         self.assertEqual(long_lines(out), [])
 
     def test_claude_command_and_measure(self):
@@ -337,6 +337,30 @@ class LimitNote(unittest.TestCase):
     def test_claude_text_mentioning_limit_is_not_a_stop(self):
         t = '{"type":"assistant","message":{"content":[{"type":"text","text":"a usage limit"}]}}\n'
         self.assertEqual(self.w.limit_note("claude", t), "")
+
+    def test_codex_heads_up_error_then_completed_is_not_a_stop(self):
+        t = ('{"type":"error","message":"Heads up, you have used over 75% of your usage limit"}'+"\n"+
+             '{"type":"turn.completed","usage":{}}'+"\n")
+        self.assertEqual(self.w.limit_note("codex", t), "")
+
+    def test_codex_limit_error_then_completed_is_not_a_stop(self):
+        t = ('{"type":"error","message":"You hit your usage limit"}'+"\n"+
+             '{"type":"turn.completed","usage":{}}'+"\n")
+        self.assertEqual(self.w.limit_note("codex", t), "")
+
+    def test_plain_line_cleared_by_later_success(self):
+        for ag, ok in (("codex", '{"type":"turn.completed","usage":{}}'), ("claude", '{"type":"result","result":"done"}')):
+            t = "You hit your limit (warning)"+"\n"+ok+"\n"
+            self.assertEqual(self.w.limit_note(ag, t), "", ag)
+
+    def test_transient_rate_limit_is_not_a_cap(self):
+        for t in ("429 rate limit reached"+"\n", "usage limit warning"+"\n"):
+            self.assertEqual(self.w.limit_note("claude", t), "")
+
+    def test_claude_plan_texts(self):
+        for m in ("5-hour limit reached", "Weekly limit reached", "Session limit reached", "Opus limit reached"):
+            t = '{"type":"result","is_error":true,"result":"%s"}' % m + "\n"
+            self.assertEqual(self.w.limit_note("claude", t), "Claude usage limit reached", m)
 
     def test_cursor(self):
         self.assertEqual(self.w.limit_note("cursor", "You've hit your usage limit"), "Cursor usage limit reached")
@@ -437,7 +461,7 @@ class AutoCursor(AutoBase):
         r = next(iter(self.rows3().values()))
         self.assertEqual(r["stopped"], "limit")
         self.assertEqual(r["error_note"], "Cursor usage limit reached")
-        self.assertIn("Your plan limit stopped the agent.", flat(out))
+        self.assertIn("A usage limit stopped the agent.", flat(out))
         self.assertNotEqual(r["grading"], "none")                           # the saved solution is graded
         for k in ("tok_uncached", "tok_cache_read", "tok_cache_write", "tok_out", "cost_usd"):
             self.assertEqual(r[k], "", k)
