@@ -3905,7 +3905,11 @@ AUTO_MIN_SEC = 60          # an agent that ends sooner than this did not do the 
 AUTO_ERROR_RE = re.compile(r"Named models unavailable|Free plans can only use Auto|Authentication required"
                            r"|not supported when using Codex with a ChatGPT account|Not logged in", re.I)
 USAGE_LIMIT_RE = re.compile(r"hit your usage limit", re.I)
-USAGE_LIMIT_NOTE = "Cursor usage limit reached"
+USAGE_LIMIT_NOTE = "Cursor usage limit reached"      # kept for old callers; limit_note() names the agent
+_LIMIT_ANY_RE = re.compile(r"hit your (usage|spend) (limit|cap)|spend cap|usage limit|hit your limit"
+                           r"|rate limit reached|credit balance is too low", re.I)
+_LIMIT_RETRY_RE = re.compile(r"reconnect|retry|retrying", re.I)     # a notice the agent survives: not a stop
+LIMIT_HINT = ["Your plan limit stopped the agent.", "Wait for the limit to reset, or run the stage by hand."]
 _ERROR_LINE = re.compile(r"error|failed|denied|unauthori[sz]ed|invalid|not found|cannot|can't", re.I)
 
 
@@ -3970,6 +3974,47 @@ def _output_text(folder, limit=400000):
         return ""
 
 
+def limit_note(agent, text):
+    """'' or the note of a provider spend cap / usage limit found in the output of an ENDED run.
+    Cursor: its text anywhere. Codex: a turn.failed event (or an error event that is not a retry
+    notice and no turn.completed follows). Claude: an error result event, or a plain stderr line."""
+    agent = agent or "cursor"
+    if agent == "cursor":
+        return USAGE_LIMIT_NOTE if USAGE_LIMIT_RE.search(text) else ""
+    hit, completed = False, False
+    for x in text.splitlines():
+        x = x.strip()
+        if not x:
+            continue
+        d = None
+        if x.startswith("{"):
+            try:
+                d = json.loads(x)
+            except ValueError:
+                d = None
+        if not isinstance(d, dict):
+            if not x.startswith("{") and _LIMIT_ANY_RE.search(x) and not _LIMIT_RETRY_RE.search(x):
+                hit = True                                    # a plain stderr line
+            continue
+        kind = str(d.get("type") or "")
+        if kind == "turn.completed":
+            completed = True
+        err = d.get("error")
+        msg = str(err.get("message") if isinstance(err, dict) else (err or d.get("message") or ""))
+        if kind == "result" and d.get("is_error"):
+            msg = str(d.get("result") or msg)
+            if _LIMIT_ANY_RE.search(msg):
+                hit = True
+        elif kind == "turn.failed" and _LIMIT_ANY_RE.search(msg):
+            hit = True
+        elif kind == "error" and _LIMIT_ANY_RE.search(msg) and not _LIMIT_RETRY_RE.search(msg):
+            hit = hit or not completed
+    if not hit:
+        return ""
+    return {"codex": "Codex spend cap reached", "claude": "Claude usage limit reached"}.get(
+        agent, "%s usage limit reached" % agent)
+
+
 def _agent_worked(it):
     """Did the agent do anything? Cursor: a tool call in its stream; others: a solution or an emulator run."""
     if it.get("agent") == "cursor":
@@ -4002,8 +4047,9 @@ def agent_error(it):
             return x
         if not first_err and _ERROR_LINE.search(x) and "warn" not in x.lower():
             first_err = x
-    if USAGE_LIMIT_RE.search(_output_text(it["folder"])) and not _agent_worked(it):
-        return USAGE_LIMIT_NOTE
+    note = limit_note(it.get("agent"), _output_text(it["folder"]))
+    if note and not _agent_worked(it):
+        return note
     el = (it["end"] or time.time()) - it["t0"]
     if el < AUTO_MIN_SEC:
         return first_err or "the agent ended after %d s (exit code %s)" % (el, it["rc"])
@@ -4047,6 +4093,7 @@ def auto_finish(reg, it):
     rid = it["rid"]
     run = reg.data["runs"][rid]
     it["run_task"] = run.get("task", "")
+    limit_hit = False
     if it["state"] in ("done", "failed"):
         why = agent_error(it)
         if why:
@@ -4055,9 +4102,11 @@ def auto_finish(reg, it):
     if it["state"] in ("stopped", "killed"):
         run["stopped"] = "time" if it["state"] == "stopped" else "ctrl-c"
         reg.save()
-    elif USAGE_LIMIT_RE.search(_output_text(it["folder"])):
-        run["stopped"], run["error_note"] = "limit", USAGE_LIMIT_NOTE     # cut off by the plan; the saved solution is graded
+    elif limit_note(it.get("agent"), _output_text(it["folder"])):
+        run["stopped"] = "limit"                  # cut off by the plan; the saved solution is graded
+        run["error_note"] = limit_note(it.get("agent"), _output_text(it["folder"]))
         reg.save()
+        limit_hit = True
     try:
         row = finish_stage(reg, rid, "3", argparse.Namespace(partial=it["state"] in ("stopped", "killed"), auto=True))
     except Exception as e:  # noqa: BLE001  (one run must not stop the others)
@@ -4067,6 +4116,8 @@ def auto_finish(reg, it):
     print("\n" + finish_line(it["label"], row, "", tail))
     if it["state"] == "done" and it["rc"]:
         print(c_err("  The agent ended with exit code %s; see agent-output.jsonl in the run folder." % it["rc"]))
+    if limit_hit:
+        print(c_err("\n".join("  " + x for x in LIMIT_HINT)))
     print_wrong_folder(run, row)
     warn = run_warnings(row)
     if warn:

@@ -29,6 +29,12 @@ def arg_after(argv, flag, default=""):
     return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else default
 
 
+def write_partial(folder):
+    os.makedirs(os.path.join(folder, "solutions"), exist_ok=True)
+    with open(os.path.join(folder, "solutions", "T3.vsa"), "w") as f:
+        f.write("; partial" + chr(10))
+
+
 def main(argv):
     if "--version" in argv:
         print(os.environ.get("FAKE_VERSION", "codex-cli 0.163.0"))
@@ -107,9 +113,18 @@ def main(argv):
     if kind == "codex":
         sys.stderr.write("WARNING: enterprise policy (ignored)\n")
         fakes.codex_log(sid, folder, [(t0, 0, 0, 0, prompt), (t1, 10000, 6000, 800, "")], model=model)
+        if os.environ.get("FAKE_LIMIT"):         # spend cap: an error event, then turn.failed
+            write_partial(folder)
+            print(json.dumps({"type": "error", "message": "Reconnecting... 2/5 (rate limit reached)"}))
+            print(json.dumps({"type": "turn.failed", "error": {"message": "You hit your spend cap. Raise it."}}))
+            return 1
     else:
         fakes.claude_log(sid, folder, [(t0, 5, 0, 0, 0, prompt), (t1, 20, 3000, 400, 500, "")],
                          model="claude-haiku-5-5")
+        if os.environ.get("FAKE_LIMIT"):
+            write_partial(folder)
+            print(json.dumps({"type": "result", "is_error": True, "result": "You've hit your limit"}))
+            return 1
         print(json.dumps({"type": "result", "result": "done"}))
     return 0
 
