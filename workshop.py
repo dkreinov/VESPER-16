@@ -14,6 +14,7 @@
   python workshop.py new s3 --task all --auto   stage 3, the tool runs the 4 agents itself (about 10 min)
   python workshop.py doctor --check-auto    one tiny agent run: can --auto work, and does its limit hold?
   python workshop.py unlock 4 <password from the slide>    grader (only after the agent is done)
+  python workshop.py play [T3|T6]           watch your game, or a task with vs without the skill
   python workshop.py grade | show | cleanup
 
 The tool starts an agent only with --auto (after a question); otherwise you paste every prompt. It sends
@@ -2196,6 +2197,13 @@ def grade_ungraded(reg):
 
 
 def cmd_submit(a):
+    rc = _submit(a)
+    if not rc:
+        play_pair_hint(Registry.load())
+    return rc
+
+
+def _submit(a):
     reg = Registry.load()
     if not [r for r in reg.data["rows"].values() if needs_submit(r)]:
         print("Nothing to submit. All results are submitted.")
@@ -2876,38 +2884,77 @@ def cmd_done(a):
     return 0
 
 
-def _q(path, always=False):
-    return '"%s"' % path if (always or " " in path) else path
-
-
 def play_hint(reg, rid):
-    """Stage-1 hint: play the learner's own game in the live console (only when its solution exists)."""
+    """Stage-1 hint: play your own game in the live console (only when its solution exists)."""
     sol = os.path.join(reg.data["runs"][rid]["folder"], "solutions", "T3.vsa")
-    if not os.path.isfile(sol):
-        return
-    print("\n  Optional: play your game in the live console:")
-    print("    python console/play.py " + _q(os.path.abspath(sol)))
+    if os.path.isfile(sol):
+        print("\n  Optional: play your game: python workshop.py play")
 
 
-def play_pair_hint(reg):
-    """After grade: the T6 run with the skill (key 1) next to the one without it (key 2), when both have a solution."""
+def play_pair(reg, task):
+    """Latest stage-3 set for `task`: [(run_id, solution path)] for [with skill, control], or None."""
     runs = reg.data["runs"]
-    rows = [r for r in reg.data["rows"].values() if r["stage"] == "3" and r["task"] == "T6"]
+    rows = [r for r in reg.data["rows"].values() if r["stage"] == "3" and r["task"] == task]
     if not rows:
-        return
+        return None
     parent = runs.get(max(rows, key=lambda r: float(r["start"] or 0))["run_id"], {}).get("parent", "")
     g = {}
     for r in sorted(rows, key=lambda r: float(r["start"] or 0)):
         run = runs.get(r["run_id"], {})
         if run.get("parent", "") == parent:
-            g.setdefault(is_control(run) or r.get("method") == "none", run)
+            g.setdefault(is_control(run) or r.get("method") == "none", (r["run_id"], run))
     if len(g) < 2:
+        return None
+    return [(g[k][0], os.path.abspath(os.path.join(g[k][1].get("folder") or "", "solutions", task + ".vsa")))
+            for k in (False, True)]
+
+
+def play_pair_hint(reg):
+    """After grade and submit: how to watch each task with vs without the skill (only complete pairs)."""
+    tasks = [t for t in ("T3", "T6")
+             if (pr := play_pair(reg, t)) and all(os.path.isfile(p) for _, p in pr)]
+    if not tasks:
         return
-    paths = [os.path.abspath(os.path.join(g[k].get("folder") or "", "solutions", "T6.vsa")) for k in (False, True)]
-    if not all(os.path.isfile(x) for x in paths):
-        return
-    print("\n  See the skill effect: T6 with skill (key 1) vs without (key 2)")
-    print("    python console/play.py %s %s" % (_q(paths[0], True), _q(paths[1], True)))
+    print("\nSee your results in the live console (key 1 = with skill, 2 = without):")
+    for t in tasks:
+        print("    python workshop.py play " + t)
+
+
+def cmd_play(a):
+    reg = Registry.load()
+    task = a.task
+    if task:
+        pr = play_pair(reg, task)
+        if not pr:
+            print("No stage-3 %s runs with and without the skill yet." % task)
+            return 1
+        msg = "Key 1 = %s with skill, key 2 = without. Ctrl+C stops." % task
+    else:
+        rows = [r for r in reg.data["rows"].values() if r["stage"] == "1"]
+        cand = [(float(r["start"] or 0), r["run_id"]) for r in rows]
+        cand += [(float(x["start"]), x["run_id"]) for x in reg.actives("1")]
+        if not cand:
+            print("No stage-1 run yet. Start with:  python workshop.py new s1")
+            return 1
+        rid = max(cand)[1]
+        folder = reg.data["runs"].get(rid, {}).get("folder") or ""
+        pr = [(rid, os.path.abspath(os.path.join(folder, "solutions", "T3.vsa")))]
+        msg = "Your stage-1 game. Ctrl+C stops."
+    bad = [r for r, p in pr if not os.path.isfile(p)]
+    if bad:
+        for r in bad:
+            print("Run %s has no saved program (solutions/%s.vsa)." % (r, task or "T3"))
+        return 1
+    cmd = [sys.executable, os.path.join(KIT, "console", "play.py")] + [p for _, p in pr]
+    if a.no_browser:
+        cmd.append("--no-browser")
+    if a.port:
+        cmd += ["--port", str(a.port)]
+    print(msg)
+    try:
+        return subprocess.call(cmd)
+    except KeyboardInterrupt:
+        return 0
 
 
 def cmd_grade(a):
@@ -4862,6 +4909,11 @@ def parse(argv):
     s = sub.add_parser("submit", help="send all results that are not yet submitted to the results form")
     s.add_argument("--no-form", action="store_true", help="print the links and answers only; mark nothing")
     s.set_defaults(func=cmd_submit)
+    s = sub.add_parser("play", help="watch your game in the live console")
+    s.add_argument("task", nargs="?", choices=["T3", "T6"], help="T3 or T6: with skill (key 1) vs without (key 2)")
+    s.add_argument("--no-browser", action="store_true")
+    s.add_argument("--port", type=int)
+    s.set_defaults(func=cmd_play)
     s = sub.add_parser("cleanup")
     s.add_argument("--yes", action="store_true")
     s.add_argument("--no-copy", action="store_true")

@@ -319,12 +319,12 @@ class PlayHintTest(unittest.TestCase):
         out = capture(run, w, "done", "--no-form")
         sol = os.path.abspath(os.path.join(folder, "solutions", "T3.vsa"))
         self.assertIn("Optional: play your game", out)
-        self.assertIn("python console/play.py " + sol, out)
+        self.assertIn("Optional: play your game: python workshop.py play", out)
+        self.assertNotIn("console/play.py", out)
         self.assertIn("NEXT:", out)
-        self.assertLess(out.index("python console/play.py"), out.index("NEXT:"))
+        self.assertLess(out.index("python workshop.py play"), out.index("NEXT:"))
         for ln in out.splitlines():
-            if "console/play.py" not in ln:
-                self.assertLessEqual(len(ln), 72, ln)
+            self.assertLessEqual(len(ln), 72, ln)
 
     def test_no_hint_after_stage1_done_when_solution_missing(self):
         w = self._s1()
@@ -332,37 +332,107 @@ class PlayHintTest(unittest.TestCase):
         self.assertNotIn("console/play.py", out)
         self.assertNotIn("Optional: play", out)
 
-    def _s3(self, with_sol=True, ctl_sol=True):
+    def _s3(self, with_sol=True, ctl_sol=True, tasks=("T6",)):
         w, _ = fresh_ws()
         fakes.ready_for_s3(w)
         capture(run, w, "new", "s3", "--task", "all", "--name", "MIRA")
         reg = w.Registry.load()
         ids = {x["run_id"].split("-")[2]: x["run_id"] for x in reg.actives()}
-        for k, m, st in (("t6", "plain", with_sol), ("n6", "none", ctl_sol)):
-            reg.set_row(ids[k], "3", dict(task="T6", score="90", start="5", method=m))
-            if st:
-                d = os.path.join(reg.data["runs"][ids[k]]["folder"], "solutions")
-                os.makedirs(d, exist_ok=True)
-                with open(os.path.join(d, "T6.vsa"), "w") as fh:
-                    fh.write("halt\n")
+        for t in tasks:
+            for k, m, st in (("t" + t[1], "plain", with_sol), ("n" + t[1], "none", ctl_sol)):
+                reg.set_row(ids[k], "3", dict(task=t, score="90", start="5", method=m))
+                if st:
+                    d = os.path.join(reg.data["runs"][ids[k]]["folder"], "solutions")
+                    os.makedirs(d, exist_ok=True)
+                    with open(os.path.join(d, t + ".vsa"), "w") as fh:
+                        fh.write("halt\n")
+        reg.save()
         return w, reg, ids
 
-    def test_pair_command_when_both_exist(self):
-        w, reg, ids = self._s3()
+    def _path(self, reg, ids, k, t):
+        return os.path.abspath(os.path.join(reg.data["runs"][ids[k]]["folder"], "solutions", t + ".vsa"))
+
+    def test_pair_hint_both_tasks(self):
+        w, reg, ids = self._s3(tasks=("T3", "T6"))
         out = capture(w.play_pair_hint, reg)
-        a, b = [os.path.abspath(os.path.join(reg.data["runs"][ids[k]]["folder"], "solutions", "T6.vsa"))
-                for k in ("t6", "n6")]
-        self.assertIn("See the skill effect: T6 with skill (key 1) vs without (key 2)", out)
-        self.assertIn('python console/play.py "%s" "%s"' % (a, b), out)
+        self.assertIn("See your results in the live console (key 1 = with skill, 2 = without):", out)
+        self.assertIn("python workshop.py play T3", out)
+        self.assertIn("  python workshop.py play T6", out)
+        self.assertNotIn("console/play.py", out)
         for ln in out.splitlines():
-            if "console/play.py" not in ln:
-                self.assertLessEqual(len(ln), 72, ln)
-        self.assertIn(a, capture(w.play_pair_hint, reg))
+            self.assertLessEqual(len(ln), 72, ln)
+
+    def test_pair_hint_one_task(self):
+        w, reg, ids = self._s3(tasks=("T6",))
+        out = capture(w.play_pair_hint, reg)
+        self.assertIn("play T6", out)
+        self.assertNotIn("play T3", out)
 
     def test_pair_nothing_when_one_missing(self):
         for flags in ((False, True), (True, False), (False, False)):
             w, reg, _ = self._s3(*flags)
             self.assertEqual(capture(w.play_pair_hint, reg), "")
+
+    def _play(self, w, *argv):
+        from unittest import mock
+        with mock.patch.object(w.subprocess, "call", return_value=0) as m:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = run(w, "play", *argv)
+        return rc, out.getvalue(), m
+
+    def test_play_t6_and_t3_call_console(self):
+        w, reg, ids = self._s3(tasks=("T3", "T6"))
+        for t in ("T3", "T6"):
+            rc, out, m = self._play(w, t)
+            n = t[1]
+            self.assertEqual(rc, 0)
+            self.assertEqual(m.call_args[0][0], [sys.executable, os.path.join(w.KIT, "console", "play.py"),
+                                                 self._path(reg, ids, "t" + n, t), self._path(reg, ids, "n" + n, t)])
+            self.assertEqual(out.splitlines()[0], "Key 1 = %s with skill, key 2 = without. Ctrl+C stops." % t)
+
+    def test_play_passes_flags(self):
+        w, reg, ids = self._s3()
+        rc, out, m = self._play(w, "T6", "--no-browser", "--port", "9000")
+        self.assertEqual(m.call_args[0][0][-3:], ["--no-browser", "--port", "9000"])
+
+    def test_play_stage1(self):
+        w = self._s1()
+        reg = w.Registry.load()
+        folder = reg.data["runs"][reg.data["active"]["run_id"]]["folder"]
+        self._sol(folder)
+        rc, out, m = self._play(w)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.splitlines()[0], "Your stage-1 game. Ctrl+C stops.")
+        self.assertEqual(m.call_args[0][0], [sys.executable, os.path.join(w.KIT, "console", "play.py"),
+                                             os.path.abspath(os.path.join(folder, "solutions", "T3.vsa"))])
+
+    def test_play_missing_solution_exit_1(self):
+        w, reg, ids = self._s3(True, False)
+        rc, out, m = self._play(w, "T6")
+        self.assertEqual(rc, 1)
+        self.assertIn(ids["n6"], out)
+        m.assert_not_called()
+        w = self._s1()
+        rc, out, m = self._play(w)
+        self.assertEqual(rc, 1)
+        self.assertIn("no saved program", out)
+        m.assert_not_called()
+
+    def test_submit_prints_hints(self):
+        for tasks, want, nope in ((("T3", "T6"), ("play T3", "play T6"), ()), (("T6",), ("play T6",), ("play T3",)),
+                                  ((), (), ("workshop.py play",))):
+            w, reg, ids = self._s3(tasks=tasks)
+            for r in reg.data["rows"].values():
+                r["grading"] = "graded"
+            reg.save()
+            out = capture(run, w, "submit", "--no-form")
+            for x in want:
+                self.assertIn(x, out)
+            for x in nope:
+                self.assertNotIn(x, out)
+            if want:
+                self.assertIn("See your results in the live console", out)
 
     def test_grade_prints_pair(self):
         w, reg, ids = self._s3()
@@ -372,5 +442,5 @@ class PlayHintTest(unittest.TestCase):
                                           method="plain" if k == "t6" else "none"))
         reg.save()
         out = capture(run, w, "grade")
-        self.assertIn("console/play.py", out)
-        self.assertLess(out.index("console/play.py"), out.index("NEXT:"))
+        self.assertIn("python workshop.py play T6", out)
+        self.assertLess(out.index("python workshop.py play T6"), out.index("NEXT:"))

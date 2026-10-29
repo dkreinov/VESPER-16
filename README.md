@@ -76,6 +76,7 @@ python workshop.py done <run_id>          # end one stage-3 run (plain `done` as
 python workshop.py unlock 4 <password>    # the grader - only after your agents are done
 python workshop.py grade                  # scores the stages that are not graded yet
 python workshop.py show                   # your table and the active runs
+python workshop.py play T6              # watch T6 with vs without your skill in the live console
 python workshop.py submit                 # LAST STEP: grades if needed, then sends all results in ONE form window
 python workshop.py form                   # open the form again for one stage (last stage; or: form <run_id> <stage>)
 python workshop.py cleanup                # removes everything workshop.py made
