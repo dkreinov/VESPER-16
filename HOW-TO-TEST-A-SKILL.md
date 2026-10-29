@@ -17,6 +17,34 @@ But a skill can also look good when it is not. These are the steps you did in th
 > - **A few short facts that every session needs → a memory note** (AGENTS.md / CLAUDE.md). Keep it short: it costs
 >   context in every session.
 
+## What is a skill, and when do you need one?
+
+A skill does not teach the model. It is a manual that the agent opens at the right moment. It costs tokens each time the agent reads it, and it can be wrong.
+
+| Option | What it is | When it loads | Best for |
+|---|---|---|---|
+| Prompt | Text you type in one session | Now, one time | One task |
+| Memory note (CLAUDE.md / AGENTS.md) | A file the agent reads at start | Always | Facts that every task in the project needs |
+| Skill | A folder with instructions and scripts | Only when its description fits the task | A reusable procedure or knowledge for one kind of task |
+| Subagent | A second agent with a fresh context | When the main agent starts it | Parallel or isolated work, an independent check |
+| MCP / tool | A connection to a system | When the agent calls it | Actions, live data |
+| Plugin | A package of skills + tools + commands | On install | Share a setup with a team |
+| Fine-tuning | Training of the weights | Always (it is in the model) | Costly, rarely needed |
+
+Evidence: the same text worked as well in CLAUDE.md as in a skill (2.6 vs 2.2 min). The difference is WHEN it loads.
+
+Script, skill, or both?
+
+| Case | Use |
+|---|---|
+| Every step is fixed and code can check it | A script only (deterministic, cheap, no tokens) |
+| Steps are fixed, but a failure needs reading and a decision | A skill that calls scripts |
+| Every case is different and needs judgement (triage, review, design) | A skill (instructions, checklists) |
+
+Rule: if you can write the if-else, write a script. If someone must read and decide, write a skill, and let the skill call your scripts.
+
+Do not turn a flow into a skill only because skills are new. Our workshop measured only the missing-knowledge case. For a flow, measure the same way: the same task with and without the skill, on a new case.
+
 ## 1. Write the skill after a hard success
 When an agent finally solves something hard in your code, hardware or tools, ask it in the same thread:
 "Write a skill from what you learned: verified facts, working recipes, traps. Not the answer to this task."
