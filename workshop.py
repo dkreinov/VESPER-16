@@ -2822,7 +2822,8 @@ def cmd_done(a):
         fr = ascii_frame(snap_path(rid, stage))
         if fr:
             print("\n" + fr)
-        next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
+        play_hint(reg, rid)
+        next_box("python workshop.py skill","stage 2 (the SAME agent thread writes a skill), run:")
     else:
         show_compare(reg, rid, brief=True)         # only when the pair of this run is complete
         left = reg.actives("3")
@@ -2831,6 +2832,40 @@ def cmd_done(a):
         else:
             all_done_box(reg)
     return 0
+
+
+def _q(path, always=False):
+    return '"%s"' % path if (always or " " in path) else path
+
+
+def play_hint(reg, rid):
+    """Stage-1 hint: play the learner's own game in the live console (only when its solution exists)."""
+    sol = os.path.join(reg.data["runs"][rid]["folder"], "solutions", "T3.vsa")
+    if not os.path.isfile(sol):
+        return
+    print("\n  Optional: play your game in the live console:")
+    print("    python console/play.py " + _q(os.path.abspath(sol)))
+
+
+def play_pair_hint(reg):
+    """After grade: the T6 run with the skill (key 1) next to the one without it (key 2), when both have a solution."""
+    runs = reg.data["runs"]
+    rows = [r for r in reg.data["rows"].values() if r["stage"] == "3" and r["task"] == "T6"]
+    if not rows:
+        return
+    parent = runs.get(max(rows, key=lambda r: float(r["start"] or 0))["run_id"], {}).get("parent", "")
+    g = {}
+    for r in sorted(rows, key=lambda r: float(r["start"] or 0)):
+        run = runs.get(r["run_id"], {})
+        if run.get("parent", "") == parent:
+            g.setdefault(is_control(run) or r.get("method") == "none", run)
+    if len(g) < 2:
+        return
+    paths = [os.path.abspath(os.path.join(g[k].get("folder") or "", "solutions", "T6.vsa")) for k in (False, True)]
+    if not all(os.path.isfile(x) for x in paths):
+        return
+    print("\n  See the skill effect: T6 with skill (key 1) vs without (key 2)")
+    print("    python console/play.py %s %s" % (_q(paths[0], True), _q(paths[1], True)))
 
 
 def cmd_grade(a):
@@ -2845,6 +2880,7 @@ def cmd_grade(a):
     grade_ungraded(reg)
     print("\n" + SAVED_LINE)
     show_compare(reg)
+    play_pair_hint(reg)
     all_done_box(reg)
     return 0
 

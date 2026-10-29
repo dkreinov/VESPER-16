@@ -295,3 +295,82 @@ class ChartsN3Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlayHintTest(unittest.TestCase):
+    """Optional console hints: after stage-1 done, and after grade (T6 with skill vs without)."""
+
+    def _s1(self):
+        w, _ = fresh_ws()
+        run(w, "doctor", "--agent", "codex", "--alias", "t")
+        run(w, "new", "s1", "--method", "plain")
+        return w
+
+    def _sol(self, folder):
+        os.makedirs(os.path.join(folder, "solutions"), exist_ok=True)
+        with open(os.path.join(folder, "solutions", "T3.vsa"), "w") as fh:
+            fh.write("halt\n")
+
+    def test_hint_after_stage1_done_when_solution_exists(self):
+        w = self._s1()
+        reg = w.Registry.load()
+        folder = reg.data["runs"][reg.data["active"]["run_id"]]["folder"]
+        self._sol(folder)
+        out = capture(run, w, "done", "--no-form")
+        sol = os.path.abspath(os.path.join(folder, "solutions", "T3.vsa"))
+        self.assertIn("Optional: play your game", out)
+        self.assertIn("python console/play.py " + sol, out)
+        self.assertIn("NEXT:", out)
+        self.assertLess(out.index("python console/play.py"), out.index("NEXT:"))
+        for ln in out.splitlines():
+            if "console/play.py" not in ln:
+                self.assertLessEqual(len(ln), 72, ln)
+
+    def test_no_hint_after_stage1_done_when_solution_missing(self):
+        w = self._s1()
+        out = capture(run, w, "done", "--no-form")
+        self.assertNotIn("console/play.py", out)
+        self.assertNotIn("Optional: play", out)
+
+    def _s3(self, with_sol=True, ctl_sol=True):
+        w, _ = fresh_ws()
+        fakes.ready_for_s3(w)
+        capture(run, w, "new", "s3", "--task", "all", "--name", "MIRA")
+        reg = w.Registry.load()
+        ids = {x["run_id"].split("-")[2]: x["run_id"] for x in reg.actives()}
+        for k, m, st in (("t6", "plain", with_sol), ("n6", "none", ctl_sol)):
+            reg.set_row(ids[k], "3", dict(task="T6", score="90", start="5", method=m))
+            if st:
+                d = os.path.join(reg.data["runs"][ids[k]]["folder"], "solutions")
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, "T6.vsa"), "w") as fh:
+                    fh.write("halt\n")
+        return w, reg, ids
+
+    def test_pair_command_when_both_exist(self):
+        w, reg, ids = self._s3()
+        out = capture(w.play_pair_hint, reg)
+        a, b = [os.path.abspath(os.path.join(reg.data["runs"][ids[k]]["folder"], "solutions", "T6.vsa"))
+                for k in ("t6", "n6")]
+        self.assertIn("See the skill effect: T6 with skill (key 1) vs without (key 2)", out)
+        self.assertIn('python console/play.py "%s" "%s"' % (a, b), out)
+        for ln in out.splitlines():
+            if "console/play.py" not in ln:
+                self.assertLessEqual(len(ln), 72, ln)
+        self.assertIn(a, capture(w.play_pair_hint, reg))
+
+    def test_pair_nothing_when_one_missing(self):
+        for flags in ((False, True), (True, False), (False, False)):
+            w, reg, _ = self._s3(*flags)
+            self.assertEqual(capture(w.play_pair_hint, reg), "")
+
+    def test_grade_prints_pair(self):
+        w, reg, ids = self._s3()
+        fakes.install_fake_grader(w)
+        for k in ("t6", "n6"):
+            reg.set_row(ids[k], "3", dict(task="T6", score="", start="5", grading="ungraded",
+                                          method="plain" if k == "t6" else "none"))
+        reg.save()
+        out = capture(run, w, "grade")
+        self.assertIn("console/play.py", out)
+        self.assertLess(out.index("console/play.py"), out.index("NEXT:"))
