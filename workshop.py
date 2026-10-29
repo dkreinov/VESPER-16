@@ -3917,7 +3917,7 @@ def auto_item(reg, a, rid, folder, prompt):
     run.update(auto=True, mode="auto", auto_model=a.auto_model, settings_confirmed="auto")
     reg.save()
     key = ("n" if is_control(run) else "t") + run["task"][-1]
-    return dict(rid=rid, folder=folder, prompt=prompt, key=key, label=AUTO_LABEL.get(key, run["task"]),
+    return dict(rid=rid, folder=folder, prompt=prompt, key=key, sol_task=run["task"], label=AUTO_LABEL.get(key, run["task"]),
                 state="waiting", t0=0.0, end=None, proc=None, rc=None, agent=a.auto_agent,
                 task=getattr(a, "task", "all"))
 
@@ -4177,19 +4177,255 @@ def auto_start_screen(a, items):
     print("\n".join(chunk_lines(["%d. %s" % (i, it["label"]) for i, it in enumerate(items, 1)], indent=4)))
 
 
+# ---- the live status screen (TTY only; a pipe or VESPER_NO_LIVE=1 keeps the plain 30-s lines)
+LIVE_BAR = 15
+LIVE_TAIL = 65536
+SPIN_U, SPIN_A = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "-\\|/"
+
+
+def live_enabled():
+    """True when the cursor-up screen can be used: a terminal, VT processing on, VESPER_NO_LIVE not set."""
+    try:
+        return bool(sys.stdout.isatty() and not os.environ.get("VESPER_NO_LIVE")
+                    and os.environ.get("TERM") != "dumb" and _vt_ok())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def live_unicode():
+    """Can the console print the check mark and the braille spinner?"""
+    enc = getattr(sys.stdout, "encoding", None)
+    if not enc:
+        return False
+    try:
+        "✓✗⠋".encode(enc)
+        return True
+    except (UnicodeError, LookupError):
+        return False
+
+
+def live_bar(el, box, width=LIVE_BAR):
+    n = int(width * min(max(el, 0), box) / box) if box > 0 else width
+    return "[" + "#" * n + "." * (width - n) + "]"
+
+
+def _step_text(kind, text):
+    """Map one tool call (kind: shell|read|write|message, text: command or path) to a short phrase."""
+    t = (text or "").replace("\\", "/")
+    if kind == "message":
+        return "thinking"
+    if re.search(r"vesper(\.cmd)?\s+run\b", t):
+        return "running the emulator"
+    if re.search(r"vesper(\.cmd)?\s+asm\b", t):
+        return "assembling"
+    if "SKILL.md" in t:
+        return "reading the skill"
+    if kind == "write" or (kind == "shell" and "solutions" in t):
+        return "writing code"
+    if "tasks/" in t or re.search(r"\btasks\b", t):
+        return "reading the task"
+    if kind == "read":
+        return "reading files"
+    return "running a command" if kind == "shell" else ""
+
+
+def _step_of_event(d):
+    """The step phrase of one agent event (Codex / Claude / Cursor stream-json), or ''."""
+    if not isinstance(d, dict):
+        return ""
+    typ = str(d.get("type") or "")
+    it = d.get("item")
+    if isinstance(it, dict):                                   # Codex exec --json
+        k = it.get("type")
+        if k == "command_execution":
+            return _step_text("shell", str(it.get("command") or ""))
+        if k == "file_change":
+            return "writing code"
+        if k in ("agent_message", "reasoning"):
+            return "thinking"
+        return ""
+    tc = d.get("tool_call")
+    if isinstance(tc, dict):                                   # Cursor stream-json
+        for name, body in tc.items():
+            args = (body or {}).get("args") if isinstance(body, dict) else None
+            args = args if isinstance(args, dict) else {}
+            low = name.lower()
+            if "shell" in low:
+                return _step_text("shell", str(args.get("command") or ""))
+            if "read" in low:
+                return _step_text("read", str(args.get("path") or ""))
+            if "edit" in low or "write" in low:
+                return "writing code"
+            return "running a tool"
+        return ""
+    msg = d.get("message")
+    if typ == "assistant" and isinstance(msg, dict) and isinstance(msg.get("content"), list):   # Claude / Cursor
+        for b in reversed(msg["content"]):
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use":
+                inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                nm = str(b.get("name") or "")
+                if nm == "Bash":
+                    return _step_text("shell", str(inp.get("command") or ""))
+                if nm in ("Edit", "Write", "MultiEdit"):
+                    return "writing code"
+                if nm in ("Read", "Grep", "Glob"):
+                    return _step_text("read", str(inp.get("file_path") or inp.get("path") or inp.get("pattern") or ""))
+                return "running a tool"
+            if b.get("type") == "text":
+                return "thinking"
+    return ""
+
+
+def last_step(folder):
+    """Best-effort: what the agent does now, from the tail of agent-output.jsonl. '' when unknown."""
+    try:
+        with open(os.path.join(folder, "agent-output.jsonl"), "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - LIVE_TAIL))
+            data = f.read()
+        lines = data.decode("utf-8", errors="replace").splitlines()
+        if size > LIVE_TAIL and lines:
+            lines = lines[1:]                          # the first line may be cut
+        for x in reversed(lines):
+            x = x.strip()
+            if not x.startswith("{"):
+                continue
+            try:
+                d = json.loads(x)
+            except ValueError:
+                continue                               # a partial line
+            s = _step_of_event(d)
+            if s:
+                return s
+    except Exception:  # noqa: BLE001  (a status line must never crash the run)
+        pass
+    return ""
+
+
+def live_header(model, items, box_min=None, budget=None):
+    box_min = TIME_BOX_MIN if box_min is None else box_min
+    budget = S3_RUN_BUDGET if budget is None else budget
+    n = len(items)
+    nw = sum(1 for it in items if str(it.get("key", "t"))[:1] != "n")
+    nc = n - nw
+    who = ("%d use your skill, %d do not (the control)." % (nw, nc) if nw and nc
+           else ("All use your skill." if nw else "None use your skill (the control)."))
+    return ["STAGE 3 --auto: %d fresh agent%s (%s) work alone" % (n, "" if n == 1 else "s", model),
+            who + " They cannot see each other.",
+            "Each has %d min and %d emulator runs. Nothing to type: just watch." % (box_min, budget)]
+
+
+def live_footer(n):
+    return ["When all %d end: the tool grades them and shows WITH vs WITHOUT." % n if n > 1
+            else "When it ends: the tool grades it.",
+            "Ctrl+C stops all agents."]
+
+
+def live_agent_lines(it, now, box, uni=True, spin=0):
+    """The two lines of one agent (each at most 72 characters)."""
+    st = it["state"]
+    el = ((it["end"] or now) - it["t0"]) if st != "waiting" else 0
+    runs = it.get("live_runs", 0)
+    saved = "yes" if it.get("live_saved") else "no"
+    ok = "✓" if uni else "*"
+    if st == "running":
+        sp = SPIN_U if uni else SPIN_A
+        head = "%s %5s %s" % (sp[spin % len(sp)], fmt_mss(el), live_bar(el, box))
+    elif st == "waiting":
+        head = "- waiting"
+    elif st == "done":
+        head = "%s done %s" % (ok, fmt_mss(el))
+    elif st == "stopped":
+        head = "stopped at time box"
+    elif st == "killed":
+        head = "stopped by Ctrl+C"
+    else:
+        head = "error: %s" % " ".join(str(it.get("err") or "could not start").split())
+    line1 = "%-16s  %s" % (it["label"][:16], head)
+    if st != "failed":
+        line1 += "  runs %d/%d  saved: %s" % (runs, S3_RUN_BUDGET, saved)
+    line2 = "   last step: %s" % (it.get("live_step") or "-")
+    return [line1[:MAXW], line2[:MAXW]]
+
+
+def live_block(items, now, box, uni=True, spin=0):
+    out = []
+    for it in items:
+        out += live_agent_lines(it, now, box, uni, spin)
+    return out + [""] + live_footer(len(items))
+
+
+def live_refresh(items, now):
+    """Update the runs, saved and last step of every item (reads files; never raises)."""
+    for it in items:
+        try:
+            if it["state"] == "waiting":
+                continue
+            end = it["end"] or now
+            it["live_runs"] = min(count_runs(it["folder"], it["t0"] - 1, end) or 0, 99)
+            task = it.get("sol_task") or ""
+            it["live_saved"] = bool(task and os.path.isfile(os.path.join(it["folder"], "solutions", task + ".vsa")))
+            if it["state"] == "running":
+                it["live_step"] = last_step(it["folder"]) or it.get("live_step", "")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+class LiveView:
+    """Draws the block in place with ANSI cursor-up. Writes to sys.stdout directly: the print wrapper
+    would re-wrap lines and break the cursor-up count."""
+
+    def __init__(self, items, box, model):
+        self.items, self.box, self.model = items, box, model
+        self.uni = live_unicode()
+        self.height = 0
+        self.tick = 0
+
+    def _w(self, s):
+        sys.stdout.write(s)
+        sys.stdout.flush()
+
+    def header(self):
+        self._w("\n" + "\n".join(live_header(self.model, self.items)) + "\n\n")
+
+    def erase(self):
+        if self.height:
+            self._w("\x1b[%dA\x1b[J" % self.height)
+            self.height = 0
+
+    def draw(self, now=None):
+        now = time.time() if now is None else now
+        live_refresh(self.items, now)
+        lines = live_block(self.items, now, self.box, self.uni, self.tick)
+        self.tick += 1
+        up = "\x1b[%dA" % self.height if self.height else ""
+        self._w(up + "".join("\x1b[2K" + x + "\n" for x in lines))
+        self.height = len(lines)
+
+
 def run_auto(reg, a, items):
     """Start the agents in order, print a status block every AUTO_TICK seconds, stop each at the time box,
     finish each run when it ends. Ctrl+C: kill all, keep the finished results."""
     box = AUTO_BOX_SEC if AUTO_BOX_SEC is not None else TIME_BOX_MIN * 60
     _FAIL_HINT[0] = False
     auto_start_screen(a, items)
+    live = LiveView(items, box, a.auto_model) if live_enabled() else None
     try:
+        if live:
+            live.header()
         for it in items:
             auto_launch(reg, a, it)
             if it["state"] == "failed":
                 auto_finish(reg, it)
-        print("\n" + status_block(items))
-        last = time.time()
+                it["err"] = reg.data["runs"][it["rid"]].get("error_note", "")
+        if live:
+            live.draw()
+        else:
+            print("\n" + status_block(items))
+        last = lastdraw = time.time()
         while any(it["state"] == "running" for it in items):
             _sleep(AUTO_POLL)
             now = time.time()
@@ -4201,10 +4437,22 @@ def run_auto(reg, a, items):
                     continue
                 kill_tree(it["proc"])         # also when it ended: its orphans (emulator, servers) die too
                 it["state"], it["end"], it["rc"] = ("done" if rc is not None else "stopped"), now, rc
+                if live:
+                    live.erase()
                 auto_finish(reg, it)
-                print("\n" + status_block(items))
+                if it["state"] == "failed":
+                    it["err"] = reg.data["runs"][it["rid"]].get("error_note", "")
+                if live:
+                    live.draw()
+                    lastdraw = time.time()
+                else:
+                    print("\n" + status_block(items))
                 last = now
-            if now - last >= AUTO_TICK:
+            if live:
+                if now - lastdraw >= 1.0:
+                    live.draw(now)
+                    lastdraw = now
+            elif now - last >= AUTO_TICK:
                 print("\n" + status_block(items))
                 last = now
     except KeyboardInterrupt:
