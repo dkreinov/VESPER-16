@@ -2823,7 +2823,7 @@ def cmd_done(a):
         if fr:
             print("\n" + fr)
         play_hint(reg, rid)
-        next_box("python workshop.py skill","stage 2 (the SAME agent thread writes a skill), run:")
+        next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
     else:
         show_compare(reg, rid, brief=True)         # only when the pair of this run is complete
         left = reg.actives("3")
