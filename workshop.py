@@ -2394,8 +2394,29 @@ def render_table(head, rows, widths, right=(), indent=2):
     return [row(head), pad + " ".join("-" * w for w in widths)] + [row(r) for r in rows]
 
 
-SHOW_HEAD = ["run", "st", "task", "min", "runs", "cost", "score"]
-SHOW_WIDTHS = [16, 2, 4, 5, 4, 6, 9]          # the box table is 70 columns wide
+SHOW_HEAD = ["run", "what", "min", "runs", "cost", "score"]
+SHOW_NARROW = ("what", "min", "runs", "cost", "score")
+
+
+def fit_widths(head, rows):
+    """Column widths from the final cell text (marks like PASS, FAIL, * and ! included; colour codes not)."""
+    return [max(_vis(c) for c in col) for col in zip(head, *rows)]
+
+
+def table_width(widths, indent=2):
+    return indent + sum(widths) + 3 * len(widths) + 1      # the box table; the ASCII table is narrower
+
+
+def row_what(r, reg=None):
+    """What a result row is, in words: "1: solve T3", "2: new skill", "T3 + skill", "T3, no skill"."""
+    st, task = str(r.get("stage", "")), r.get("task", "")
+    if st == "1":
+        return "1: solve %s" % (task or "T3")
+    if st == "2":
+        return "2: new skill"
+    run = ((reg.data["runs"].get(r.get("run_id", "")) if reg else None) or {})
+    ctl = is_control(run) or r.get("method") == "none"
+    return "%s%s" % (task, ", no skill" if ctl else " + skill")
 
 
 def run_summary(row, stage=None):
@@ -2449,7 +2470,7 @@ def run_warnings(row):
     return out
 
 
-def show_rows(rows, note=True):
+def show_rows(rows, note=True, reg=None):
     """Results: one table that fits 72 columns (run, task, minutes, runs, cost, score)."""
     body = []
     for r in rows:
@@ -2460,16 +2481,17 @@ def show_rows(rows, note=True):
         if r.get("overrun") == "yes":
             sc += "!"
         em = str(r.get("emulator_runs", "")).strip()
-        body.append([r.get("run_id", ""), r.get("stage", ""), r.get("task", ""), "-" if el is None else "%.1f" % el,
+        body.append([r.get("run_id", ""), row_what(r, reg), "-" if el is None else "%.1f" % el,
                      "-" if em in ("", "unknown") else em, "-" if cost is None else "$%.2f" % cost, sc])
-    if term_cols() < 2 + sum(SHOW_WIDTHS) + 3 * len(SHOW_WIDTHS) + 1:
+    widths = fit_widths(SHOW_HEAD, body)
+    if term_cols() < table_width(widths) or table_width(widths) > MAXW:
         for b in body:                           # a narrow window: one short key: value block per run
             print("\n  %s" % b[0])
-            for k, v in zip(("stage", "task", "min", "runs", "cost", "score"), b[1:]):
+            for k, v in zip(SHOW_NARROW, b[1:]):
                 if v not in ("", "-"):
                     print("    %s: %s" % (k, v))
     else:
-        print("\n".join(render_table(SHOW_HEAD, body, SHOW_WIDTHS, right=(3, 4, 5))))
+        print("\n".join(render_table(SHOW_HEAD, body, widths, right=(2, 3, 4))))
     models = {}
     for r in rows:
         if r.get("model"):
@@ -2510,7 +2532,7 @@ T6_BASELINE = "small model, no skill: 0/12 pass in 5 min"
 def color_change(ch, width=10):
     """Pad to width, then colour: real savings green, real increases red, zero plain."""
     chc = ch.rjust(width)
-    if ch in ("+0%", "-0%"):
+    if ch in ("+0%", "-0%") or (ch[:1] in ("+", "-") and not re.search(r"[1-9]", ch)):
         return chc
     if ch.startswith("-"):
         return c_ok(chc)
@@ -2551,6 +2573,23 @@ def verdict(row):
     return "PASS" if passed(row) else "FAIL"
 
 
+CHANGE_NOT_SHOWN = "  Change not shown: one attempt failed, so time and cost are not comparable."
+
+
+def diff_text(f, a, b):
+    """Signed difference (with skill minus without), in the units of the two columns: -0.9, +2, -0.3M."""
+    if a is None or b is None:
+        return "-"
+    d = b - a
+    if f == "k":
+        return "+0" if int(d) == 0 else ("-" if d < 0 else "+") + M.fmt_k(abs(int(d)))
+    if f == "%.1f":
+        return "%+.1f" % d
+    if f == "%.2f":
+        return "%+.2f" % d
+    return "%+d" % round(d)
+
+
 def compare_control(reg, rw, rc, task="T3", note=""):
     """Task WITH the skill (rw) vs WITHOUT the skill (rc, control), same parent."""
     match = settings_match(rw, rc)
@@ -2560,23 +2599,26 @@ def compare_control(reg, rw, rc, task="T3", note=""):
     else:
         banner("%s: WITH vs WITHOUT the skill%s" % (task, note))
         print(UNMATCHED_NOTE if not match else OVERRUN_NOTE)
-    head = ["", "without", "with skill", "change"]
-    body = []
     failed = "FAIL" in (verdict(rc), verdict(rw))
+    head = ["", "without", "with skill"] + ([] if failed else ["change"])
+    body = []
     for name, keys, f in COMPARE:
         a, b = _val(rc, *keys), _val(rw, *keys)
         fmt = lambda x: "-" if x is None else (M.fmt_k(int(x)) if f == "k" else f % x)
         ca, cb = fmt(a), fmt(b)
         if name == "Score":
             ca, cb = ("%s %s" % (ca, verdict(rc))).strip(), ("%s %s" % (cb, verdict(rw))).strip()
-        ch = "%+d%%" % round((b - a) / a * 100) if a and b is not None and name != "Score" and not failed else ""
-        body.append([name, ca, cb, color_change(ch, 0)])
+        cells = [name, ca, cb]
+        if not failed:
+            cells.append(color_change(diff_text(f, a, b), 0))
+        body.append(cells)
         if name == "Score" and over:
             body.append(["Time box"] + ["over %d min" % TIME_BOX_MIN if r.get("overrun") == "yes" else "ok"
-                                        for r in (rc, rw)] + [""])
-    print("\n" + "\n".join(render_table(head, body, [13, 16, 16, 6], right=(1, 2, 3))))
+                                        for r in (rc, rw)] + ([] if failed else [""]))
+    print("\n" + "\n".join(render_table(head, body, fit_widths(head, body), right=(1, 2, 3))))
     print("  without = %s;  with skill = %s" % (rc["run_id"], rw["run_id"]))
     if failed:
+        print("\n" + CHANGE_NOT_SHOWN)
         print("\n" + FAILED_NOTE)
 
 
@@ -2643,7 +2685,7 @@ def show_compare(reg, s3_id=None, cost_note=True, brief=False):
         reg_ctl = {run["task"] for run in runs.values()
                    if run.get("parent") == parent and is_control(run)}
         if not any(k[1] for k in g) and not reg_ctl:
-            show_rows(mine, note=False)
+            show_rows(mine, note=False, reg=reg)
             print("\n  No control runs: run python workshop.py new s3 --task all for a fair comparison.")
             continue
         shown_t3 = None
@@ -3259,7 +3301,7 @@ def cmd_show(a):
         print("No results yet.")
     else:
         cmp = getattr(a, "compare", False) or not reg.actives()
-        show_rows(rows, note=not cmp)
+        show_rows(rows, note=not cmp, reg=reg)
         if cmp:
             show_compare(reg)                       # the tables, then the notes once
         elif any(r["stage"] == "3" for r in rows):
@@ -3375,7 +3417,7 @@ def cmd_shadow(a):
             sys.exit("cannot start %s: %s" % (cmd[0], e))
     reg.start_active(rid, a.stage[1] + "s", t0)
     row = finish_stage(reg, rid, a.stage[1] + "s", a)
-    show_rows([row])
+    show_rows([row], reg=reg)
     return 0
 
 

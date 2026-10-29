@@ -75,10 +75,10 @@ class Narrow(unittest.TestCase):
     def test_show_narrow_terminal_gives_blocks(self):
         fakes.ready_for_s3(self.w)
         with mock.patch.object(self.w.shutil, "get_terminal_size",
-                               return_value=os.terminal_size((60, 24))):
+                               return_value=os.terminal_size((30, 24))):
             out = capture(self.w, "show")
-        self.assertIn("  stage: 2", out)
-        self.assertIn("    task: T3", out)
+        self.assertIn("    what: 2: new skill", out)
+        self.assertIn("    what: 1: solve T3", out)
         self.assertNotIn("emulator_runs", out)
         self.assertEqual(long_lines(out), [])
 
