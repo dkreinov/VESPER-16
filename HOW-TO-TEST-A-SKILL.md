@@ -1,5 +1,7 @@
 # How to test a skill (take this to your own work)
 
+For the short version, use [CHECKLIST.md](CHECKLIST.md): eight practical checks linked to T3, T6, and T4.
+
 A skill turns an expensive discovery into a file that the next agent can reuse. Often a cheaper model can then do
 the repeat work. In our lab (task T6, 3 runs each): the large model without a skill passed 3/3 for $0.44 per task;
 the small model WITH the skill passed 3/3 for $0.026; the small model without it passed 0/3.
