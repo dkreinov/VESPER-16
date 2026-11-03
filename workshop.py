@@ -412,16 +412,16 @@ SMALL_SHORT = {"claude": "Haiku 5.5 (/model claude-haiku-5-5)", "codex": "gpt-6-
                "cursor": "GPT-5.6 Luna High (not Auto)", "copilot": CP.SMALL}
 
 
-def partial_notice(reg):
+def partial_notice(reg, semi=False):
     """GitHub Copilot is PARTIAL support: say so on the stage pages. Other agents: nothing is printed."""
     if reg.data.get("agent") == "copilot":
-        print("\n".join(CP.banner_lines()))
+        print("\n".join(CP.banner_lines(semi)))
 
 
-def cursor_app_lines(agent, total=4):
+def cursor_app_lines(agent, total=4, semi=False):
     """Stage-3 lines for a learner who uses the Cursor app (not --auto)."""
     if agent == "copilot":
-        return CP.banner_lines() + CP.stage3_lines(total)
+        return CP.banner_lines(semi) + CP.stage3_lines(total)
     if agent != "cursor":
         return []
     return ["  Model: GPT-5.6 Luna High (%s) in %s." % (AUTO_MODEL["cursor"],
@@ -1261,7 +1261,7 @@ def show_s1(reg, a, rid, f, prompt, method, mode, again=False):
     if mode == "semi":
         semi_page(reg, rid, "STAGE 1 - the agent with NO skill        run %s" % rid, f, prompt, "1",
                   "python workshop.py new s1", extra=lambda: method_notice(method, " (used in stage 2)"))
-        partial_notice(reg)
+        partial_notice(reg, semi=True)
         next_box(done_cmd, "when the agent says it is done, run:")
         return 0
     if run.get("mode") == "semi":
@@ -3256,7 +3256,7 @@ def cmd_skill(a):
             print("  The prompt is on the clipboard. Paste it (Ctrl+V) in the SAME chat as stage 1. No new window opens.")
         else:
             print("  The clipboard did not work. Copy the text between the PROMPT lines by hand.")
-    partial_notice(reg)
+    partial_notice(reg, semi=(mode == "semi"))
     print("\n  4. Wait until the agent says the skill is written.")
     next_box("python workshop.py harvest", "when the skill is written, run:")
     return 0
@@ -5029,7 +5029,7 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
     model_txt = (LARGE_SHORT if stage == "1" else SMALL_SHORT).get(agent, "")
     print("  Check the model: %s." % model_txt if model_txt else "  Check the model. Never use Auto.")
     if stage == "3" and agent in ("cursor", "copilot"):
-        for l in cursor_app_lines(agent, 1):
+        for l in cursor_app_lines(agent, 1, semi=True):
             print(l)
     if not reopen:                                # a resume: the app is open and the prompt may be sent
         print("\n  " + c_next(mem_line(agent)))

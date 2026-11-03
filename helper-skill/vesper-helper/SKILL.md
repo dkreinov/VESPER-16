@@ -24,7 +24,7 @@ You help a learner who is stuck with the VESPER-16 workshop kit. Use short sente
 
 ## The three modes
 
-- auto: add `--auto`. The kit runs the agent.
+- auto: add `--auto` (stage 3 only). The kit runs the agent.
 - semi: add `--mode semi`. The kit opens the app on the run folder and shows the prompt.
 - manual: add `--mode manual`. The kit prints the folder and the prompt. The learner opens the app.
 
@@ -42,7 +42,7 @@ Then one Enter runs `done` for all four runs. By hand: `python workshop.py done 
 
 ## Memory off, by agent
 
-- Codex: type `/memories` and turn memory off BEFORE the first prompt. `done` shows `memory: OFF (verified)` or a warning.
+- Codex: type `/memories` and turn memory off BEFORE the first prompt. In the Codex CLI, paste the message after that. `done` shows `memory: OFF (verified)` or a warning.
 - Claude Code: the kit turns it off in semi mode. By hand, nothing to do.
 - Cursor: nothing to switch. Use a new folder and a new chat. Cursor keeps transcripts in `~/.cursor/projects/<slug>/agent-transcripts`; an agent can read them.
 - Copilot: use a VS Code profile `vesper-clean`. Turn OFF `chat.copilot.memory.enabled` in that profile only.

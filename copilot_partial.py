@@ -22,6 +22,12 @@ LIMITS = [
     "This path is less tested than Codex or Claude Code. If something looks wrong, tell the instructor.",
 ]
 
+# Same facts for the SEMI pages. The old manual pages keep LIMITS (golden text).
+LIMITS_SEMI = [
+    "Semi mode opens VS Code on the run folder with the chat ready. You send the prompt yourself.",
+    "NOT supported: --auto, the Copilot CLI and the Copilot app.",
+] + LIMITS[2:]
+
 SETUP = [
     "Before you start (once, 3 minutes):",
     "  1. VS Code: File > Preferences > Profiles > Create Profile. Name it vesper-clean.",
@@ -51,9 +57,9 @@ def doctor_lines():
     return out
 
 
-def banner_lines():
+def banner_lines(semi=False):
     """Short reminder, printed on the stage pages."""
-    return ["", "  *** %s ***" % PARTIAL_TITLE] + ["  - " + x for x in LIMITS[:3]]
+    return ["", "  *** %s ***" % PARTIAL_TITLE] + ["  - " + x for x in (LIMITS_SEMI if semi else LIMITS)[:3]]
 
 
 def stage3_lines(total=4):

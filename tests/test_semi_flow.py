@@ -207,6 +207,18 @@ class Stage1(Base):
         self.assertEqual(e[0]["argv"][1], "-n")
         self.assertEqual(e[1]["argv"][1:3], ["chat", "-r"])
         self.assertIn("PARTIAL", out.upper())                       # the Copilot notice stays
+        t = flat(out)
+        self.assertNotIn("manual mode only", t)                     # the page is SEMI: no contradiction
+        self.assertIn("Semi mode opens VS Code", t)
+        self.assertIn("--auto", t)
+
+    def test_copilot_stage3_semi_page_notice(self):
+        self.stage3_ready("copilot")
+        out, _ = capture(self.w, "new", "s3", "--task", "T3", "--mode", "semi")
+        t = flat(out)
+        self.assertNotIn("manual mode only", t)
+        self.assertIn("PARTIAL SUPPORT", t)
+        self.assertIn("--auto", t)
 
 
 class Skill(Base):

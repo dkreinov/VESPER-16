@@ -12,15 +12,15 @@ BEFORE CLASS (once)
    (use claude, cursor or copilot). GREEN or YELLOW = go. RED = read the first RED line.
 
 THREE MODES (you choose; the kit never switches alone)
-- auto:   add --auto. The kit runs the agent. You do nothing.
+- auto:   add --auto (stage 3 only). The kit runs the agent. You do nothing.
 - semi:   add --mode semi. The kit opens your app on the run folder and shows the prompt.
 - manual: add --mode manual. The kit prints the folder and the prompt. You open the app.
 No flag = semi if the kit finds your app, else manual.
 App did not open? Run the same command again with --mode manual.
 
 MEMORY OFF (every workshop chat)
-- Codex: type /memories and turn it off BEFORE you send the prompt.
-- Claude Code: the kit does it in semi mode.
+- Codex: type /memories and turn it off BEFORE you send the prompt. In the Codex CLI, paste the message after that.
+- Claude Code: the kit does it in semi mode and sends the message itself.
 - Cursor: nothing to switch. Use a new chat for each run.
 - Copilot: VS Code profile "vesper-clean", turn OFF chat.copilot.memory.enabled.
 

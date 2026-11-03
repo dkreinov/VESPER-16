@@ -46,7 +46,7 @@ Install your agent from its vendor site. Sign in. Use a paid plan, so you can pi
 | Claude Code | `claude` in a terminal | sign in at the first start |
 | Copilot | VS Code with the Copilot Chat extension | sign in to GitHub |
 
-Copilot works in manual mode only. It is less tested than the other agents.
+Copilot has partial support. Semi mode opens VS Code with the chat ready, and you send the prompt yourself. `--auto`, the Copilot CLI and the Copilot app are not supported. It is less tested than the other agents.
 
 ## 4. Check the computer
 
@@ -65,7 +65,7 @@ You choose the mode. The kit never switches by itself.
 
 | Mode | Command part | What happens |
 |---|---|---|
-| auto | `--auto` (or `--mode auto`) | The kit runs the agent for you. You do nothing. |
+| auto | `--auto` (or `--mode auto`), stage 3 only | The kit runs the agent for you. You do nothing. |
 | semi | `--mode semi` | The kit makes ONE run folder per page, opens your app on it, and shows the prompt. |
 | manual | `--mode manual` | The kit makes the folder and prints the path and the prompt. You open the app yourself. |
 
@@ -80,7 +80,7 @@ Memory must be OFF in every workshop chat.
 | Agent | What you do |
 |---|---|
 | Codex | In the chat, type `/memories`. Turn memory off BEFORE you send the prompt. `done` checks it later. |
-| Claude Code | In semi mode the kit turns it off. By hand, you do nothing. |
+| Claude Code | In semi mode the kit turns it off, and sends the message when the window opens. By hand, you do nothing. |
 | Cursor | Nothing to switch. A new folder and a new chat start clean. Cursor keeps chat transcripts on disk, and an agent can read them. Use a new chat for each run. |
 | Copilot | In VS Code, make a profile named `vesper-clean`. In that profile turn OFF the setting `chat.copilot.memory.enabled`. |
 
@@ -98,10 +98,14 @@ Memory must be OFF in every workshop chat.
    - Claude Code: your default model (Sonnet or Opus, not Haiku).
    - Cursor: a large model from the menu.
    - Copilot: a large model from the model picker.
-5. Turn memory off (section 6).
-6. Start a new chat. The full prompt is on the page. It is the same text as `PROMPT.txt` in the run folder.
-   In semi mode a short message may be filled in or copied to the clipboard. It tells the agent to read `PROMPT.txt`.
-7. Send the prompt.
+5. Turn memory off and send the prompt. The steps depend on the agent:
+   - Codex app: the short message is in the box. Type `/memories`, turn memory off, then send.
+   - Codex CLI: a terminal opens. Type `/memories` and turn memory off. Then paste the message (it is on the clipboard) and send it.
+   - Claude Code: the kit turns memory off and sends the message when the window opens. You do nothing.
+   - Cursor: nothing to turn off. Paste the message (it is on the clipboard) in a new chat and send it.
+   - Copilot: use the `vesper-clean` profile with `chat.copilot.memory.enabled` OFF. The kit opens that profile. The message is in the chat box. Send it.
+6. The full prompt is on the page. It is the same text as `PROMPT.txt` in the run folder.
+   The short message tells the agent to read `PROMPT.txt`.
 8. When the agent is done, run:
    ```
    python workshop.py done
@@ -148,8 +152,8 @@ Memory must be OFF in every workshop chat.
       - Codex: gpt-6-luna, effort high.
       - Cursor: GPT-5.6 Luna High.
       - Copilot: Claude Haiku 5.5 or GPT-6 Luna.
-   4. Turn memory off (section 6).
-   5. Send the prompt. Press Enter in the terminal. The next page appears at once.
+   4. Turn memory off and send the prompt, as in section 7 step 5. Claude Code does both by itself.
+   5. Press Enter in the terminal. The next page appears at once.
 4. Do not wait for a run to end. After page 4, the kit prints the stop time of each run (start plus 10 minutes).
 5. Stop every agent at its stop time.
 6. Press Enter once in the terminal. The kit then runs `done` for all four runs.
