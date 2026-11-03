@@ -154,7 +154,7 @@ class Open(Base):
         self.assertEqual(argv[argv.index("-c") + 1], "model_reasoning_effort=high")
         self.assertNotIn(L.one_line("s1-ab12"), argv)               # not sent: memory is turned off first
         clip.assert_called_once_with(L.one_line("s1-ab12"))
-        self.assertTrue(any("/memories" in x for x in r.lines))
+        self.assertTrue(any("memory off first" in x and "paste" in x for x in r.lines))
 
     def test_codex_cli_no_effort_flag_without_effort(self):
         L.open_project("codex", self.folder, "s1-ab12", model="gpt-x", clip=lambda t: True)

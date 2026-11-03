@@ -276,8 +276,8 @@ def open_project(agent, folder, run_id, *, model=None, effort=None, mode_hint=""
             copied = (clip or _clip)(msg)
             return Opened(True, "codex-terminal", [
                 "A new terminal window runs Codex on the run folder.",
-                "Type /memories and turn memory off. Then paste the message and send it." if copied
-                else "Type /memories and turn memory off. Then type this message and send it: %s" % msg], manual)
+                "Turn memory off first. Then paste the message and send it." if copied
+                else "Turn memory off first. Then type this message and send it: %s" % msg], manual)
         if agent == "claude":
             env = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
             argv = [found.path] + (["--model", model] if model else []) + [msg]

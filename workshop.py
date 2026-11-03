@@ -5012,7 +5012,7 @@ def label_of(folder):
     return os.path.basename(os.path.normpath(folder)).split("__")[0]
 
 
-def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extra=None):
+def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extra=None, reopen=True):
     """One semi page: mode line, run name, full prompt, memory line, model line, then the app opens."""
     agent = reg.data.get("agent") or ""
     run = reg.data["runs"][rid]
@@ -5026,12 +5026,15 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
     print("  Folder: %s" % folder)
     prompt_block(prompt)
     print("  This text is the same as PROMPT.txt in the folder.")
-    print("\n  " + c_next(mem_line(agent)))
     model_txt = (LARGE_SHORT if stage == "1" else SMALL_SHORT).get(agent, "")
     print("  Check the model: %s." % model_txt if model_txt else "  Check the model. Never use Auto.")
     if stage == "3" and agent in ("cursor", "copilot"):
         for l in cursor_app_lines(agent, 1):
             print(l)
+    if not reopen:                                # a resume: the app is open and the prompt may be sent
+        print("\n  " + c_next(mem_line(agent)))
+        print("  The app is already open for this run. The kit does not open it again.")
+        return LA.Opened(True, run.get("semi_open") or "", [], [])
     model, effort = (S1_MODEL if stage == "1" else S3_MODEL).get(agent, (None, None))
     try:
         op = LA.open_project(agent, folder, rid, model=model, effort=effort, clip=copy_to_clipboard)
@@ -5044,6 +5047,7 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
     reg.save()
     print()
     print("\n".join("  " + l for l in op.lines))
+    print("\n  " + c_next(mem_line(agent, op.ok)))          # after the opener: a failed open must not claim "off"
     if not op.ok:
         print(c_err("  The app did not open on its own."))
         print("\n".join("  " + l for l in op.manual))
@@ -5118,16 +5122,19 @@ def semi_s3_finish(reg, a, made):
     return 0
 
 
-def semi_run_page(reg, a, i, total, key, rid, f, p, retry_cmd):
+def semi_run_page(reg, a, i, total, key, rid, f, p, retry_cmd, resume=False):
     run = reg.data["runs"][rid]
     label = label_of(f)
     head = "STAGE 3 - RUN %d of %d  %s" % (i, total, label)
     nm = run.get("name", "")
     if nm and run.get("task") == "T6":
         head += "   name on T6: " + nm
-    semi_page(reg, rid, head, f, p, "3", retry_cmd, label=label)
+    opened = bool(resume and run.get("semi_open") and run.get("semi_open") != "failed")
+    semi_page(reg, rid, head, f, p, "3", retry_cmd, label=label, reopen=not opened)
+    if opened and run.get("sent_at"):             # a resume: keep the first send time, never send twice
+        return
     ask("\n  Send the prompt in the app. Then press Enter here. The next page appears at once. ", "")
-    run["sent_at"] = time.time()
+    run["sent_at"] = run.get("sent_at") or time.time()
     reg.save()
 
 
@@ -5159,7 +5166,7 @@ def resume_s3_semi(reg, a, entries):
     made = [(k, entries[k][0], entries[k][1], entries[k][2]) for k in order]
     retry = "python workshop.py new s3 --task %s" % a.task
     for i, m in enumerate(made, 1):
-        semi_run_page(reg, a, i, len(made), m[0], m[1], m[2], m[3], retry)
+        semi_run_page(reg, a, i, len(made), m[0], m[1], m[2], m[3], retry, resume=True)
     return semi_s3_finish(reg, a, made)
 
 

@@ -347,9 +347,35 @@ class Stage3(Base):
                 pass
         reg = self.w.Registry.load()
         self.assertEqual(len(reg.actives("3")), 1)                     # only page 1 was made
+        first = reg.actives("3")[0]["run_id"]
+        reg.data["runs"][first]["sent_at"] = 1234.5               # the learner sent it before the break
+        reg.save()
+        launches = len(self.entries())
+        self.assertEqual(launches, 1)
         out, rc = capture(self.w, "new", "s3", "--task", "all", "--name", "MIRA")
         self.assertIn("already set up", out)
         self.assertIn("T3_WITH_SKILL_LUNA", out)
+        self.assertEqual(len(self.entries()), launches)             # no second launch: no double send
+        self.assertEqual(self.w.Registry.load().data["runs"][first]["sent_at"], 1234.5)
+
+    def test_memory_line_comes_after_a_failed_open(self):
+        self.stage3_ready("claude")
+        with mock.patch.object(self.w.LA, "open_project", return_value=self.w.LA.Opened(False, "", ["no"], ["Folder: F"])):
+            out, _ = capture(self.w, "new", "s3", "--task", "T3", "--mode", "semi")
+        self.assertNotIn("The kit turned it off", flat(out))
+        self.assertIn("Nothing to turn off by hand", flat(out))
+
+    def test_memory_line_after_a_good_open(self):
+        self.stage3_ready("claude")
+        out, _ = capture(self.w, "new", "s3", "--task", "T3", "--mode", "semi")
+        self.assertIn("The kit turned it off", out)
+        self.assertLess(out.index("A new terminal window"), out.index("The kit turned it off"))
+
+    def test_codex_cli_page_says_paste_and_send(self):
+        self.stage3_ready("codex")
+        out, _ = capture(self.w, "new", "s3", "--task", "T3", "--mode", "semi")
+        self.assertIn("/memories", out)
+        self.assertNotIn("sent as the first prompt", out)
 
     def test_failed_open_prints_manual_command_on_the_page(self):
         self.stage3_ready("codex")
@@ -462,7 +488,9 @@ class EveryAgentPages(Base):
             self.assertEqual(e[0]["agent"], agent)
             for part in argv_part:
                 self.assertIn(part, e[0]["argv"], agent)
-            if agent != "cursor" and agent != "copilot":
+            if agent == "codex":
+                self.assertNotIn("Workshop run: %s" % rid, " ".join(e[0]["argv"]))      # pasted, not sent
+            elif agent != "cursor" and agent != "copilot":
                 self.assertEqual(e[0]["argv"][-1], "Workshop run: %s. Read PROMPT.txt in this folder and do what it says." % rid)
             if agent in ("cursor", "copilot"):
                 self.assertIn(run_["folder"], e[0]["argv"])
