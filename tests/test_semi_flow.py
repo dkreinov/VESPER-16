@@ -126,6 +126,29 @@ class Stage1(Base):
         self.assertIn("Workshop run: " + rid, txt)
         self.assertIn("tasks/T3.md", txt)
 
+    def test_codex_link_has_no_prompt_and_the_prompt_comes_after_the_enter(self):
+        """Memory first: the app opens with an empty box, the prompt is shown after 'memory is off' (Dennis, 2026-11-03)."""
+        self.doctor("codex")
+        import tempfile
+        os.environ["VESPER_LAUNCHER_CODEX"] = tempfile.mkdtemp(prefix="vcodexapp_")      # a folder = the Codex app route
+        seen = []
+        buf = io.StringIO()
+
+        def fake_ask(prompt, default=""):
+            seen.append(buf.getvalue())
+            return ""
+        with mock.patch.object(self.w, "gate_on", return_value=True),                 mock.patch.object(self.w, "ask", side_effect=fake_ask), contextlib.redirect_stdout(buf):
+            run(self.w, "new", "s1")
+        out = buf.getvalue()
+        link = [e for e in self.entries() if e["agent"] == "codex"][0]["argv"][-1]
+        self.assertTrue(link.startswith("codex://new?path="), link)
+        self.assertNotIn("prompt=", link)                         # an empty box on purpose
+        self.assertEqual(len(seen), 1)
+        self.assertIn("/memories", seen[0])
+        self.assertNotIn("END OF PROMPT", seen[0])                # the prompt was not on screen when the kit waited
+        self.assertIn("END OF PROMPT", out)
+        self.assertTrue("clipboard" in out or "Type this message" in out)
+
     def test_codex_page_says_memory_off_before_the_prompt(self):
         self.doctor("codex")
         out, _ = capture(self.w, "new", "s1")

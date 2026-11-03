@@ -5025,8 +5025,25 @@ def label_of(folder):
     return os.path.basename(os.path.normpath(folder)).split("__")[0]
 
 
+def _semi_open(reg, rid, agent, folder, stage, run, retry_cmd, defer):
+    """Open the app on the run folder. A launcher never stops a page. defer = Codex: empty box, message later."""
+    model, effort = (S1_MODEL if stage == "1" else S3_MODEL).get(agent, (None, None))
+    try:
+        op = LA.open_project(agent, folder, rid, model=model, effort=effort, clip=copy_to_clipboard,
+                             defer_message=defer)
+    except Exception as e:
+        op = LA.Opened(False, "", ["The kit could not open the app (%s)." % type(e).__name__],
+                       ["Folder: %s" % folder, "Open %s on this folder by hand." % AGENT_NAME.get(agent, "your agent"),
+                        "Send this message in the chat: %s" % LA.one_line(rid)])
+    run["mode"] = "semi"
+    run["semi_open"] = op.how or "failed"
+    reg.save()
+    return op
+
+
 def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extra=None, reopen=True):
-    """One semi page: mode line, run name, full prompt, memory line, model line, then the app opens."""
+    """One semi page. Codex: memory off FIRST (the app opens with an empty box), then the prompt.
+    Other agents: full prompt, memory line, model line, then the app opens."""
     agent = reg.data.get("agent") or ""
     run = reg.data["runs"][rid]
     try:   # the one-line message says "Read PROMPT.txt": the file must be in the folder before the app opens
@@ -5036,6 +5053,7 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
                 fh.write(prompt)
     except OSError:
         pass
+    defer = agent == "codex" and reopen
     clear_screen()
     print(c_next("  " + mode_line("semi", agent, retry_cmd)))
     banner(head)
@@ -5048,6 +5066,17 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
         print("\n" + c_next("  !! FIRST, BEFORE YOU SEND THE PROMPT !!"))
         for l in textwrap.wrap(mem_line(agent), MAXW - 6) or [""]:
             print(c_next("     " + l))
+    op = None
+    if defer:                                     # Codex: open with an EMPTY box, wait for "memory is off"
+        op = _semi_open(reg, rid, agent, folder, stage, run, retry_cmd, True)
+        print()
+        print("\n".join("  " + l for l in op.lines))
+        if not op.ok:
+            print(c_err("  The app did not open on its own."))
+            print("\n".join("  " + l for l in op.manual))
+            print("  To use the manual mode, run:  %s --mode manual" % retry_cmd)
+        if gate_on():
+            ask("\n  When memory is OFF in the new thread, press Enter to see the prompt. ", "")
     prompt_block(prompt)
     print("  This text is the same as PROMPT.txt in the folder.")
     model_txt = (LARGE_SHORT if stage == "1" else SMALL_SHORT).get(agent, "")
@@ -5059,23 +5088,21 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
         print("\n  " + c_next(mem_line(agent)))
         print("  The app is already open for this run. The kit does not open it again.")
         return LA.Opened(True, run.get("semi_open") or "", [], [])
-    model, effort = (S1_MODEL if stage == "1" else S3_MODEL).get(agent, (None, None))
-    try:
-        op = LA.open_project(agent, folder, rid, model=model, effort=effort, clip=copy_to_clipboard)
-    except Exception as e:                       # a launcher never stops a page
-        op = LA.Opened(False, "", ["The kit could not open the app (%s)." % type(e).__name__],
-                       ["Folder: %s" % folder, "Open %s on this folder by hand." % AGENT_NAME.get(agent, "your agent"),
-                        "Send this message in the chat: %s" % LA.one_line(rid)])
-    run["mode"] = "semi"
-    run["semi_open"] = op.how or "failed"
-    reg.save()
-    print()
-    print("\n".join("  " + l for l in op.lines))
-    print("\n  " + c_next(mem_line(agent, op.ok)))          # after the opener: a failed open must not claim "off"
-    if not op.ok:
-        print(c_err("  The app did not open on its own."))
-        print("\n".join("  " + l for l in op.manual))
-        print("  To use the manual mode, run:  %s --mode manual" % retry_cmd)
+    if defer:
+        copied = copy_to_clipboard(LA.one_line(rid))
+        if copied:
+            print("\n  The message is on the clipboard. Paste it in the thread (Ctrl+V) and send it.")
+        else:
+            print("\n  Type this message in the thread and send it:\n  " + LA.one_line(rid))
+    else:
+        op = _semi_open(reg, rid, agent, folder, stage, run, retry_cmd, False)
+        print()
+        print("\n".join("  " + l for l in op.lines))
+        print("\n  " + c_next(mem_line(agent, op.ok)))      # after the opener: a failed open must not claim "off"
+        if not op.ok:
+            print(c_err("  The app did not open on its own."))
+            print("\n".join("  " + l for l in op.manual))
+            print("  To use the manual mode, run:  %s --mode manual" % retry_cmd)
     mode_box(agent, op.ok, retry_cmd)             # the last lines of the page: the learner always sees what happened
     return op
 

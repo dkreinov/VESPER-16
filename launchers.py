@@ -120,6 +120,8 @@ def find_app(agent, prefer=None):
 # ---------------------------------------------------------------- helpers
 
 def codex_link(folder, prompt_text):
+    if not prompt_text:                      # path only: the thread opens with an empty box
+        return "codex://new?path=%s" % quote(folder, safe="")
     return "codex://new?path=%s&prompt=%s" % (quote(folder, safe=""), quote(prompt_text, safe=""))
 
 
@@ -244,7 +246,7 @@ def _launcher_ok(found):
     return found.kind == "codex-app" or bool(_which(found.path)) or os.path.isfile(found.path)
 
 
-def open_project(agent, folder, run_id, *, model=None, effort=None, mode_hint="", clip=None):
+def open_project(agent, folder, run_id, *, model=None, effort=None, mode_hint="", clip=None, defer_message=False):
     manual = _manual(folder, agent, run_id)
     msg = one_line(run_id)
     try:
@@ -258,12 +260,16 @@ def open_project(agent, folder, run_id, *, model=None, effort=None, mode_hint=""
                                       "Open the app by hand (see below)."], manual)
         if agent == "codex" and found.kind == "codex-app":
             write_run_config(agent, folder, model, effort)
-            link = codex_link(folder, msg)
+            link = codex_link(folder, "" if defer_message else msg)
             ps = ["powershell.exe", "-NoProfile", "-Command", 'Start-Process "%s"' % link]
             if not _dry_log(agent, ["Start-Process", link], {}, ps):
                 if not WIN:
                     return Opened(False, "", ["The Codex app link needs Windows."], manual)
                 subprocess.run(ps, timeout=30, check=True, capture_output=True)
+            if defer_message:
+                return Opened(True, "codex-link", [
+                    "The Codex app opens on the run folder. The box is empty on purpose.",
+                    "Type /memories in the new thread and turn memory off first."], manual)
             return Opened(True, "codex-link", [
                 "The Codex app opens on the run folder.",
                 "The message is in the box. Do not send it yet.",
@@ -273,6 +279,10 @@ def open_project(agent, folder, run_id, *, model=None, effort=None, mode_hint=""
                     + (["-c", "model_reasoning_effort=%s" % effort] if effort else []))
             if not _open_terminal(agent, folder, {}, argv):
                 return Opened(False, "", ["The kit cannot open a terminal window on this system."], manual)
+            if defer_message:
+                return Opened(True, "codex-terminal", [
+                    "A new terminal window runs Codex on the run folder.",
+                    "Type /memories first and turn memory off."], manual)
             copied = (clip or _clip)(msg)
             return Opened(True, "codex-terminal", [
                 "A new terminal window runs Codex on the run folder.",
