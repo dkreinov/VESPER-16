@@ -5016,6 +5016,13 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
     """One semi page: mode line, run name, full prompt, memory line, model line, then the app opens."""
     agent = reg.data.get("agent") or ""
     run = reg.data["runs"][rid]
+    try:   # the one-line message says "Read PROMPT.txt": the file must be in the folder before the app opens
+        pf = os.path.join(folder, "PROMPT.txt")
+        if not os.path.isfile(pf):
+            with open(pf, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(prompt)
+    except OSError:
+        pass
     clear_screen()
     print(c_next("  " + mode_line("semi", agent, retry_cmd)))
     banner(head)

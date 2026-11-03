@@ -114,6 +114,18 @@ class Stage1(Base):
         self.assertIn("python workshop.py done", out)
         self.assertEqual(reg.data["runs"][rid]["mode"], "semi")
 
+    def test_semi_stage1_folder_holds_prompt_txt(self):
+        """The one-line message says 'Read PROMPT.txt': the file must exist in the stage-1 folder (hand test, 2026-11-03)."""
+        self.doctor("cursor")
+        capture(self.w, "new", "s1")
+        reg = self.w.Registry.load()
+        rid = reg.data["active"]["run_id"]
+        pf = os.path.join(reg.data["runs"][rid]["folder"], "PROMPT.txt")
+        self.assertTrue(os.path.isfile(pf))
+        txt = open(pf, encoding="utf-8").read()
+        self.assertIn("Workshop run: " + rid, txt)
+        self.assertIn("tasks/T3.md", txt)
+
     def test_codex_semi_writes_the_run_config_and_the_link(self):
         self.doctor("codex")
         out, _ = capture(self.w, "new", "s1")
