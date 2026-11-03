@@ -27,6 +27,7 @@ Each sentence holds one fact. Do the numbered steps in order.
    git clone https://github.com/dkreinov/VESPER-16
    cd VESPER-16
    ```
+   Do not use "Download ZIP" on GitHub. A ZIP has no `.git` folder, so `git pull` does not work.
 7. Before class, update the kit:
    ```
    git pull

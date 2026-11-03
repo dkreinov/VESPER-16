@@ -3,7 +3,7 @@ VESPER-16 WORKSHOP - HOW TO START (Windows first, Mac in brackets)
 BEFORE CLASS (once)
 1. Install Git: git-scm.com. Install Python 3.9+: python.org (tick "Add to PATH").
 2. Open PowerShell [Mac: Terminal]. Check: git --version and python --version [Mac: python3].
-3. Get the kit (not on OneDrive):
+3. Get the kit with git clone (do NOT use Download ZIP, and not on OneDrive):
    git clone https://github.com/dkreinov/VESPER-16
    cd VESPER-16
 4. Before class: git pull
@@ -16,7 +16,7 @@ THREE MODES (you choose; the kit never switches alone)
 - semi:   add --mode semi. The kit opens your app on the run folder and shows the prompt.
 - manual: add --mode manual. The kit prints the folder and the prompt. You open the app.
 No flag = semi if the kit finds your app, else manual.
-App did not open? Run the same command again with --mode manual.
+App did not open? Run it again with --mode manual. A mistake? Start over: new s1 --restart
 
 MEMORY OFF (every workshop chat)
 - Codex: type /memories and turn it off BEFORE you send the prompt. In the Codex CLI, paste the message after that.
