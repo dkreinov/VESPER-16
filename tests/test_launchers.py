@@ -78,6 +78,14 @@ class Config(Base):
             self.assertEqual(L.write_run_config(a, self.folder, "m", "high"), [])
         self.assertEqual(os.listdir(self.folder), [])
 
+    def test_script_switches_to_utf8_first_and_keeps_a_non_ascii_path(self):
+        odd = os.path.join(self.d, "Ünï-папка")
+        p = L._write_script(odd, {}, [self.fake])
+        self.addCleanup(os.remove, p)
+        t = open(p, encoding="utf-8").read()
+        self.assertTrue(t.startswith("chcp 65001 >nul"))
+        self.assertIn(odd, t)
+
 
 class Find(unittest.TestCase):
     def test_none_override(self):
@@ -135,14 +143,22 @@ class Open(Base):
         self.assertTrue(os.path.exists(os.path.join(self.folder, ".codex", "config.toml")))
 
     def test_codex_cli(self):
-        r = L.open_project("codex", self.folder, "s1-ab12", model="gpt-x")
+        clip = mock.Mock(return_value=True)
+        r = L.open_project("codex", self.folder, "s1-ab12", model="gpt-x", effort="high", clip=clip)
         self.assertTrue(r.ok)
         self.assertEqual(r.how, "codex-terminal")
         argv = self.entries()[0]["argv"]
         self.assertEqual(argv[0], self.fake)
         self.assertEqual(argv[argv.index("-C") + 1], self.folder)
         self.assertEqual(argv[argv.index("-m") + 1], "gpt-x")
-        self.assertEqual(argv[-1], L.one_line("s1-ab12"))
+        self.assertEqual(argv[argv.index("-c") + 1], "model_reasoning_effort=high")
+        self.assertNotIn(L.one_line("s1-ab12"), argv)               # not sent: memory is turned off first
+        clip.assert_called_once_with(L.one_line("s1-ab12"))
+        self.assertTrue(any("/memories" in x for x in r.lines))
+
+    def test_codex_cli_no_effort_flag_without_effort(self):
+        L.open_project("codex", self.folder, "s1-ab12", model="gpt-x", clip=lambda t: True)
+        self.assertNotIn("-c", self.entries()[0]["argv"])
 
     def test_cursor(self):
         clip = mock.Mock(return_value=True)
@@ -171,8 +187,9 @@ class Open(Base):
         self.assertTrue(r.ok)
         self.assertEqual(r.how, "vscode-chat")
         e = self.entries()
-        self.assertEqual(e[0]["argv"], [self.fake, "-n", self.folder])
-        self.assertEqual(e[1]["argv"], [self.fake, "chat", "-r", "-m", "agent", L.one_line("s1-ab12")])
+        self.assertEqual(e[0]["argv"], [self.fake, "-n", self.folder, "--profile", "vesper-clean"])
+        self.assertEqual(e[1]["argv"], [self.fake, "chat", "-r", "-m", "agent", "--profile", "vesper-clean",
+                                        L.one_line("s1-ab12")])
 
     def test_missing_app(self):
         for a in AGENTS:
@@ -203,6 +220,16 @@ class Open(Base):
 
 
 class Script(Base):
+    def test_windows_terminal_gets_working_directory(self):
+        del os.environ["VESPER_LAUNCHER_DRYRUN"]
+        with mock.patch.object(L, "WIN", True), mock.patch.object(L, "_terminal_available", return_value=True),                 mock.patch("subprocess.run") as run:
+            L._open_terminal("claude", self.folder, {}, [self.fake])
+        self.addCleanup(lambda: [os.remove(x) for x in
+                                 [os.path.join(tempfile.gettempdir(), n) for n in os.listdir(tempfile.gettempdir())
+                                  if n.startswith("vesper_run_") and n.endswith(".cmd")] if os.path.exists(x)])
+        cmd = run.call_args[0][0][-1]
+        self.assertIn("-WorkingDirectory '%s'" % self.folder, cmd)
+
     def test_terminal_script_is_in_temp_not_run_folder(self):
         p = L._write_script(self.folder, {"A": "1"}, [self.fake, "x", "100%"])
         self.addCleanup(os.remove, p)

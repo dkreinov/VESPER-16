@@ -189,7 +189,7 @@ def _cmd_quote(s):
 
 def _write_script(folder, env, argv):
     """Write a .cmd script to the system temp folder (never the run folder). Returns its path."""
-    lines = ["@echo off", "cd /d %s" % _cmd_quote(folder)]
+    lines = ["chcp 65001 >nul", "@echo off", "cd /d %s" % _cmd_quote(folder)]
     for k, v in (env or {}).items():
         lines.append("set %s=%s" % (k, str(v).replace("%", "%%")))
     lines.append(" ".join(_cmd_quote(a) for a in argv))
@@ -223,7 +223,8 @@ def _open_terminal(agent, folder, env, argv):
     if WIN:
         arg = "'/k','\"%s\"'" % script.replace("'", "''")
         subprocess.run(["powershell.exe", "-NoProfile", "-Command",
-                        "Start-Process cmd.exe -ArgumentList " + arg], timeout=30, check=True,
+                        "Start-Process cmd.exe -WorkingDirectory %s -ArgumentList %s" % (_ps_quote(folder), arg)],
+                       timeout=30, check=True,
                        capture_output=True)
     else:
         subprocess.run(["open", "-a", "Terminal", script], timeout=30, check=True, capture_output=True)
@@ -268,12 +269,15 @@ def open_project(agent, folder, run_id, *, model=None, effort=None, mode_hint=""
                 "The message is in the box. Do not send it yet.",
                 "Type /memories and turn memory off. Then send the message."], manual)
         if agent == "codex":
-            argv = [found.path, "-C", folder] + (["-m", model] if model else []) + [msg]
+            argv = ([found.path, "-C", folder] + (["-m", model] if model else [])
+                    + (["-c", "model_reasoning_effort=%s" % effort] if effort else []))
             if not _open_terminal(agent, folder, {}, argv):
                 return Opened(False, "", ["The kit cannot open a terminal window on this system."], manual)
+            copied = (clip or _clip)(msg)
             return Opened(True, "codex-terminal", [
                 "A new terminal window runs Codex on the run folder.",
-                "The message is sent as the first prompt."], manual)
+                "Type /memories and turn memory off. Then paste the message and send it." if copied
+                else "Type /memories and turn memory off. Then type this message and send it: %s" % msg], manual)
         if agent == "claude":
             env = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
             argv = [found.path] + (["--model", model] if model else []) + [msg]
@@ -293,8 +297,8 @@ def open_project(agent, folder, run_id, *, model=None, effort=None, mode_hint=""
             lines.append("The full prompt is in PROMPT.txt in the folder.")
             return Opened(True, "cursor-folder", lines, manual)
         if agent == "copilot":
-            a1 = [found.path, "-n", folder]
-            a2 = [found.path, "chat", "-r", "-m", "agent", msg]
+            a1 = [found.path, "-n", folder, "--profile", "vesper-clean"]
+            a2 = [found.path, "chat", "-r", "-m", "agent", "--profile", "vesper-clean", msg]
             if _dry_log(agent, a1, {}):
                 _dry_log(agent, a2, {})
             else:
