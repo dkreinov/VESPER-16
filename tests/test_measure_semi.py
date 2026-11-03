@@ -103,7 +103,7 @@ class CodexMemory(unittest.TestCase):
         finally:
             con.execute("ROLLBACK")
             con.close()
-        self.assertIn(r, (None, "enabled"))
+        self.assertIsNone(r)                 # the reader is locked out: unknown, never an error
 
     def test_env_override(self):
         codex_db(self.db, [("1", "C:\\a", "m", "", "disabled", "s1-q", 1)])
