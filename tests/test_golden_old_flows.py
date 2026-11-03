@@ -21,6 +21,15 @@ def strip_added(text):
     return t.strip()
 
 
+_EXTRA = {}
+
+
+def extra():
+    if not _EXTRA:
+        _EXTRA.update(G.capture_extra())
+    return _EXTRA
+
+
 def current():
     if not _CACHE:
         _CACHE.update(G.capture_all())
@@ -29,6 +38,29 @@ def current():
 
 @unittest.skipUnless(sys.platform == "win32", "golden text was captured on Windows")
 class GoldenOldFlows(unittest.TestCase):
+    def check_extra(self, prefix):
+        names = sorted(n[:-4] for n in os.listdir(GOLD) if n.startswith(prefix) and n.endswith(".txt"))
+        self.assertTrue(names)
+        got = extra()
+        for n in names:
+            with self.subTest(page=n):
+                with open(os.path.join(GOLD, n + ".txt"), encoding="utf-8") as f:
+                    want = f.read()
+                self.assertIn(n, got)
+                self.assertEqual(strip_added(got[n]), strip_added(want))
+
+    def test_tty_gate_pages(self):
+        """run_page text: stage 1 and stage 3 with the confirmation gate on (captured from main)."""
+        self.check_extra("gate-codex-new")
+        self.check_extra("gate-cursor-new")
+
+    def test_task_both_pages(self):
+        self.check_extra("plain-")
+
+    def test_cleanup_output(self):
+        self.check_extra("gate-codex-cleanup")
+        self.check_extra("gate-cursor-cleanup")
+
     def check(self, prefix):
         names = sorted(n[:-4] for n in os.listdir(GOLD) if n.startswith(prefix) and n.endswith(".txt"))
         self.assertTrue(names)

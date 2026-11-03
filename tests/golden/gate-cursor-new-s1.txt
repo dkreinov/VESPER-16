@@ -1,0 +1,42 @@
+
+========================================================================
+  STAGE 1 - the agent with NO skill        run <ID1>
+========================================================================
+
+  Stage-2 method for you: PLAIN (the room is split 3 ways at random).
+
+  1. Open this folder as a NEW project in your agent (choose exactly
+  this folder, not a folder above it):
+
+       <HOME>\vesper-runs\<ID1>
+
+     Project name in the app: <ID1>
+
+  2. Start a NEW thread.
+
+  3. Model: a large model from the menu (not Auto)
+
+------------------------------ PROMPT ----------------------------------
+Workshop run: <ID1>
+
+Write the game described in tasks/T3.md for the VESPER-16 handheld
+console. The dev kit is in this folder; use bin/vesper (it works in
+every shell, also on Windows). Save the program as solutions/T3.vsa. You
+have 20 runs of `bin/vesper run`; `bin/vesper asm` is free.
+
+Do not read memory files or notes from earlier sessions. Work only
+inside this folder: do not read or change files outside it.
+
+Work on your own until the task is done. Do not stop to ask for approval
+or a design review.
+--------------------------- END OF PROMPT ------------------------------
+
+  Paste it and send it.
+
++----------------------------------------------------------------------+
+|  NEXT: when the agent says it is done, run:                          |
+|        python workshop.py done                                       |
++----------------------------------------------------------------------+
+
+
+[rc=0]

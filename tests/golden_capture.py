@@ -113,10 +113,63 @@ def capture_all():
     return out
 
 
+def capture_extra():
+    """More OLD pages: the TTY gate pages (run_page), --task both, and cleanup. Returns {name: text}.
+    The gate is forced on and every question gets its default answer (y / Enter)."""
+    out = {}
+    saved = {k: os.environ.get(k) for k in ENV_KEYS}
+    try:
+        for agent in ("codex", "cursor"):
+            def ws():
+                w, home = fresh_ws()
+                for a in AGENTS:
+                    os.environ["VESPER_LAUNCHER_" + a.upper()] = "none"
+                os.environ.pop("VESPER_LAUNCHER_DRYRUN", None)
+                os.environ["VESPER_NO_CLEAR"] = "1"
+                return w, home, Norm(home)
+
+            def gated(w):
+                return mock.patch.multiple(w, gate_on=lambda: True, ask=lambda prompt, default="": default)
+
+            w, home, norm = ws()
+            with mock.patch.object(w, "new_code", counter()):
+                cap(w, "doctor", "--agent", agent, "--alias", "t")
+                with gated(w):
+                    out["gate-%s-new-s1" % agent] = norm(cap(w, "new", "s1", "--method", "plain"))
+            w, home, norm = ws()
+            with mock.patch.object(w, "new_code", counter()):
+                fakes.ready_for_s3(w)
+                reg = w.Registry.load()
+                reg.data["agent"] = agent
+                reg.save()
+                with gated(w):
+                    out["gate-%s-new-s3-all" % agent] = norm(cap(w, "new", "s3", "--task", "all", "--name", "MIRA"))
+                out["gate-%s-cleanup" % agent] = norm(cap(w, "cleanup", "--yes", "--no-copy"))
+            w, home, norm = ws()
+            with mock.patch.object(w, "new_code", counter()):
+                fakes.ready_for_s3(w)
+                reg = w.Registry.load()
+                reg.data["agent"] = agent
+                reg.save()
+                out["plain-%s-new-s3-both" % agent] = norm(
+                    cap(w, "new", "s3", "--task", "both", "--name", "MIRA"))
+                with gated(w):
+                    out["gate-%s-new-s3-both" % agent] = norm(cap(w, "new", "s3", "--task", "both", "--yes"))
+    finally:
+        os.environ.pop("VESPER_NO_CLEAR", None)
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return out
+
+
 if __name__ == "__main__":
     dest = sys.argv[1]
     os.makedirs(dest, exist_ok=True)
-    for name, text in capture_all().items():
+    pages = capture_extra() if len(sys.argv) > 2 and sys.argv[2] == "--extra" else capture_all()
+    for name, text in pages.items():
         with open(os.path.join(dest, name + ".txt"), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
     print("wrote", len(os.listdir(dest)), "files to", dest)

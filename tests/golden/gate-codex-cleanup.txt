@@ -1,0 +1,18 @@
+workshop.py made these items:
+  [done]
+  <HOME>\vesper-runs\<ID5>
+  [done]
+  <HOME>\vesper-runs\.skills\<ID5>
+  [done]
+  <HOME>\vesper-runs\<ID4>
+  [done]
+  <HOME>\vesper-runs\<ID2>
+  [done]
+  <HOME>\vesper-runs\<ID1>
+  [done]
+  <HOME>\vesper-runs\<ID3>
+  and its own files in
+  <HOME>\vesper-runs
+Cleanup done.
+
+[rc=0]
