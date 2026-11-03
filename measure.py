@@ -256,10 +256,32 @@ def cursor_state_db():
     return os.path.join(base, "Cursor", "User", "globalStorage", "state.vscdb")
 
 
+def _iso_epoch(v):
+    """ISO stamp like 2026-11-03T08:44:56.582Z -> epoch seconds, or None."""
+    try:
+        d = dt.datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=dt.timezone.utc)
+        return d.timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _cursor_effort(cfg):
+    try:
+        for p in (cfg.get("selectedModels") or [{}])[0].get("parameters") or []:
+            if isinstance(p, dict) and p.get("id") in ("effort", "reasoning_effort") and p.get("value"):
+                return str(p["value"])
+    except (AttributeError, IndexError, TypeError):
+        pass
+    return ""
+
+
 def cursor_app_chat(run_id, db=None):
-    """The Cursor app chat of a run: {model, first, last} (epoch seconds; model 'auto' for Cursor's 'default'),
-    or None. The run id is in the first message of the chat; the database is opened read-only.
-    Anything that goes wrong (no file, other layout, locked database) gives None, never an error."""
+    """The Cursor app chat of a run: {model, effort, first, last} (epoch seconds; model 'auto' for Cursor's
+    'default'), or None. The run id is in the first message of the chat; the database is opened read-only.
+    first = stamp of the first user message with the run id; last = newest message stamp of the chat
+    (fallback: the chat's createdAt / lastUpdatedAt). Any problem gives None, never an error."""
     db = db or cursor_state_db()
     if not run_id or not os.path.isfile(db):
         return None
@@ -284,11 +306,32 @@ def cursor_app_chat(run_id, db=None):
                     d = None
                 if not isinstance(d, dict) or not isinstance(d.get("createdAt"), (int, float)):
                     continue
-                last = d.get("lastUpdatedAt")
-                last = last if isinstance(last, (int, float)) and last >= d["createdAt"] else d["createdAt"]
-                name = str((d.get("modelConfig") or {}).get("modelName") or "").strip()
+                first = d["createdAt"] / 1000.0
+                lu = d.get("lastUpdatedAt")
+                last = (lu if isinstance(lu, (int, float)) and lu >= d["createdAt"] else d["createdAt"]) / 1000.0
+                stamp_first, stamps = None, []
+                for _key, val in con.execute("SELECT key, CAST(value AS TEXT) FROM cursorDiskKV "
+                                             "WHERE key LIKE ?", ("bubbleId:" + cid + ":%",)):
+                    try:
+                        b = json.loads(val)
+                    except ValueError:
+                        continue
+                    t = _iso_epoch(b.get("createdAt")) if isinstance(b, dict) else None
+                    if t is None:
+                        continue
+                    stamps.append(t)
+                    if (b.get("type") == 1 and str(run_id) in str(b.get("text") or "")
+                            and (stamp_first is None or t < stamp_first)):
+                        stamp_first = t
+                if stamp_first is not None:
+                    first = stamp_first
+                if stamps:
+                    last = max(stamps)
+                last = max(last, first)
+                cfg = d.get("modelConfig") or {}
+                name = str(cfg.get("modelName") or "").strip()
                 found = dict(model="auto" if name.lower() in ("default", "auto") else cursor_model(name),
-                             first=d["createdAt"] / 1000.0, last=last / 1000.0)
+                             effort=_cursor_effort(cfg), first=first, last=last)
                 if best is None or found["last"] > best["last"]:
                     best = found                           # several chats: the newest one
             return best
@@ -312,6 +355,43 @@ def find_total_usage(obj):
 
 def codex_home():
     return os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+
+
+def codex_state_db():
+    return os.environ.get("VESPER_CODEX_STATE") or os.path.join(codex_home(), "state_5.sqlite")
+
+
+def _last_dir(p):
+    return os.path.basename(str(p or "").replace("\\", "/").rstrip("/")).lower()
+
+
+def codex_memory_mode(run_id, cwd=None, db=None):
+    """'enabled', 'disabled' or None: memory_mode of the newest Codex thread whose first message holds the
+    run id, else whose cwd ends with the folder name. Read-only; any problem gives None."""
+    db = db or codex_state_db()
+    if not os.path.isfile(db):
+        return None
+    try:
+        from pathlib import Path
+        con = sqlite3.connect(Path(os.path.abspath(db)).as_uri() + "?mode=ro", uri=True, timeout=2)
+        try:
+            con.text_factory = lambda b: b.decode("utf-8", "replace")
+            row = None
+            if run_id:
+                row = con.execute("SELECT memory_mode FROM threads WHERE instr(first_user_message, ?) > 0 "
+                                  "ORDER BY updated_at DESC LIMIT 1", (str(run_id),)).fetchone()
+            want = _last_dir(cwd) if cwd else ""
+            if row is None and want:
+                for mm, c in con.execute("SELECT memory_mode, cwd FROM threads ORDER BY updated_at DESC"):
+                    if _last_dir(c) == want:
+                        row = (mm,)
+                        break
+            v = str(row[0]).strip().lower() if row and row[0] is not None else ""
+            return v if v in ("enabled", "disabled") else None
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def recent(fp, t0, days=7):
