@@ -16,6 +16,17 @@ def capture(w, *argv):
     return out.getvalue(), rc
 
 
+def answer_numbers():
+    """A fake `ask` for the end of stage 3: the numbers 1-4 for the list, y for 'did you stop', else the default."""
+    nums = iter(["1", "2", "3", "4"])
+
+    def fake(q, d=""):
+        if "Type the NUMBER" in q:
+            return next(nums, "q")
+        return "y" if "Did you stop" in q else d
+    return fake
+
+
 def argparse_ns():
     import argparse
     return argparse.Namespace(no_form=True)
@@ -449,23 +460,39 @@ class Stage3(Base):
             self.assertEqual(diff, 10)
         self.assertEqual(table.count("python workshop.py done s3-"), 4)    # no person at the keyboard: lines, not done
 
-    def test_one_enter_then_done_for_all_four(self):
+    def test_numbers_then_done_for_each_run(self):
         self.stage3_ready("codex")
-        enters = []
+        asked = []
+        nums = iter(["1", "2", "3", "4"])
+
+        def fake_ask(q, d=""):
+            asked.append(q)
+            if "Type the NUMBER" in q:
+                return next(nums, "q")
+            return "y" if "Did you stop" in q else d
         with mock.patch.object(self.w, "interactive", return_value=True), \
-                mock.patch.object(self.w, "ask", side_effect=lambda q, d="": enters.append(q) or d), \
+                mock.patch.object(self.w, "ask", side_effect=fake_ask), \
+                mock.patch.object(self.w, "run_is_done", side_effect=lambda rid: False), \
                 mock.patch.object(self.w, "cmd_done", return_value=0) as done:
             capture(self.w, "new", "s3", "--task", "all", "--name", "MIRA")
-        self.assertEqual([c.args[0].run_id for c in done.call_args_list],
-                         [r for r in self.w.Registry.load().data["runs"] if r.startswith("s3-")])
-        self.assertEqual(len(done.call_args_list), 4)
-        self.assertEqual(len([q for q in enters if "done for all 4 runs" in q]), 1)      # ONE Enter for all four
-        self.assertEqual(len([q for q in enters if "next page appears at once" in q]), 4)
+        self.assertEqual(len(done.call_args_list), 4)                                  # one done per typed number
+        self.assertEqual(len([q for q in asked if "Type the NUMBER" in q]), 5)         # four numbers, then q
+        self.assertEqual(len([q for q in asked if "next page appears at once" in q]), 3)
+        self.assertEqual(len([q for q in asked if "list of runs appears next" in q]), 1)
+
+    def test_no_answer_three_times_leaves_the_list(self):
+        self.stage3_ready("codex")
+        with mock.patch.object(self.w, "interactive", return_value=True), \
+                mock.patch.object(self.w, "ask", side_effect=lambda q, d="": d), \
+                mock.patch.object(self.w, "cmd_done", return_value=0) as done:
+            out, rc = capture(self.w, "new", "s3", "--task", "all", "--name", "MIRA")
+        self.assertEqual(len(done.call_args_list), 0)
+        self.assertIn("You left the list", out)
 
     def test_done_runs_for_real_with_the_labeled_folders(self):
         self.stage3_ready("codex")
         with mock.patch.object(self.w, "interactive", return_value=True), \
-                mock.patch.object(self.w, "ask", side_effect=lambda q, d="": d):
+                mock.patch.object(self.w, "ask", side_effect=answer_numbers()):
             out, rc = capture(self.w, "new", "s3", "--task", "all", "--name", "MIRA", "--yes")
         self.assertEqual(rc, 0)
         reg = self.w.Registry.load()

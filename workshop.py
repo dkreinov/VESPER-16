@@ -5237,6 +5237,7 @@ def semi_s3_finish(reg, a, made):
         if st:
             stops[rid] = float(st) + TIME_BOX_MIN * 60
     n = len(made)
+    empties = 0                    # no answer three times in a row (stdin closed, a script): leave, never loop
     while True:
         pending = [m for m in made if not run_is_done(m[1])]
         print_run_list(made, stops)
@@ -5254,6 +5255,9 @@ def semi_s3_finish(reg, a, made):
             print("\n  Then the table with the scores:  python workshop.py show")
             return 0
         ans = ask("\n  Type the NUMBER (1-%d) of a run when its agent is stopped. Type q to leave: " % n, "").strip().lower()
+        empties = empties + 1 if not ans else 0
+        if empties >= 3:
+            ans = "q"
         if ans in ("q", "quit", "exit"):
             print("\n  You left the list. End a run later with its line:")
             print("\n".join("    " + x for x in lines))
