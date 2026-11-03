@@ -141,6 +141,15 @@ class Stage1(Base):
         self.assertNotEqual(rid1, rid2)
         self.assertTrue(reg.data["runs"][rid1].get("abandoned"))
         self.assertTrue(os.path.isdir(reg.data["runs"][rid1]["folder"]))   # the old folder stays until cleanup
+        self.assertEqual(reg.data["runs"][rid2]["method"], reg.data["runs"][rid1]["method"])   # no re-roll of the split
+
+    def test_restart_keeps_the_method_in_every_draw(self):
+        self.doctor("cursor")
+        for _ in range(6):
+            capture(self.w, "new", "s1", "--restart")
+        reg = self.w.Registry.load()
+        s1 = [r["method"] for k, r in reg.data["runs"].items() if k.startswith("s1-")]
+        self.assertEqual(len(set(s1)), 1, s1)
 
     def test_the_semi_page_ends_with_the_mode_box(self):
         self.doctor("cursor")

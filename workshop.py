@@ -1186,9 +1186,12 @@ def cmd_new(a):
         r1 = reg.data["runs"][rid1]
         return show_s1(reg, a, rid1, r1["folder"], render_prompt("stage1", task=r1["task"], run_id=rid1),
                        r1["method"], mode, again=True)
+    kept_method = None            # --restart keeps the stage-2 method: a restart must not re-roll the random split
     if getattr(a, "restart", False):
         gone = [x["run_id"] for x in acts if a.stage == "s1" or x["stage"] == "3"]
         for rid0 in gone:
+            if a.stage == "s1" and kept_method is None:
+                kept_method = reg.data["runs"].get(rid0, {}).get("method") or None
             reg.end_active(rid0)
             reg.data["runs"].get(rid0, {})["abandoned"] = True
         if gone:
@@ -1210,7 +1213,7 @@ def cmd_new(a):
     if a.stage == "s1":
         if task == "T6":
             sys.exit("T6 is a stage-3 task. Stage 1 uses T3:  python workshop.py new s1")
-        method = a.method if a.method != "random" else random.choice(METHODS)
+        method = a.method if a.method != "random" else (kept_method if kept_method in METHODS else random.choice(METHODS))
         code = new_code()
         rid = "s1-" + code
         reg.data["runs"][rid] = dict(folder="", task=task, method=method, code=code, stage="1", parent="",
