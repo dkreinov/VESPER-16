@@ -26,6 +26,7 @@ import urllib.parse
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, KIT)
+import copilot_partial as CP  # noqa: E402  (GitHub Copilot, PARTIAL support: all of it lives in that file)
 import measure as M  # noqa: E402  (session readers and prices, same folder)
 import t6font as T6F  # noqa: E402  (T6 name font, same folder; locked part 4 has a copy)
 
@@ -326,6 +327,7 @@ BUILTIN_HOW = {
                "If you do not have it, read and follow the guide at {guide}/anthropic-skill-creator/SKILL.md."),
     "cursor": ("use your built-in skill creator (/create-skill). If you do not have it, read and follow the "
                "guide at {guide}/anthropic-skill-creator/SKILL.md."),
+    "copilot": CP.BUILTIN_HOW,
 }
 BUILTIN_STEP = {
     "codex": "Codex: the prompt calls $skill-creator, Codex's built-in skill creator. Nothing to install.",
@@ -334,6 +336,7 @@ BUILTIN_STEP = {
                "     (If you cannot install plugins, the prompt points the agent to the bundled guide.)"),
     "cursor": ("Cursor: type /create-skill at the start of the message, then paste the prompt.\n"
                "     (Older Cursor without /create-skill: the prompt points the agent to the bundled guide.)"),
+    "copilot": CP.BUILTIN_STEP,
 }
 
 
@@ -402,14 +405,22 @@ def memories_card(reg):
 
 LARGE_SHORT = {"claude": "your default model (Sonnet or Opus, not Haiku)",
                "codex": "gpt-6.1-sol (the large model; Codex keeps your last model, so check it)",
-               "cursor": "a large model from the menu (not Auto)"}
+               "cursor": "a large model from the menu (not Auto)", "copilot": CP.LARGE}
 STOP_LINE = "Stop the agent at %d min, then run its done line." % TIME_BOX_MIN
 SMALL_SHORT = {"claude": "Haiku 5.5 (/model claude-haiku-5-5)", "codex": "gpt-6-luna, effort high",
-               "cursor": "GPT-5.6 Luna High (not Auto)"}
+               "cursor": "GPT-5.6 Luna High (not Auto)", "copilot": CP.SMALL}
+
+
+def partial_notice(reg):
+    """GitHub Copilot is PARTIAL support: say so on the stage pages. Other agents: nothing is printed."""
+    if reg.data.get("agent") == "copilot":
+        print("\n".join(CP.banner_lines()))
 
 
 def cursor_app_lines(agent, total=4):
     """Stage-3 lines for a learner who uses the Cursor app (not --auto)."""
+    if agent == "copilot":
+        return CP.banner_lines() + CP.stage3_lines(total)
     if agent != "cursor":
         return []
     return ["  Model: GPT-5.6 Luna High (%s) in %s." % (AUTO_MODEL["cursor"],
@@ -788,9 +799,12 @@ def _cmd_doctor(a):
         note(1, "WARN", "a VESPER skill is in a global folder (stage 3 would not be clean): " + ", ".join(g))
     else:
         note(0, "OK", "no VESPER skill in global skill folders")
-    agent = (a.agent or reg.data.get("agent") or ask("Which agent do you use (codex/claude/cursor)? [codex] ", "codex")).lower()
+    agent = (a.agent or reg.data.get("agent") or ask("Which agent do you use (codex/claude/cursor/copilot)? [codex] ", "codex")).lower()
     alias = a.alias if a.alias is not None else (
         reg.data.get("alias") or ask("Alias for the shared chart (Enter = anonymous): ", ""))
+    if agent == "copilot":
+        lines += CP.doctor_lines()
+        level = max(level, 1)
     sp = superpowers_evidence(agent)
     if sp:
         note(1, "WARN", "superpowers is active for %s (%s). Your agent may stop to ask for approval; "
@@ -1214,11 +1228,13 @@ def cmd_new(a):
         except KeyboardInterrupt:
             print("\n  Stopped. Run %s stays active. Its prompt:" % rid)
             prompt_block(prompt)
+        partial_notice(reg)
         next_box(done_cmd, "when the agent says it is done, run:")
         return 0
     agent1 = reg.data.get("agent") or ""
     print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd, mem=mem,
                  model=LARGE_SHORT.get(agent1) or "; ".join("%s: %s" % (k, v) for k, v in LARGE_SHORT.items()))
+    partial_notice(reg)
     return 0
 
 
@@ -2748,6 +2764,19 @@ def finish_stage(reg, rid, stage, a, grade=True):
             m.update({k: prev[k] for k in ("model", "tok_uncached", "tok_out", "cost_usd", "measurement")})
         elif run.get("auto"):
             m["measurement"] = "none"             # --auto never asks: the tool started the agent itself
+        elif reg.data.get("agent") == "copilot":
+            # Copilot Chat in VS Code (PARTIAL support): model, time and output tokens from the chat file; no input tokens
+            m["measurement"] = "copilot-app"
+            chat = CP.copilot_app_chat(rid)
+            if chat:
+                lo, hi = max(chat["first"], t0), min(chat["last"], t1)
+                m["model"] = chat["model"]
+                if chat["out_tokens"]:
+                    m["tok_out"] = chat["out_tokens"]
+                if hi > lo:
+                    m["elapsed_min"] = "%.1f" % ((hi - lo) / 60)
+                    m["last_activity"] = hi
+            print(CP.APP_LINE)
         elif reg.data.get("agent") == "cursor":
             # Cursor app: no tokens anywhere. Model and time come from Cursor's local chat data, if found.
             m["measurement"] = "cursor-app"
@@ -3154,6 +3183,7 @@ def cmd_skill(a):
         print("\n  2. The prompt names the guide the agent must follow (%s)." % run["method"])
     print("\n  3. Copy everything between the PROMPT lines and send it.")
     prompt_block(prompt)
+    partial_notice(reg)
     print("\n  4. Wait until the agent says the skill is written.")
     next_box("python workshop.py harvest", "when the skill is written, run:")
     return 0
@@ -4854,7 +4884,7 @@ def parse(argv):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("doctor")
-    s.add_argument("--agent", choices=["codex", "claude", "cursor", "other"])
+    s.add_argument("--agent", choices=["codex", "claude", "cursor", "copilot", "other"])
     s.add_argument("--alias")
     s.add_argument("--check-auto", action="store_true",
                    help="ONE tiny agent run with the stage-3 model and the --auto flags: can it work, and is it limited?")
