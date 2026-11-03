@@ -1186,9 +1186,19 @@ def cmd_new(a):
         r1 = reg.data["runs"][rid1]
         return show_s1(reg, a, rid1, r1["folder"], render_prompt("stage1", task=r1["task"], run_id=rid1),
                        r1["method"], mode, again=True)
+    if getattr(a, "restart", False):
+        gone = [x["run_id"] for x in acts if a.stage == "s1" or x["stage"] == "3"]
+        for rid0 in gone:
+            reg.end_active(rid0)
+            reg.data["runs"].get(rid0, {})["abandoned"] = True
+        if gone:
+            reg.save()
+            acts = reg.actives()
+            print("Started again from scratch. The old run folder stays on disk until you run cleanup.")
     blocking = acts if a.stage == "s1" else [x for x in acts if x["stage"] != "3"]
     if blocking:
-        sys.exit("\n".join(active_lines(reg)))
+        sys.exit("\n".join(active_lines(reg)) + "\nStart again from scratch:  python workshop.py new "
+                 + ("s1" if a.stage == "s1" else "s3 --task %s" % task) + " --restart")
     if a.stage == "s3":
         same = [x for x in acts if reg.data["runs"].get(x["run_id"], {}).get("task") in
                 (("T6", "T3") if task in ("both", "all") else (task,))
@@ -5059,7 +5069,20 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
         print(c_err("  The app did not open on its own."))
         print("\n".join("  " + l for l in op.manual))
         print("  To use the manual mode, run:  %s --mode manual" % retry_cmd)
+    mode_box(agent, op.ok, retry_cmd)             # the last lines of the page: the learner always sees what happened
     return op
+
+
+def mode_box(agent, opened, retry_cmd):
+    """A box at the END of a semi page. The prompt above is long and pushes the mode line off the screen."""
+    name = AGENT_NAME.get(agent, "The app")
+    first = ("MODE: SEMI. %s opened on the run folder. Look at it now." % name) if opened         else ("MODE: SEMI. %s did NOT open. Open it by hand (see above)." % name)
+    second = "Did not open or wrong folder?  Run:  %s --mode manual" % retry_cmd
+    w = max(70, len(first) + 4, len(second) + 4)
+    print("\n" + c_next("+" + "=" * w + "+"))
+    print(c_next("|  " + first.ljust(w - 2) + "|"))
+    print(c_next("|  " + second.ljust(w - 2) + "|"))
+    print(c_next("+" + "=" * w + "+"))
 
 
 def semi_start_time(agent, rid, enter_t):
@@ -5222,6 +5245,9 @@ def parse(argv):
                         "manual = you open the app. Default: semi if the kit finds the app, else manual")
     s.add_argument("--model", help="with --auto: the model (default: the stage-3 model of your agent)")
     s.add_argument("--yes", action="store_true", help="with --auto: start the agents without the question")
+    s.add_argument("--restart", action="store_true",
+                   help="start again from scratch: end the active run of this stage and make a new one "
+                        "(the old run folder stays until cleanup)")
     s.set_defaults(func=cmd_new)
     s = sub.add_parser("done")
     s.add_argument("run_id", nargs="?", help="the run to end (needed when two stage-3 runs are active)")

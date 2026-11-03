@@ -126,6 +126,30 @@ class Stage1(Base):
         self.assertIn("Workshop run: " + rid, txt)
         self.assertIn("tasks/T3.md", txt)
 
+    def test_restart_ends_the_active_run_and_makes_a_new_one(self):
+        self.doctor("cursor")
+        capture(self.w, "new", "s1")
+        rid1 = self.w.Registry.load().data["active"]["run_id"]
+        with self.assertRaises(SystemExit) as cm:
+            capture(self.w, "new", "s1")
+        self.assertIn("new s1 --restart", str(cm.exception.code))      # the learner is told how to start again
+        out, rc = capture(self.w, "new", "s1", "--restart")
+        self.assertEqual(rc, 0)
+        self.assertIn("Started again from scratch", out)
+        reg = self.w.Registry.load()
+        rid2 = reg.data["active"]["run_id"]
+        self.assertNotEqual(rid1, rid2)
+        self.assertTrue(reg.data["runs"][rid1].get("abandoned"))
+        self.assertTrue(os.path.isdir(reg.data["runs"][rid1]["folder"]))   # the old folder stays until cleanup
+
+    def test_the_semi_page_ends_with_the_mode_box(self):
+        self.doctor("cursor")
+        out, _ = capture(self.w, "new", "s1")
+        tail = [l for l in out.splitlines() if l.strip()][-14:]
+        t = " ".join(tail)
+        self.assertIn("MODE: SEMI. Cursor opened on the run folder", t)
+        self.assertIn("new s1 --mode manual", t)
+
     def test_codex_semi_writes_the_run_config_and_the_link(self):
         self.doctor("codex")
         out, _ = capture(self.w, "new", "s1")
