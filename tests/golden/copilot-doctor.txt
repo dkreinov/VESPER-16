@@ -4,7 +4,7 @@
   OK    workshop home <HOME>\vesper-runs
   OK    no VESPER skill in global skill folders
   WARN  GitHub Copilot: PARTIAL SUPPORT (experimental)
-          Copilot works here in manual mode only: VS Code, Copilot Chat, agent mode.
+          Semi mode opens VS Code on the run folder with the chat ready. You send the prompt yourself.
           NOT supported: --auto, the Copilot CLI and the Copilot app.
           From the chat the kit reads: model, time and output tokens. Input tokens and cost are not available.
           This path is less tested than Codex or Claude Code. If something looks wrong, tell the instructor.

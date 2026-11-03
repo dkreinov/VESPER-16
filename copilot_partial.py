@@ -52,7 +52,7 @@ APP_LINE = "  Tokens and cost: input tokens are not available in Copilot Chat, s
 def doctor_lines():
     """Lines for `doctor` when the learner picked Copilot. The first is a WARN, so the result is never plain green."""
     out = ["  WARN  %s" % PARTIAL_TITLE]
-    out += ["          " + x for x in LIMITS]
+    out += ["          " + x for x in LIMITS_SEMI]
     out += ["          " + x for x in SETUP]
     return out
 
