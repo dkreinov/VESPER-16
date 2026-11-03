@@ -378,8 +378,8 @@ class HarvestStepTest(unittest.TestCase):
         self.assertNotIn("Before stage 3 (2 minutes)", out)
         self.assertIn("  No copied block of your T3 solution was found in your skill", out)
         self.assertIn("  Why stage 3 also runs a DIFFERENT task (T6):", out)
-        self.assertIn("    1. Memory: the agent remembers the earlier session.", out)
-        self.assertIn("    2. The skill holds parts of the T3 answer itself.", out)
+        self.assertIn("A pass on T3 alone proves little", out)
+        self.assertIn("a boot screen with your name and a test ball", out)
         self.assertLess(out.index("Why stage 3 also runs"), out.index("NEXT:"))
         self.assertNotIn("Knowledge or the answer?", out)      # learners see no code blocks
         self.assertNotIn("Isolation OK", out)

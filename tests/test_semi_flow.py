@@ -743,6 +743,7 @@ class NeverCrash(Base):
             print("ok %s" % a.run_id)
             return 0
         with mock.patch.object(self.w, "interactive", return_value=True), \
+                mock.patch.object(self.w, "ask", side_effect=answer_numbers()), \
                 mock.patch.object(self.w, "cmd_done", side_effect=fake_done):
             out, rc = capture(self.w, "new", "s3", "--task", "all", "--name", "MIRA")
         self.assertEqual(rc, 0)
