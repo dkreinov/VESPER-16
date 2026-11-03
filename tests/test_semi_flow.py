@@ -697,7 +697,7 @@ class Labels(Base):
             self.assertEqual(self.w.run_folder_label(reg, "T6", True), "T6_NO_SKILL_" + tag)
 
     def test_label_of_reads_the_front_of_the_folder_name(self):
-        self.assertEqual(self.w.label_of("C:\\x\\T3_WITH_SKILL_LUNA__s3-ab12-t3-cd34"), "T3_WITH_SKILL_LUNA")
+        self.assertEqual(self.w.label_of(os.path.join("x", "T3_WITH_SKILL_LUNA__s3-ab12-t3-cd34")), "T3_WITH_SKILL_LUNA")
         self.assertEqual(self.w.label_of("/x/s1-ab12"), "s1-ab12")
 
     def test_show_grade_and_done_work_with_labeled_folders(self):
