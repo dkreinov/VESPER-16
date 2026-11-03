@@ -5044,6 +5044,10 @@ def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extr
     if label:
         print("\n  Run name: %s" % label)
     print("  Folder: %s" % folder)
+    if agent in ("codex", "copilot"):             # the learner must act BEFORE sending: say it before the long prompt
+        print("\n" + c_next("  !! FIRST, BEFORE YOU SEND THE PROMPT !!"))
+        for l in textwrap.wrap(mem_line(agent), MAXW - 6) or [""]:
+            print(c_next("     " + l))
     prompt_block(prompt)
     print("  This text is the same as PROMPT.txt in the folder.")
     model_txt = (LARGE_SHORT if stage == "1" else SMALL_SHORT).get(agent, "")

@@ -126,6 +126,19 @@ class Stage1(Base):
         self.assertIn("Workshop run: " + rid, txt)
         self.assertIn("tasks/T3.md", txt)
 
+    def test_codex_page_says_memory_off_before_the_prompt(self):
+        self.doctor("codex")
+        out, _ = capture(self.w, "new", "s1")
+        i_mem = out.index("FIRST, BEFORE YOU SEND THE PROMPT")
+        i_prompt = out.index("PROMPT ---")
+        self.assertLess(i_mem, i_prompt)
+        self.assertIn("/memories", out[i_mem:i_prompt])
+
+    def test_cursor_page_has_no_early_memory_box(self):
+        self.doctor("cursor")
+        out, _ = capture(self.w, "new", "s1")
+        self.assertNotIn("FIRST, BEFORE YOU SEND THE PROMPT", out)
+
     def test_restart_ends_the_active_run_and_makes_a_new_one(self):
         self.doctor("cursor")
         capture(self.w, "new", "s1")
@@ -332,7 +345,7 @@ class Stage3(Base):
         t = flat(out)
         self.assertEqual(t.count("Mode: SEMI"), 4)
         self.assertEqual(t.count("Run name: T"), 4)
-        self.assertEqual(t.count("/memories"), 4)
+        self.assertEqual(t.count("/memories"), 8)          # twice per page: before the prompt and after the opener
         self.assertEqual(t.count("Check the model"), 4)
         self.assertEqual(t.count("END OF PROMPT"), 4)
 
