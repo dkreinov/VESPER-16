@@ -4,16 +4,8 @@ Write the game described in [tasks/T3.md](tasks/T3.md) for the VESPER-16 handhel
 The kit contains the console's assembler + emulator and two tiny example programs.
 There is no manual — working out how the console behaves is part of the exercise.
 
-<p align="center"><img src="media/t3-squash.gif" alt="T3 squash running on VESPER-16: the paddle returns the ball, the green score bar grows, a miss resets the game" width="384"></p>
-<p align="center"><sub>What a finished T3 looks like (12 s from a real solution, frames 600–960, scaled 6×):
-the paddle returns the ball and the green score bar grows; a miss resets the score and relaunches the ball.</sub></p>
-
 **Bonus:** [tasks/T4.md](tasks/T4.md) is a second game, Breakout, for anyone who finishes early or wants
 to try a skill on a game it was not written for.
-
-<p align="center"><img src="media/t4-breakout.gif" alt="T4 Breakout running on VESPER-16: the ball breaks the last bricks, the wall refills and the ball waits on the paddle" width="384"></p>
-<p align="center"><sub>What a finished T4 looks like (12 s from a real solution, frames 600–960, scaled 6×):
-the last bricks break, the full wall comes back and the ball rests on the paddle until A is pressed.</sub></p>
 
 ## Design concepts
 
@@ -206,7 +198,7 @@ tasks/T3.md         the game task
 tasks/T4.md         bonus game (Breakout)
 tasks/T6.md         stage-3 task template (your name is filled in by workshop.py)
 player.html         offline viewer for --out folders and --gif files
-media/              the demo GIFs and design concept images above
+media/              the design concept images above
 solutions/          save your game here
 locked/             later workshop parts (password-protected)
 unlock.py           opens a locked part into unlocked/part-<n>/
