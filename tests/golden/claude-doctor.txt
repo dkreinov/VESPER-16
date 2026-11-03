@@ -1,0 +1,9 @@
+  OK    Python <V>
+  OK    git
+  OK    emulator: VESPER-16 SDK 2.3.1
+  OK    workshop home <HOME>\vesper-runs
+  OK    no VESPER skill in global skill folders
+  INFO  --auto claude: ready (CLI found)
+GREEN: all good.
+
+[rc=0]

@@ -1,0 +1,20 @@
+  OK    Python <V>
+  OK    git
+  OK    emulator: VESPER-16 SDK 2.3.1
+  OK    workshop home <HOME>\vesper-runs
+  OK    no VESPER skill in global skill folders
+  WARN  GitHub Copilot: PARTIAL SUPPORT (experimental)
+          Copilot works here in manual mode only: VS Code, Copilot Chat, agent mode.
+          NOT supported: --auto, the Copilot CLI and the Copilot app.
+          From the chat the kit reads: model, time and output tokens. Input tokens and cost are not available.
+          This path is less tested than Codex or Claude Code. If something looks wrong, tell the instructor.
+          Before you start (once, 3 minutes):
+            1. VS Code: File > Preferences > Profiles > Create Profile. Name it vesper-clean.
+               Use this profile for the workshop. Your normal profile and memories stay as they are.
+            2. In that profile: Settings (Ctrl+,), search "memory", turn OFF chat.copilot.memory.enabled.
+            3. Open the run folder in VS Code (File > Open Folder). Use Copilot Chat in Agent mode.
+            4. Pick the model from the model picker. Never leave it on Auto.
+            5. Start a NEW chat for every run (the + button in the chat panel).
+YELLOW: it works - read the warnings.
+
+[rc=0]

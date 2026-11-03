@@ -1,0 +1,16 @@
+  Tokens and cost: input tokens are not available in Copilot Chat, so
+  there is no cost.
+
+  FINISHED  T6 without skill   <ID4>   time unknown   0 runs
+  cost unknown
+  Score 0 FAIL
+
++----------------------------------------------------------------------+
+|  NEXT: 2 agents are still working. When each is done (or at 10       |
+|        min), run its line:                                           |
+|        python workshop.py done <ID5>   (T6 with skill)     |
+|        python workshop.py done <ID3>   (T3 with skill)     |
++----------------------------------------------------------------------+
+
+
+[rc=0]

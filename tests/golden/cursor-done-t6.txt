@@ -1,0 +1,39 @@
+  Tokens and cost: not available in the Cursor app.
+
+  FINISHED  T6 with skill   <ID5>   time unknown   0 runs
+  cost unknown
+  Score 0 FAIL
+
+========================================================================
+  T6: WITH vs WITHOUT the skill - different task; shares components
+  with T3
+========================================================================
+  Settings differ: this is not a matched comparison.
+
+                without with skill
+  ------------- ------- ----------
+  Time (min)          -          -
+  Emulator runs       0          0
+  Tokens in           -          -
+  Tokens out          -          -
+  Cost (USD)          -          -
+  Score          0 FAIL     0 FAIL
+  without = <ID4>;  with skill = <ID5>
+
+  Change not shown: one attempt failed, so time and cost are not
+  comparable.
+
+  At least one attempt failed. Costs describe attempts, not
+  equal-quality savings.
+
+  Observed results: one attempt per condition. Check pass/fail before
+  time or cost; reliability is unknown.
+
++----------------------------------------------------------------------+
+|  NEXT: all agents are done. Now:                                     |
+|        1. python workshop.py show                                    |
+|        2. python workshop.py submit                                  |
++----------------------------------------------------------------------+
+
+
+[rc=0]

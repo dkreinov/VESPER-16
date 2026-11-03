@@ -13,6 +13,10 @@ def fresh_ws():
     os.environ["CODEX_HOME"] = os.path.join(home, "codex")
     os.environ["VESPER_DOCTOR_REPORT"] = os.path.join(home, "doctor-report.txt")   # never in the kit folder
     os.environ["VESPER_DOCTOR_SKIP_CLI"] = "1"                                   # no slow agent --version calls
+    for _a in ("CODEX", "CURSOR", "CLAUDE", "COPILOT"):                            # semi mode never opens a real app in tests
+        os.environ["VESPER_LAUNCHER_" + _a] = "none"
+    os.environ.pop("VESPER_LAUNCHER_DRYRUN", None)
+    os.environ["VESPER_CODEX_STATE"] = os.path.join(home, "no-codex-state.sqlite")
     os.environ["VESPER_NO_BG_CHECK"] = "1"                                       # new s1 starts no background check
     if ROOT not in sys.path:
         sys.path.insert(0, ROOT)

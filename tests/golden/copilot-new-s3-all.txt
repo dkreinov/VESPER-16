@@ -1,0 +1,131 @@
+
+========================================================================
+  STAGE 3 - four NEW agents (T3 and T6, each with and without the
+  skill)
+  name on T6: MIRA
+========================================================================
+  For EACH run: new project from the folder -> new thread
+  -> model a small model from the model picker: Claude Haiku 5.5 or
+  GPT-6 Luna (not Auto)
+  -> paste its prompt.   6 runs each.
+
+  *** GitHub Copilot: PARTIAL SUPPORT (experimental) ***
+  - Copilot works here in manual mode only: VS Code, Copilot Chat, agent
+  mode.
+  - NOT supported: --auto, the Copilot CLI and the Copilot app.
+  - From the chat the kit reads: model, time and output tokens. Input
+  tokens and cost are not available.
+  Model: a small model from the model picker: Claude Haiku 5.5 or GPT-6
+  Luna (not Auto) in all 4 chats.
+  New chat for each run. Memory off (profile vesper-clean). Agent mode.
+  Tokens and cost: not shown by Copilot Chat. The kit reads model, time
+  and output tokens.
+  Wait until the agent is done; do not ask it anything else.
+  If an agent asks a question, reply: Make reasonable assumptions and
+  continue.
+  Time box 10 min: stop any agent still working at 10 min, then run its
+  done line.
+  Start in this order: 1. T3 without skill 2. T3 with skill 3. T6
+  without skill 4. T6 with skill
+  Together, these 4 runs are a small benchmark of your skill: the same
+  task and a different task, each with and without it.
+
+  RUN 1 of 4  T3 WITHOUT the skill
+  Folder:
+       <HOME>\vesper-runs\<ID2>
+------------------------------- PROMPT 1 -------------------------------
+Workshop run: <ID2>
+
+Write the game described in tasks/T3.md for the VESPER-16 handheld
+console. The dev kit is in this folder; use bin/vesper (it works in
+every shell, also on Windows). Save the program as solutions/T3.vsa. You
+have 6 runs of `bin/vesper run`; `bin/vesper asm` is free.
+
+Do not read memory files or notes from earlier sessions. Work only
+inside this folder: do not read or change files outside it.
+
+Work on your own until the task is done. Do not stop to ask for approval
+or a design review.
+--------------------------- END OF PROMPT 1 ----------------------------
+  Send it and note the time. Stop the agent at 10 min, then run its done
+  line.
+
+  RUN 2 of 4  T3 WITH the skill
+  Folder:
+       <HOME>\vesper-runs\<ID3>
+------------------------------- PROMPT 2 -------------------------------
+Workshop run: <ID3>
+
+Write the game described in tasks/T3.md for the VESPER-16 handheld
+console. The dev kit is in this folder; use bin/vesper (it works in
+every shell, also on Windows). Save the program as solutions/T3.vsa. You
+have 6 runs of `bin/vesper run`; `bin/vesper asm` is free. Use the
+vesper16 skill (in Codex: $vesper16; it is in .agents/skills/vesper16
+and .claude/skills/vesper16). Load the skill before you do anything
+else. If you cannot find or load it, stop, write "SKILL NOT FOUND", and
+do not start the task.
+
+Do not read memory files or notes from earlier sessions. Work only
+inside this folder: do not read or change files outside it.
+
+Work on your own until the task is done. Do not stop to ask for approval
+or a design review.
+--------------------------- END OF PROMPT 2 ----------------------------
+  Send it and note the time. Stop the agent at 10 min, then run its done
+  line.
+
+  RUN 3 of 4  T6 WITHOUT the skill
+  Folder:
+       <HOME>\vesper-runs\<ID4>
+------------------------------- PROMPT 3 -------------------------------
+Workshop run: <ID4>
+
+Write the game described in tasks/T6.md for the VESPER-16 handheld
+console. The dev kit is in this folder; use bin/vesper (it works in
+every shell, also on Windows). Save the program as solutions/T6.vsa. You
+have 6 runs of `bin/vesper run`; `bin/vesper asm` is free.
+
+Do not read memory files or notes from earlier sessions. Work only
+inside this folder: do not read or change files outside it.
+
+Work on your own until the task is done. Do not stop to ask for approval
+or a design review.
+--------------------------- END OF PROMPT 3 ----------------------------
+  Send it and note the time. Stop the agent at 10 min, then run its done
+  line.
+
+  RUN 4 of 4  T6 WITH the skill (a different task that shares components
+  with T3)
+  Folder:
+       <HOME>\vesper-runs\<ID5>
+------------------------------- PROMPT 4 -------------------------------
+Workshop run: <ID5>
+
+Write the game described in tasks/T6.md for the VESPER-16 handheld
+console. The dev kit is in this folder; use bin/vesper (it works in
+every shell, also on Windows). Save the program as solutions/T6.vsa. You
+have 6 runs of `bin/vesper run`; `bin/vesper asm` is free. Use the
+vesper16 skill (in Codex: $vesper16; it is in .agents/skills/vesper16
+and .claude/skills/vesper16). Load the skill before you do anything
+else. If you cannot find or load it, stop, write "SKILL NOT FOUND", and
+do not start the task.
+
+Do not read memory files or notes from earlier sessions. Work only
+inside this folder: do not read or change files outside it.
+
+Work on your own until the task is done. Do not stop to ask for approval
+or a design review.
+--------------------------- END OF PROMPT 4 ----------------------------
+  Send it and note the time. Stop the agent at 10 min, then run its done
+  line.
+
++----------------------------------------------------------------------+
+|  NEXT: when an agent is done (or at 10 min), run its line:           |
+|        python workshop.py done <ID2>   (T3 without skill)  |
+|        python workshop.py done <ID3>   (T3 with skill)     |
+|        python workshop.py done <ID4>   (T6 without skill)  |
+|        python workshop.py done <ID5>   (T6 with skill)     |
++----------------------------------------------------------------------+
+
+
+[rc=0]

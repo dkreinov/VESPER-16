@@ -1,0 +1,17 @@
+No agent log contains <ID2> (Cursor or another agent?). Type
+the numbers from the agent's usage screen (Enter = skip).
+
+  FINISHED  T3 without skill   <ID2>   time unknown   0 runs
+  cost unknown
+  Score 0 FAIL
+
++----------------------------------------------------------------------+
+|  NEXT: 3 agents are still working. When each is done (or at 10       |
+|        min), run its line:                                           |
+|        python workshop.py done <ID5>   (T6 with skill)     |
+|        python workshop.py done <ID3>   (T3 with skill)     |
+|        python workshop.py done <ID4>   (T6 without skill)  |
++----------------------------------------------------------------------+
+
+
+[rc=0]

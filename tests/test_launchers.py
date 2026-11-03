@@ -102,6 +102,21 @@ class Find(unittest.TestCase):
     def test_unknown_agent(self):
         self.assertIsNone(L.find_app("nope"))
 
+    def test_codex_cli_note_when_cli_is_preferred(self):
+        env = {"VESPER_LAUNCHER_CODEX": ""}
+        with mock.patch.dict(os.environ, env), mock.patch.object(L, "_which", return_value="codex.cmd"), mock.patch.object(L, "_codex_app_dir", return_value="appdir"):
+            cli = L.find_app("codex", prefer="cli")
+            app = L.find_app("codex")
+        self.assertEqual((cli.kind, cli.note), ("codex-cli", "Codex CLI found."))
+        self.assertNotIn("not found", cli.note)
+        self.assertEqual(app.kind, "codex-app")
+
+    def test_codex_cli_note_when_the_app_is_missing(self):
+        with mock.patch.dict(os.environ, {"VESPER_LAUNCHER_CODEX": ""}), mock.patch.object(L, "_which", return_value="codex.cmd"), mock.patch.object(L, "_codex_app_dir", return_value=None):
+            f = L.find_app("codex")
+        self.assertEqual(f.kind, "codex-cli")
+        self.assertIn("the app was not found", f.note)
+
 
 class Open(Base):
     def test_codex_app(self):

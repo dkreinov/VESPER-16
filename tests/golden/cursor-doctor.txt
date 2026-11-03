@@ -1,0 +1,11 @@
+  OK    Python <V>
+  OK    git
+  OK    emulator: VESPER-16 SDK 2.3.1
+  OK    workshop home <HOME>\vesper-runs
+  OK    no VESPER skill in global skill folders
+  INFO  --auto cursor: ready (CLI found)
+  INFO  Cursor loads User Rules and alwaysApply rules in every run
+        (Settings > Rules). Turn them off for a clean --auto run.
+GREEN: all good.
+
+[rc=0]

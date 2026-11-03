@@ -28,6 +28,7 @@ KIT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, KIT)
 import copilot_partial as CP  # noqa: E402  (GitHub Copilot, PARTIAL support: all of it lives in that file)
 import measure as M  # noqa: E402  (session readers and prices, same folder)
+import launchers as LA  # noqa: E402  (semi mode: find and open the agent app, same folder)
 import t6font as T6F  # noqa: E402  (T6 name font, same folder; locked part 4 has a copy)
 
 _VT = []
@@ -440,6 +441,8 @@ def s3_header(reg, a, both, total=None):
         title = "STAGE 3 - %s WITH your skill" % ("two NEW agents" if both else "a NEW agent")
     first = reg.data["runs"][a.s3_first]
     right = ("name on T6: " + first["name"]) if first.get("task") == "T6" and first.get("name") else ""
+    if CUR_MODE_LINE[0]:
+        print("\n" + c_next("  " + CUR_MODE_LINE[0]))
     print("\n" + c_banner(WIDE))
     if right and len(title) + 4 + len(right) <= 70:
         print(c_banner(("  " + title).ljust(70 - len(right)) + right))
@@ -495,6 +498,8 @@ def run_page(reg, rid, head, folder, prompt, model_line, last, extra=None, mem=F
     """One run as its own page (terminal only). Repeats the steps until the learner answers y."""
     while True:
         clear_screen()
+        if CUR_MODE_LINE[0]:
+            print("\n" + c_next("  " + CUR_MODE_LINE[0]))
         print("\n" + c_banner(WIDE) + "\n" + c_banner("  " + head) + "\n" + c_banner(WIDE))
         if extra:
             extra()
@@ -805,6 +810,12 @@ def _cmd_doctor(a):
     if agent == "copilot":
         lines += CP.doctor_lines()
         level = max(level, 1)
+    if agent in LA.AGENTS:
+        try:
+            fa = LA.find_app(agent)
+        except Exception:
+            fa = None
+        note(0, "INFO", ("app found: " + fa.note) if fa else "app not found: semi mode falls back to manual")
     sp = superpowers_evidence(agent)
     if sp:
         note(1, "WARN", "superpowers is active for %s (%s). Your agent may stop to ask for approval; "
@@ -865,8 +876,8 @@ def write_task(dst_dir, task, name=""):
         fh.write(T6F.task_md(tpl, name))
 
 
-def make_run_folder(reg, run_id, task, skill_dir=None, name=""):
-    f = os.path.join(ws_home(), run_id)
+def make_run_folder(reg, run_id, task, skill_dir=None, name="", dirname=None):
+    f = os.path.join(ws_home(), dirname or run_id)
     reg.add_item(f, "dir")
     reg.save()
     if not os.path.isdir(os.path.join(f, ".git")):
@@ -943,27 +954,33 @@ def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False,
         next_box(cmd, then)
 
 
-def create_s3_run(reg, a, task, name=None, control=False):
+def t6_name(reg, a):
+    """The name on the T6 nameplate: --name, else the alias, else asked."""
+    if a.name is not None:
+        raw = a.name
+    elif reg.data.get("alias"):
+        raw = reg.data["alias"]
+        a.name_from_alias = True
+    else:
+        raw = ask("Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
+    name = T6F.normalise(raw)
+    if getattr(a, "name_from_alias", False) and name == T6F.DEFAULT_NAME \
+            and raw.strip().upper() != T6F.DEFAULT_NAME:
+        # a Hebrew or other non-Latin alias has no A-Z letters: everyone would get the same nameplate
+        print("  Your alias has no A-Z letters, so your T6 nameplate would be %s, the same for all."
+              % T6F.DEFAULT_NAME)
+        name = T6F.normalise(ask("  Type a Latin name for T6 (A-Z, up to %d; Enter keeps %s): "
+                                 % (T6F.MAX_LETTERS, T6F.DEFAULT_NAME), ""))
+        a.name_from_alias = False
+    return name
+
+
+def create_s3_run(reg, a, task, name=None, control=False, labeled=False):
     """Create one stage-3 run (registry row, folder, active). Returns (run_id, folder, prompt).
     On failure the registry row and active entry are removed, so no half state stays."""
     src, parent, sh, shs = resolve_skill(reg, a.skill)
     if task == "T6" and name is None:
-        if a.name is not None:
-            raw = a.name
-        elif reg.data.get("alias"):
-            raw = reg.data["alias"]
-            a.name_from_alias = True
-        else:
-            raw = ask("Your name for the T6 nameplate (up to 8 letters A-Z; Enter = VESPER): ", "")
-        name = T6F.normalise(raw)
-        if getattr(a, "name_from_alias", False) and name == T6F.DEFAULT_NAME \
-                and raw.strip().upper() != T6F.DEFAULT_NAME:
-            # a Hebrew or other non-Latin alias has no A-Z letters: everyone would get the same nameplate
-            print("  Your alias has no A-Z letters, so your T6 nameplate would be %s, the same for all."
-                  % T6F.DEFAULT_NAME)
-            name = T6F.normalise(ask("  Type a Latin name for T6 (A-Z, up to %d; Enter keeps %s): "
-                                     % (T6F.MAX_LETTERS, T6F.DEFAULT_NAME), ""))
-            a.name_from_alias = False
+        name = t6_name(reg, a)
     name = name or ""
     rid = s3_run_id(reg, parent, ("n" + task[-1]) if control else task)
     if control:       # control run: same folder, no skill, no skill sentences in the prompt
@@ -976,7 +993,8 @@ def create_s3_run(reg, a, task, name=None, control=False):
                                      skill_source=a.skill if a.skill in ("own", "wiki") else "path",
                                      skill_hash=sh, skill_has_solution=shs, session=None, name=name)
     try:
-        f = make_run_folder(reg, rid, task, skill_dir=None if control else src, name=name)
+        dirname = "%s__%s" % (run_folder_label(reg, task, control), rid) if labeled else None
+        f = make_run_folder(reg, rid, task, skill_dir=None if control else src, name=name, dirname=dirname)
         prompt = render_prompt("stage3-noskill" if control else "stage3", task=task, run_id=rid)
         with open(os.path.join(f, "PROMPT.txt"), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(prompt)                    # a lost window is never fatal: the prompt stays in the run folder
@@ -1154,6 +1172,20 @@ def cmd_new(a):
     if task in ("both", "all") and a.stage != "s3":
         sys.exit("--task %s is for stage 3 only:  python workshop.py new s3 --task all" % task)
     acts = reg.actives()
+    agent0 = reg.data.get("agent") or ""
+    if getattr(a, "auto", False) and a.stage != "s3":
+        sys.exit("--auto is for stage 3 only:  python workshop.py new s3 --task all --auto")
+    mode = want_mode(a, agent0)
+    CUR_MODE_LINE[0] = None
+    if mode != "auto":
+        set_mode_line(a, agent0, mode, "python workshop.py new " + (
+            "s1" if a.stage == "s1" else "s3 --task %s" % task))
+    if (a.stage == "s1" and getattr(a, "mode", None) in ("semi", "manual") and len(acts) == 1
+            and acts[0]["stage"] == "1" and reg.data["runs"].get(acts[0]["run_id"], {}).get("mode") == "semi"):
+        rid1 = acts[0]["run_id"]          # the app did not open: show the same run again, in the chosen mode
+        r1 = reg.data["runs"][rid1]
+        return show_s1(reg, a, rid1, r1["folder"], render_prompt("stage1", task=r1["task"], run_id=rid1),
+                       r1["method"], mode, again=True)
     blocking = acts if a.stage == "s1" else [x for x in acts if x["stage"] != "3"]
     if blocking:
         sys.exit("\n".join(active_lines(reg)))
@@ -1163,8 +1195,6 @@ def cmd_new(a):
                 and (task == "all" or not is_control(reg.data["runs"].get(x["run_id"], {})))]
     else:
         same = []
-    if getattr(a, "auto", False) and a.stage != "s3":
-        sys.exit("--auto is for stage 3 only:  python workshop.py new s3 --task all --auto")
     if a.stage == "s3" and not same and not repeat_ok(reg, a, task):
         return 0
     if a.stage == "s1":
@@ -1177,10 +1207,11 @@ def cmd_new(a):
                                      skill_source="none", skill_hash="", skill_has_solution="", session=None, name="")
         f = make_run_folder(reg, rid, task)
         prompt = render_prompt("stage1", task=task, run_id=rid)
-        if not gate_on():
+        if not gate_on() and mode != "semi":
+            if CUR_MODE_LINE[0]:
+                print("\n" + CUR_MODE_LINE[0])
             banner("STAGE 1 - the agent with NO skill        run %s" % rid)
             method_notice(method, " (used in stage 2)")
-        done_cmd = "python workshop.py done"
     else:
         g = find_global_vesper_skills()
         if g:
@@ -1193,6 +1224,8 @@ def cmd_new(a):
         try:
             if same:
                 return resume_s3(reg, a, same)
+            if mode == "semi":
+                return new_s3_semi(reg, a, task)
             if task == "all":
                 return new_s3_all(reg, a)
             if task == "both":
@@ -1218,6 +1251,24 @@ def cmd_new(a):
     reg.save()
     if a.stage == "s1":
         maybe_start_bg_check()
+    return show_s1(reg, a, rid, f, prompt, method, mode)
+
+
+def show_s1(reg, a, rid, f, prompt, method, mode, again=False):
+    """The stage-1 page (semi: the app opens; manual: the old page). Used for a new run and for a re-show."""
+    done_cmd = "python workshop.py done"
+    run = reg.data["runs"][rid]
+    if mode == "semi":
+        semi_page(reg, rid, "STAGE 1 - the agent with NO skill        run %s" % rid, f, prompt, "1",
+                  "python workshop.py new s1", extra=lambda: method_notice(method, " (used in stage 2)"))
+        partial_notice(reg)
+        next_box(done_cmd, "when the agent says it is done, run:")
+        return 0
+    if run.get("mode") == "semi":
+        run["mode"] = "manual"
+        reg.save()
+    if again and not gate_on() and CUR_MODE_LINE[0]:
+        print("\n" + CUR_MODE_LINE[0])
     mem = (reg.data.get("agent") or "") in ("codex", "") and codex_memories_on(reg)
     if gate_on():
         agent1 = reg.data.get("agent") or ""
@@ -2780,13 +2831,22 @@ def finish_stage(reg, rid, stage, a, grade=True):
         elif reg.data.get("agent") == "cursor":
             # Cursor app: no tokens anywhere. Model and time come from Cursor's local chat data, if found.
             m["measurement"] = "cursor-app"
-            chat = M.cursor_app_chat(rid)
+            try:
+                chat = M.cursor_app_chat(rid)
+            except Exception:                     # the chat store is private data of the app: never fatal
+                chat = None
             if chat:
                 lo, hi = max(chat["first"], t0), min(chat["last"], t1)
                 m["model"] = chat["model"]
                 if hi > lo:
                     m["elapsed_min"] = "%.1f" % ((hi - lo) / 60)
                     m["last_activity"] = hi
+                mins = (hi - lo) if hi > lo else (chat["last"] - chat["first"])
+                print("  Cursor chat found: model %s, effort %s, %.1f min."
+                      % (chat["model"] or "unknown", chat.get("effort") or "unknown", max(mins, 0) / 60))
+            else:
+                print("  Cursor chat not found. This is only a hint: the kit cannot read the time and model.")
+                print("  Run `python workshop.py done %s` again when the chat is saved." % rid)
             print(CURSOR_APP_LINE)
         else:
             print("No agent log contains %s (Cursor or another agent?). "
@@ -2894,6 +2954,7 @@ def cmd_done(a):
         print("\n" + finish_line(run_label(reg, rid).strip("()"), row, rid, tail))
         if _val(row, "score") is not None:
             print("\n".join(chunk_lines(["Score %s" % ("%s %s" % (row.get("score", ""), verdict(row))).strip()])))
+    semi_done_lines(reg, rid)
     warn = run_warnings(row)
     if warn:
         print("\n" + "\n".join(warn))
@@ -3165,7 +3226,14 @@ def cmd_skill(a):
     if reg.row(rid, "2"):
         sys.exit("Stage 2 of %s is already done. Next:  python workshop.py new s3 --task all" % rid)
     run = reg.data["runs"][rid]
+    mode = want_mode(a, reg.data.get("agent") or "")
+    if mode == "auto":
+        sys.exit("Stage 2 has no auto mode. Run:  python workshop.py skill")
     clear_screen()
+    if mode != "semi":
+        print(c_next("  " + set_mode_line(a, reg.data.get("agent") or "", mode, "python workshop.py skill")))
+    else:
+        print(c_next("  " + mode_line("semi", reg.data.get("agent") or "", "python workshop.py skill")))
     if again:
         print("\n  Stage 2 is already running (the clock started at the first 'skill'). Here is the prompt again.")
     else:
@@ -3183,6 +3251,11 @@ def cmd_skill(a):
         print("\n  2. The prompt names the guide the agent must follow (%s)." % run["method"])
     print("\n  3. Copy everything between the PROMPT lines and send it.")
     prompt_block(prompt)
+    if mode == "semi":
+        if copy_to_clipboard(prompt):
+            print("  The prompt is on the clipboard. Paste it (Ctrl+V) in the SAME chat as stage 1. No new window opens.")
+        else:
+            print("  The clipboard did not work. Copy the text between the PROMPT lines by hand.")
     partial_notice(reg)
     print("\n  4. Wait until the agent says the skill is written.")
     next_box("python workshop.py harvest", "when the skill is written, run:")
@@ -4872,10 +4945,238 @@ def resume_s3(reg, a, same):
             entries.pop(k)
     if not entries:
         return 1
+    agent = reg.data.get("agent") or ""
+    if getattr(a, "mode", None) != "manual" and all(runs[v[0]].get("mode") == "semi" for v in entries.values()):
+        return resume_s3_semi(reg, a, entries)
     if not gate_on():
         s3_header(reg, a, len(entries) > 1, total=len(entries) if len(entries) in (3, 4) else None)
     s3_pages(reg, a, entries, seed)
     return 0
+
+
+# ------------------------------------------------------------------ semi mode (the kit opens the agent app)
+AGENT_NAME = {"codex": "Codex", "cursor": "Cursor", "claude": "Claude Code", "copilot": "VS Code (Copilot)"}
+MODEL_TAG = {"codex": "LUNA", "cursor": "LUNA", "claude": "HAIKU", "copilot": "SMALL"}
+S1_MODEL = {"codex": ("gpt-6.1-sol", None)}                       # (model, effort) for the app config / flags
+S3_MODEL = {"codex": ("gpt-6-luna", "high"), "claude": (AUTO_MODEL["claude"], None)}
+MEM_LINE = {"codex": "Memory: type /memories and turn memory OFF before you send the prompt.",
+            "cursor": "Memory: Cursor has no memory switch. Nothing to turn off.",
+            "copilot": "Memory: in the clean VS Code profile, turn OFF chat.copilot.memory.enabled."}
+CUR_MODE_LINE = [None]            # the mode line that the manual pages print (set by cmd_new / cmd_skill)
+
+
+def interactive():
+    return bool(sys.stdin and sys.stdin.isatty())
+
+
+def want_mode(a, agent):
+    """auto | semi | manual. --auto is --mode auto. No flag: semi when the kit finds the app, else manual."""
+    if getattr(a, "auto", False):
+        return "auto"
+    m = getattr(a, "mode", None)
+    if m in ("semi", "manual"):
+        return m
+    return "semi" if LA.find_app(agent) else "manual"
+
+
+def mode_line(mode, agent, retry_cmd, defaulted=False):
+    """First line of a page: which mode runs, and the next command if it fails."""
+    name = AGENT_NAME.get(agent, "your agent")
+    if mode == "semi":
+        return ("Mode: SEMI. The kit opens %s on the run folder. Did not open? Run: %s --mode manual"
+                % (name, retry_cmd))
+    why = " The kit did not find the %s app on this PC." % name if defaulted else ""
+    return "Mode: MANUAL. You open %s by hand.%s Want the kit to open it? Run: %s --mode semi" % (name, why, retry_cmd)
+
+
+def set_mode_line(a, agent, mode, retry_cmd):
+    """Remember the first line of the manual pages (printed by run_page, print_prompt and s3_header)."""
+    defaulted = getattr(a, "mode", None) is None and mode == "manual"
+    CUR_MODE_LINE[0] = mode_line(mode, agent, retry_cmd, defaulted)
+    return CUR_MODE_LINE[0]
+
+
+def mem_line(agent, opened_ok=True):
+    if agent == "claude":
+        return ("Memory: off. The kit turned it off for this window." if opened_ok
+                else "Memory: Claude Code keeps memory per project. Nothing to turn off by hand.")
+    return MEM_LINE.get(agent, "Memory: turn memory off in your agent for this chat.")
+
+
+def run_folder_label(reg, task, control):
+    """T3_WITH_SKILL_LUNA: the run name that the folder name starts with."""
+    return "%s_%s_SKILL_%s" % (task, "NO" if control else "WITH", MODEL_TAG.get(reg.data.get("agent") or "", "SMALL"))
+
+
+def label_of(folder):
+    return os.path.basename(os.path.normpath(folder)).split("__")[0]
+
+
+def semi_page(reg, rid, head, folder, prompt, stage, retry_cmd, label=None, extra=None):
+    """One semi page: mode line, run name, full prompt, memory line, model line, then the app opens."""
+    agent = reg.data.get("agent") or ""
+    run = reg.data["runs"][rid]
+    clear_screen()
+    print(c_next("  " + mode_line("semi", agent, retry_cmd)))
+    banner(head)
+    if extra:
+        extra()
+    if label:
+        print("\n  Run name: %s" % label)
+    print("  Folder: %s" % folder)
+    prompt_block(prompt)
+    print("  This text is the same as PROMPT.txt in the folder.")
+    print("\n  " + c_next(mem_line(agent)))
+    model_txt = (LARGE_SHORT if stage == "1" else SMALL_SHORT).get(agent, "")
+    print("  Check the model: %s." % model_txt if model_txt else "  Check the model. Never use Auto.")
+    if stage == "3" and agent in ("cursor", "copilot"):
+        for l in cursor_app_lines(agent, 1):
+            print(l)
+    model, effort = (S1_MODEL if stage == "1" else S3_MODEL).get(agent, (None, None))
+    try:
+        op = LA.open_project(agent, folder, rid, model=model, effort=effort, clip=copy_to_clipboard)
+    except Exception as e:                       # a launcher never stops a page
+        op = LA.Opened(False, "", ["The kit could not open the app (%s)." % type(e).__name__],
+                       ["Folder: %s" % folder, "Open %s on this folder by hand." % AGENT_NAME.get(agent, "your agent"),
+                        "Send this message in the chat: %s" % LA.one_line(rid)])
+    run["mode"] = "semi"
+    run["semi_open"] = op.how or "failed"
+    reg.save()
+    print()
+    print("\n".join("  " + l for l in op.lines))
+    if not op.ok:
+        print(c_err("  The app did not open on its own."))
+        print("\n".join("  " + l for l in op.manual))
+        print("  To use the manual mode, run:  %s --mode manual" % retry_cmd)
+    return op
+
+
+def semi_start_time(agent, rid, enter_t):
+    """Start of a run: the stamp of its first chat message when the kit finds it, else the Enter time."""
+    if agent == "cursor":
+        try:
+            chat = M.cursor_app_chat(rid)
+            if chat and enter_t - 900 <= chat["first"] <= enter_t + 5:
+                return chat["first"]
+        except Exception:
+            pass
+    return enter_t
+
+
+def clock(t):
+    return time.strftime("%H:%M:%S", time.localtime(t))
+
+
+def stop_table(reg, made):
+    """Print the stop time of each run (start + the time box). made = [(key, rid, folder, prompt)]."""
+    agent = reg.data.get("agent") or ""
+    rows = []
+    for key, rid, folder, _ in made:
+        run = reg.data["runs"][rid]
+        t = semi_start_time(agent, rid, float(run.get("sent_at") or time.time()))
+        run["start_at"] = t
+        rows.append((label_of(folder), rid, clock(t), clock(t + TIME_BOX_MIN * 60)))
+    reg.save()
+    w = max(len(r[0]) for r in rows)
+    print("\n  Stop each agent at its stop time (start + %d min):\n" % TIME_BOX_MIN)
+    print("  %-*s  %-8s  %-8s  %s" % (w, "Run", "Start", "STOP", "Run id"))
+    for name, rid, st, sp in rows:
+        print("  %-*s  %-8s  %-8s  %s" % (w, name, st, sp, rid))
+
+
+def semi_done_all(reg, rids, a):
+    """Run `done` for each run, one after the other, without clearing the screen between them."""
+    old = os.environ.get("VESPER_NO_CLEAR")
+    os.environ["VESPER_NO_CLEAR"] = "1"
+    try:
+        for rid in rids:
+            print("\n" + "-" * 72 + "\n  done for %s" % rid)
+            try:
+                cmd_done(argparse.Namespace(run_id=rid, partial=False, no_form=getattr(a, "no_form", False)))
+            except SystemExit as e:
+                print("  %s" % (e.code if isinstance(e.code, str) else "done stopped for " + rid))
+            except Exception as e:                   # a reader problem never hides the other runs
+                print("  done could not finish for %s (%s). Run: python workshop.py done %s" % (rid, type(e).__name__, rid))
+    finally:
+        if old is None:
+            os.environ.pop("VESPER_NO_CLEAR", None)
+        else:
+            os.environ["VESPER_NO_CLEAR"] = old
+
+
+def semi_s3_finish(reg, a, made):
+    """After the last page: the stop-time table, one Enter, then done for all runs."""
+    if not made:
+        return 1
+    stop_table(reg, made)
+    lines = ["python workshop.py done %s   %s" % (rid, label_of(f)) for _, rid, f, _ in made]
+    if not interactive():
+        next_box(lines, "when each agent is stopped or done, run its line:")
+        return 0
+    ask("\n  Stop every agent at its stop time. Then press Enter here. The kit runs done for all %d runs. " % len(made), "")
+    semi_done_all(reg, [rid for _, rid, _, _ in made], a)
+    return 0
+
+
+def semi_run_page(reg, a, i, total, key, rid, f, p, retry_cmd):
+    run = reg.data["runs"][rid]
+    label = label_of(f)
+    head = "STAGE 3 - RUN %d of %d  %s" % (i, total, label)
+    nm = run.get("name", "")
+    if nm and run.get("task") == "T6":
+        head += "   name on T6: " + nm
+    semi_page(reg, rid, head, f, p, "3", retry_cmd, label=label)
+    ask("\n  Send the prompt in the app. Then press Enter here. The next page appears at once. ", "")
+    run["sent_at"] = time.time()
+    reg.save()
+
+
+def new_s3_semi(reg, a, task):
+    """Stage 3 in semi mode: ONE folder per page, made when its page shows. Order: t3, n3, t6, n6."""
+    plan = {"all": [("T3", False), ("T3", True), ("T6", False), ("T6", True)],
+            "both": [("T3", False), ("T6", False)]}.get(task, [(task, False)])
+    retry = "python workshop.py new s3 --task %s" % task
+    name = t6_name(reg, a) if any(t == "T6" for t, _ in plan) else ""
+    made = []
+    a.s3_first = None
+    for i, (t, ctl) in enumerate(plan, 1):
+        try:
+            rid, f, p = create_s3_run(reg, a, t, name=name if t == "T6" else None, control=ctl, labeled=True)
+        except Exception as e:
+            print(c_err("\n  A run could not be created: %s" % e))
+            print("  Runs already created stay valid. Start the missing ones later with --task T6 or T3.")
+            break
+        a.s3_first = a.s3_first or rid
+        made.append((("n" if ctl else "t") + t[-1], rid, f, p))
+        semi_run_page(reg, a, i, len(plan), made[-1][0], rid, f, p, retry)
+    rc = semi_s3_finish(reg, a, made)
+    return rc if len(made) == len(plan) else (rc or 1)
+
+
+def resume_s3_semi(reg, a, entries):
+    """Pages of the semi runs that are still active, again, in the semi order."""
+    order = [k for k in ALL_ORDER if k in entries]
+    made = [(k, entries[k][0], entries[k][1], entries[k][2]) for k in order]
+    retry = "python workshop.py new s3 --task %s" % a.task
+    for i, m in enumerate(made, 1):
+        semi_run_page(reg, a, i, len(made), m[0], m[1], m[2], m[3], retry)
+    return semi_s3_finish(reg, a, made)
+
+
+def semi_done_lines(reg, rid):
+    """Codex app: the memory state of the thread, read-only. Unknown prints nothing."""
+    run = reg.data["runs"].get(rid, {})
+    if reg.data.get("agent") != "codex" or run.get("auto"):
+        return
+    try:
+        mm = M.codex_memory_mode(rid, cwd=run.get("folder"))
+    except Exception:
+        mm = None
+    if mm == "disabled":
+        print("  memory: OFF (verified)")
+    elif mm == "enabled":
+        print(c_err("  WARNING: Codex memory was ON for this run. This run is not clean."))
+        print("  Do this run again with memory off (type /memories before you send the prompt).")
 
 
 # ------------------------------------------------------------------ CLI
@@ -4901,7 +5202,10 @@ def parse(argv):
     s.add_argument("--method", default="random", choices=["random"] + METHODS)
     s.add_argument("--skill", default="own", help="own | wiki | <folder with SKILL.md>")
     s.add_argument("--auto", action="store_true",
-                   help="stage 3: the tool starts the agents itself (headless) and stops each at 10 min")
+                   help="stage 3: the tool starts the agents itself (headless) and stops each at 10 min (same as --mode auto)")
+    s.add_argument("--mode", choices=["auto", "semi", "manual"],
+                   help="auto = the kit runs the agent; semi = the kit opens your agent app on the run folder; "
+                        "manual = you open the app. Default: semi if the kit finds the app, else manual")
     s.add_argument("--model", help="with --auto: the model (default: the stage-3 model of your agent)")
     s.add_argument("--yes", action="store_true", help="with --auto: start the agents without the question")
     s.set_defaults(func=cmd_new)
@@ -4911,6 +5215,8 @@ def parse(argv):
     s.add_argument("--no-form", action="store_true")
     s.set_defaults(func=cmd_done)
     s = sub.add_parser("skill")
+    s.add_argument("--mode", choices=["auto", "semi", "manual"],
+                   help="semi = the prompt goes to the clipboard; manual = you copy it. Default: semi if the kit finds the app")
     s.set_defaults(func=cmd_skill)
     s = sub.add_parser("harvest")
     s.add_argument("--no-form", action="store_true")
@@ -4957,7 +5263,16 @@ def parse(argv):
     s.add_argument("--yes", action="store_true")
     s.add_argument("--no-form", action="store_true", default=True)
     s.set_defaults(func=cmd_shadow)
-    return ap.parse_args(argv)
+    args = ap.parse_args(argv)
+    if args.cmd in ("new", "skill"):
+        m = getattr(args, "mode", None)
+        if getattr(args, "auto", False) and m not in (None, "auto"):
+            ap.error("--auto and --mode %s do not fit together. Use one of them." % m)
+        if m == "auto":
+            args.auto = True
+        if getattr(args, "auto", False):
+            args.mode = "auto"
+    return args
 
 
 def main(argv=None):

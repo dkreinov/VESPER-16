@@ -1,0 +1,32 @@
+  Tokens and cost: not available in the Cursor app.
+
+========================================================================
+  STAGE 2 DONE: skill saved   run <ID1>
+========================================================================
+
+  Time unknown   Cost unknown   Memory unknown   Isolation unknown
+
+  No copied block of your T3 solution was found in your skill (a line
+  match; it cannot see the answer in other words).
+  Why stage 3 also runs a DIFFERENT task (T6):
+  A new agent can pass T3 again with your skill without real knowledge:
+    1. Memory: the agent remembers the earlier session.
+       (This is why memory is off in stage 3.)
+    2. The skill holds parts of the T3 answer itself.
+  So a T3 pass alone proves little. T6 is the next feature on the
+  same console: a boot screen with your name and a test ball. A gain
+  there shows that the console knowledge in your skill transfers.
+
+  Optional (2 min): python workshop.py judge
+
++----------------------------------------------------------------------+
+|  NEXT: stage 3: FOUR new agents (T3, T3 control, T6, T6 control).    |
+|        Choose one:                                                   |
+|        python workshop.py new s3 --task all                          |
+|           you open 4 threads in your agent app                       |
+|        python workshop.py new s3 --task all --auto                   |
+|           the tool runs the 4 agents, about 10 min                   |
++----------------------------------------------------------------------+
+
+
+[rc=0]

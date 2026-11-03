@@ -1,0 +1,39 @@
+  Tokens and cost: input tokens are not available in Copilot Chat, so
+  there is no cost.
+
+  FINISHED  T3 with skill   <ID3>   time unknown   0 runs
+  cost unknown
+  Score 0 FAIL
+
+========================================================================
+  T3: WITH vs WITHOUT the skill
+========================================================================
+  Settings differ: this is not a matched comparison.
+
+                without with skill
+  ------------- ------- ----------
+  Time (min)          -          -
+  Emulator runs       0          0
+  Tokens in           -          -
+  Tokens out          -          -
+  Cost (USD)          -          -
+  Score          0 FAIL     0 FAIL
+  without = <ID2>;  with skill = <ID3>
+
+  Change not shown: one attempt failed, so time and cost are not
+  comparable.
+
+  At least one attempt failed. Costs describe attempts, not
+  equal-quality savings.
+
+  Observed results: one attempt per condition. Check pass/fail before
+  time or cost; reliability is unknown.
+
++----------------------------------------------------------------------+
+|  NEXT: 1 agent is still working. When it is done (or at 10 min),     |
+|        run its line:                                                 |
+|        python workshop.py done <ID5>   (T6 with skill)     |
++----------------------------------------------------------------------+
+
+
+[rc=0]

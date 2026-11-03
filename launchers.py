@@ -70,7 +70,8 @@ def _find_codex(prefer):
 
     def cli():
         p = _which("codex") or _first_file(os.path.join(os.environ.get("APPDATA", ""), "npm", "codex.cmd"))
-        return Found("codex-cli", p, "Codex CLI found (the app was not found).") if p else None
+        note = "Codex CLI found." if prefer == "cli" else "Codex CLI found (the app was not found)."
+        return Found("codex-cli", p, note) if p else None
 
     order = (cli, app) if prefer == "cli" else (app, cli)
     for fn in order:

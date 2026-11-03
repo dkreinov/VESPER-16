@@ -1,0 +1,18 @@
+  Tokens and cost: input tokens are not available in Copilot Chat, so
+  there is no cost.
+
+========================================================================
+  STAGE 1 FINISHED   run <ID1>
+========================================================================
+
+  Time unknown   Runs 0 of 20   Cost unknown   Memory unknown
+  Isolation unknown
+  Score 0 FAIL
+
++----------------------------------------------------------------------+
+|  NEXT: stage 2 (the SAME agent thread writes a skill), run:          |
+|        python workshop.py skill                                      |
++----------------------------------------------------------------------+
+
+
+[rc=0]
