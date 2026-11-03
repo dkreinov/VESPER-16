@@ -16,6 +16,11 @@ def capture(w, *argv):
     return out.getvalue(), rc
 
 
+def argparse_ns():
+    import argparse
+    return argparse.Namespace(no_form=True)
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.w, self.home = fresh_ws()
@@ -372,6 +377,52 @@ class Stage3(Base):
         self.assertEqual(pos, sorted(pos))
         self.assertEqual(len(self.entries()), 4)
         self.assertEqual(out.count("same as PROMPT.txt"), 4)
+
+    def finish_with_answers(self, answers, now_shift=0.0):
+        """Run the interactive end of stage 3 with typed answers. Returns (output, list of run ids that done ran for)."""
+        self.run_all("codex")
+        reg = self.w.Registry.load()
+        made = [(k, r["run_id"] if "run_id" in r else k, r["folder"], "") for k, r in reg.data["runs"].items() if r["stage"] == "3"]
+        made = [("t3", rid, f, p) for _, rid, f, p in made]
+        ended, asked = [], list(answers)
+        self.prompts = []
+
+        def fake_done(reg2, rids, a):
+            ended.extend(rids)
+        buf = io.StringIO()
+        with mock.patch.object(self.w, "interactive", return_value=True),                 mock.patch.object(self.w, "ask", side_effect=lambda *a, **k: (self.prompts.append(a[0]), asked.pop(0))[1]),                 mock.patch.object(self.w, "run_is_done", side_effect=lambda rid: rid in ended),                 mock.patch.object(self.w, "semi_done_all", side_effect=fake_done),                 mock.patch.object(self.w.time, "time", return_value=time.time() + now_shift),                 contextlib.redirect_stdout(buf):
+            self.w.semi_s3_finish(reg, argparse_ns(), made)
+        return buf.getvalue(), ended, [m[1] for m in made]
+
+    def test_bare_enter_ends_nothing(self):
+        out, ended, rids = self.finish_with_answers(["", "  ", "x", "9", "q"])
+        self.assertEqual(ended, [])
+        self.assertIn("Enter alone does nothing", out)
+        self.assertIn("You left the list", out)
+
+    def test_a_run_before_its_stop_time_needs_a_y(self):
+        out, ended, rids = self.finish_with_answers(["1", "n", "q"])
+        self.assertEqual(ended, [])
+        self.assertIn("Did you stop its agent", " ".join(self.prompts))
+
+    def test_a_run_before_its_stop_time_ends_after_y(self):
+        out, ended, rids = self.finish_with_answers(["1", "y", "q"])
+        self.assertEqual(ended, [rids[0]])
+
+    def test_after_the_stop_time_a_number_ends_that_run_only_and_the_list_marks_it(self):
+        out, ended, rids = self.finish_with_answers(["2", "q"], now_shift=3 * 3600)
+        self.assertEqual(ended, [rids[1]])
+        self.assertIn("ENDED  (done saved)", out)
+        self.assertEqual(out.count("running"), 7)       # list 1: four rows running; list 2: three rows running
+
+    def test_all_four_ended_ends_the_loop(self):
+        out, ended, rids = self.finish_with_answers(["1", "2", "3", "4"], now_shift=3 * 3600)
+        self.assertEqual(ended, rids)
+        self.assertIn("All 4 runs are ENDED", out)
+        self.assertIn("python workshop.py show", out)
+        self.assertIn("python workshop.py play T3", out)       # the learner can play what the agents made
+        self.assertIn("python workshop.py play T6", out)
+        self.assertLess(out.index("python workshop.py play T3"), out.index("python workshop.py show"))
 
     def test_pages_show_prompt_memory_and_model(self):
         _, out, _, _ = self.run_all("codex")

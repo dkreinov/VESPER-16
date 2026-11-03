@@ -1900,6 +1900,8 @@ def detect_outside_reads(paths, t0, t1, folder, writer=False):
         for _, text in calls:
             if text:
                 for h in _scan_text(text, roots, writer):
+                    if writer and h.startswith("runs home .guides"):
+                        continue                       # stage 2 prompts tell the writer to read these guides
                     if h not in hits:
                         hits.append(h)
     if not hits:
@@ -3184,13 +3186,10 @@ def detect_solution(skill_dir, snapshot):
 
 REPEAT_NOTE = [
     "  Why stage 3 also runs a DIFFERENT task (T6):",
-    "  A new agent can pass T3 again with your skill without real knowledge:",
-    "    1. Memory: the agent remembers the earlier session.",
-    "       (This is why memory is off in stage 3.)",
-    "    2. The skill holds parts of the T3 answer itself.",
-    "  So a T3 pass alone proves little. T6 is the next feature on the",
-    "  same console: a boot screen with your name and a test ball. A gain",
-    "  there shows that the console knowledge in your skill transfers.",
+    "    - A pass on T3 alone proves little: memory or a copied answer can help.",
+    "    - T6 is the next feature on the same console:",
+    "      a boot screen with your name and a test ball.",
+    "    - A gain on T6 shows that the console knowledge in your skill transfers.",
 ]
 
 
@@ -4716,23 +4715,49 @@ def auto_end_screen(reg, items, show=True):
     return 0 if not failed else 1
 
 
+def choice_box(when, options):
+    """The NEXT box with several ways to go on. options = [(label, command, what it does)].
+    The learner picks ONE; '-- OR --' sits between the options so it is clear that they are alternatives."""
+    w = 70
+    print("\n" + c_next("+" + "-" * w + "+"))
+    for i, l in enumerate(textwrap.wrap("NEXT: " + when, w - 4) or [""]):
+        print(c_next("|  " + l.ljust(w - 2) + "|"))
+    for n, (label, cmd, what) in enumerate(options):
+        print(c_next("|" + " " * w + "|"))
+        if n:
+            print(c_next("|  " + "-- OR --".center(w - 4).ljust(w - 2) + "|"))
+            print(c_next("|" + " " * w + "|"))
+        print(c_next("|  " + ("%s - %s" % (label, what)).ljust(w - 2)[:w - 2] + "|"))
+        print(c_next("|        " + cmd.ljust(w - 8) + "|"))
+    print(c_next("+" + "-" * w + "+"))
+
+
 def s3_choice_box(reg, when):
-    """The NEXT box with both ways to run stage 3. --auto goes first only when the stored --auto check
-    (doctor --check-auto, or the background check of stage 1) PASSed. After a FAIL: the manual flow first and
-    one short reason line. No result yet (still running, or never ran): both ways, manual first, no reason."""
+    """The NEXT box with the ways to run stage 3: SEMI (the kit opens your app), AUTO, MANUAL. '-- OR --' between them.
+    --auto goes first only when the stored --auto check (doctor --check-auto, or the background check of stage 1)
+    PASSed. After a FAIL: the default way first and one short reason line. No result yet: the default way first."""
     agent = reg.data.get("agent") or ""
-    auto = ["python workshop.py new s3 --task all --auto", "   the tool runs the 4 agents, about 10 min"]
-    manual = ["python workshop.py new s3 --task all", "   you open 4 threads in your agent app"]
+    try:
+        found = bool(agent) and LA.find_app(agent) is not None
+    except Exception:
+        found = False
+    base = "python workshop.py new s3 --task all"
+    default = (("SEMI", base, "the kit opens your app, one folder per page") if found
+               else ("MANUAL", base, "you open 4 threads in your agent app"))
+    auto = ("AUTO", base + " --auto", "the tool runs the 4 agents, about 10 min")
+    manual = ("MANUAL", base + " --mode manual", "you open the app yourself")
     if agent and agent not in AUTO_AGENTS:
-        next_box(manual, when)
+        choice_box(when, [default] + ([manual] if found else []))
         return
     rec = stored_check(reg, agent) if agent else None
+    rest = [manual] if found else []
     if rec and rec.get("ok"):
-        next_box(auto + manual, when)
+        choice_box(when, [auto, default] + rest)
         return
     if rec:
         print("\n" + check_reason_line(agent, rec.get("text") or ""))
-    next_box(manual + auto, when)
+    choice_box(when, [default, auto] + rest)
+
 
 
 # ------------------------------------------------------------------ the --auto check in the background
@@ -5176,8 +5201,29 @@ def semi_done_all(reg, rids, a):
             os.environ["VESPER_NO_CLEAR"] = old
 
 
+def run_is_done(rid):
+    """True when stage 3 of this run has a result row (done ran for it)."""
+    try:
+        return bool(Registry.load().row(rid, "3"))
+    except Exception:
+        return False
+
+
+def print_run_list(made, stops):
+    """The numbered list of runs with STOP time and an ENDED / running mark. stops = {rid: epoch seconds}."""
+    w = max(len(label_of(f)) for _, _, f, _ in made)
+    print("\n  %-3s %-*s  %-8s  %s" % ("No", w, "Run", "STOP", "Status"))
+    for n, (_, rid, f, _) in enumerate(made, 1):
+        if run_is_done(rid):
+            status = c_next("ENDED  (done saved)")
+        else:
+            status = "running"
+        print("  %-3d %-*s  %-8s  %s" % (n, w, label_of(f), clock(stops[rid]) if rid in stops else "?", status))
+
+
 def semi_s3_finish(reg, a, made):
-    """After the last page: the stop-time table, one Enter, then done for all runs."""
+    """After the last page: the stop-time table, then the learner names each run that has ended (a number).
+    A bare Enter does nothing, so a slip cannot end a run. done runs for that run only."""
     if not made:
         return 1
     stop_table(reg, made)
@@ -5185,9 +5231,49 @@ def semi_s3_finish(reg, a, made):
     if not interactive():
         next_box(lines, "when each agent is stopped or done, run its line:")
         return 0
-    ask("\n  Stop every agent at its stop time. Then press Enter here. The kit runs done for all %d runs. " % len(made), "")
-    semi_done_all(reg, [rid for _, rid, _, _ in made], a)
-    return 0
+    stops = {}
+    for _, rid, _, _ in made:
+        st = reg.data["runs"][rid].get("start_at") or reg.data["runs"][rid].get("sent_at")
+        if st:
+            stops[rid] = float(st) + TIME_BOX_MIN * 60
+    n = len(made)
+    while True:
+        pending = [m for m in made if not run_is_done(m[1])]
+        print_run_list(made, stops)
+        if not pending:
+            print("\n  All %d runs are ENDED." % n)
+            print("\n  PLAY what the agents made (a browser opens, key 1 = with the skill, key 2 = without):")
+            tasks = []
+            for _, rid0, _, _ in made:
+                tk = reg.data["runs"].get(rid0, {}).get("task")
+                if tk in ("T3", "T6") and tk not in tasks:
+                    tasks.append(tk)
+            for tk in tasks:
+                print("    python workshop.py play %s      your %s game: with the skill against without" % (tk, tk))
+            print("    python workshop.py play         the game from stage 1")
+            print("\n  Then the table with the scores:  python workshop.py show")
+            return 0
+        ans = ask("\n  Type the NUMBER (1-%d) of a run when its agent is stopped. Type q to leave: " % n, "").strip().lower()
+        if ans in ("q", "quit", "exit"):
+            print("\n  You left the list. End a run later with its line:")
+            print("\n".join("    " + x for x in lines))
+            return 0
+        if not ans.isdigit() or not 1 <= int(ans) <= n:
+            print("  Type a number from 1 to %d, or q. (Enter alone does nothing.)" % n)
+            continue
+        _, rid, f, _ = made[int(ans) - 1]
+        if run_is_done(rid):
+            print("  Run %s is already ENDED." % ans)
+            continue
+        stop_at = stops.get(rid)
+        if stop_at and time.time() < stop_at - 5:
+            yn = ask("  %s stops at %s. It is %s. Did you stop its agent? Type y to continue: "
+                     % (label_of(f), clock(stop_at), clock(time.time())), "").strip().lower()
+            if yn != "y":
+                print("  Not ended. Stop the agent first, then type the number again.")
+                continue
+        semi_done_all(reg, [rid], a)
+        reg = Registry.load()
 
 
 def semi_run_page(reg, a, i, total, key, rid, f, p, retry_cmd, resume=False):
@@ -5201,7 +5287,8 @@ def semi_run_page(reg, a, i, total, key, rid, f, p, retry_cmd, resume=False):
     semi_page(reg, rid, head, f, p, "3", retry_cmd, label=label, reopen=not opened)
     if opened and run.get("sent_at"):             # a resume: keep the first send time, never send twice
         return
-    ask("\n  Send the prompt in the app. Then press Enter here. The next page appears at once. ", "")
+    ask("\n  Send the prompt in the app. Then press Enter here. "
+        + ("The next page appears at once. " if i < total else "The list of runs appears next. "), "")
     run["sent_at"] = run.get("sent_at") or time.time()
     reg.save()
 
