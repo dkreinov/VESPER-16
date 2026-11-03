@@ -1,0 +1,60 @@
+VESPER-16 WORKSHOP - HOW TO START (Windows first, Mac in brackets)
+
+BEFORE CLASS (once)
+1. Install Git: git-scm.com. Install Python 3.9+: python.org (tick "Add to PATH").
+2. Open PowerShell [Mac: Terminal]. Check: git --version and python --version [Mac: python3].
+3. Get the kit (not on OneDrive):
+   git clone https://github.com/dkreinov/VESPER-16
+   cd VESPER-16
+4. Before class: git pull
+5. Install your agent (Codex, Cursor, Claude Code or Copilot) and sign in. Use a paid plan.
+6. Check the PC: python workshop.py doctor --agent codex
+   (use claude, cursor or copilot). GREEN or YELLOW = go. RED = read the first RED line.
+
+THREE MODES (you choose; the kit never switches alone)
+- auto:   add --auto. The kit runs the agent. You do nothing.
+- semi:   add --mode semi. The kit opens your app on the run folder and shows the prompt.
+- manual: add --mode manual. The kit prints the folder and the prompt. You open the app.
+No flag = semi if the kit finds your app, else manual.
+App did not open? Run the same command again with --mode manual.
+
+MEMORY OFF (every workshop chat)
+- Codex: type /memories and turn it off BEFORE you send the prompt.
+- Claude Code: the kit does it in semi mode.
+- Cursor: nothing to switch. Use a new chat for each run.
+- Copilot: VS Code profile "vesper-clean", turn OFF chat.copilot.memory.enabled.
+
+STAGE 1 (large model, never Auto)
+1. python workshop.py new s1
+2. Open the folder in your agent (semi mode does it). New chat. Memory off.
+3. Send the prompt. The page shows the full text (same as PROMPT.txt).
+4. Agent done? python workshop.py done
+
+STAGE 2 (same chat)
+1. python workshop.py skill
+2. Paste the prompt in the SAME chat as stage 1 (Cursor, Copilot: type /create-skill first).
+3. Agent done? python workshop.py harvest
+
+STAGE 3 (small model, never Auto)
+1. python workshop.py new s3 --task all
+2. Four pages, one after the other: T3 with skill, T3 without, T6 with, T6 without.
+3. Each page: new window, new chat, small model, memory off, send the prompt, press Enter.
+4. The next page appears at once. Do not wait for a run to end.
+5. After page 4 the kit prints the 4 stop times (start + 10 min). Stop each agent then.
+6. Press Enter once. The kit runs done for all four runs.
+   (By hand: python workshop.py done <run_id> for each run.)
+Small models: Codex gpt-6-luna high | Claude Code Haiku 5.5 | Cursor GPT-5.6 Luna High.
+
+AT THE END
+1. python workshop.py unlock 4 <password from the slide>
+2. python workshop.py grade
+3. python workshop.py show
+4. python workshop.py submit   (paste into all_results with Ctrl+V [Cmd+V], click Submit)
+5. python workshop.py cleanup  (close the agent windows first)
+
+IF YOU ARE STUCK
+- Run the command again with --mode manual.
+- python workshop.py doctor --agent <name>, then read the first RED or YELLOW line.
+- "chat not found" at done = a hint only. Run: python workshop.py done <run_id>
+- Memory warning at done = the run is not clean. Redo it with memory off.
+- Full manual: docs/MANUAL-FULL.md in the kit. Ask here in this chat.

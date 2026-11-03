@@ -174,6 +174,19 @@ stopped run as partial work (`stopped = ctrl-c`). The manual flow (without `--au
   are done, the same command asks "Start a repeat attempt? [y/N]" (default No; without a terminal it needs `--yes`).
   Your done lines are in `show`.
 
+## Modes: auto, semi, manual
+
+You choose how the kit runs the agent. Add one flag to `new s1`, `new s3` and `skill`.
+
+```sh
+python workshop.py new s3 --task all --auto           # auto: the kit runs the agents itself
+python workshop.py new s3 --task all --mode semi      # semi: the kit opens your app on the run folder
+python workshop.py new s3 --task all --mode manual    # manual: the kit prints the folder and the prompt
+```
+
+With no flag the kit uses semi if it finds your app, else manual. If the app does not open, run the same command with `--mode manual`.
+Start to finish, from zero: [docs/MANUAL-FULL.md](docs/MANUAL-FULL.md).
+
 ## Rules for the exercise
 
 - Leave `bin/`, `examples/` and `tasks/` unchanged.
