@@ -149,6 +149,16 @@ class Stage1(Base):
         self.assertIn("END OF PROMPT", out)
         self.assertTrue("clipboard" in out or "Type this message" in out)
 
+    def test_a_log_of_another_agent_that_mentions_the_run_id_is_not_the_session(self):
+        """Dennis, 2026-11-03: a Claude Code dev session on the same PC held the run id, `done` said WRONG FOLDER."""
+        fake = [{"agent": "claude", "sid": "dev", "path": "x.jsonl"}]
+        with mock.patch.object(self.w, "find_sessions", return_value=fake):
+            self.assertIsNone(self.w.pick_session("s1-abcd", None, 0, "cursor"))
+            self.assertIsNone(self.w.pick_session("s1-abcd", None, 0, "copilot"))
+            self.assertIsNone(self.w.pick_session("s1-abcd", None, 0, "codex"))
+            self.assertEqual(self.w.pick_session("s1-abcd", None, 0, "claude")["sid"], "dev")
+            self.assertEqual(self.w.pick_session("s1-abcd", None, 0)["sid"], "dev")        # old call: unchanged
+
     def test_codex_page_says_memory_off_before_the_prompt(self):
         self.doctor("codex")
         out, _ = capture(self.w, "new", "s1")

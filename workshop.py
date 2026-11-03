@@ -2090,8 +2090,12 @@ def _same_dir(a, b):
     return bool(a and b) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
-def pick_session(run_id, folder=None, since=None):
+def pick_session(run_id, folder=None, since=None, agent=None):
     s = find_sessions(run_id, since)
+    if agent in ("cursor", "copilot"):    # no log reader for these apps: a Claude or Codex log that only MENTIONS the id
+        return None                       # (for example a dev session on the same PC) is not this run
+    if agent in ("codex", "claude"):
+        s = [x for x in s if x["agent"] == agent]
     if len(s) > 1 and folder:                     # a pasted run code elsewhere must not count
         own = [x for x in s if _same_dir(session_cwd(x["path"]), folder)]
         if own:
@@ -2820,7 +2824,7 @@ def finish_stage(reg, rid, stage, a, grade=True):
     else:
         t0, t1 = float(row["start"]), float(row["cutoff"])
     if not run.get("session"):
-        run["session"] = pick_session(rid, run["folder"], t0)
+        run["session"] = pick_session(rid, run["folder"], t0, reg.data.get("agent") or None)
     m = measure_stage(run, t0, t1)
     if not m["measurement"]:
         prev = row or {}
