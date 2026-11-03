@@ -100,8 +100,8 @@ Memory must be OFF in every workshop chat.
    - Cursor: a large model from the menu.
    - Copilot: a large model from the model picker.
 5. Turn memory off and send the prompt. The steps depend on the agent:
-   - Codex app: the short message is in the box. Type `/memories`, turn memory off, then send.
-   - Codex CLI: a terminal opens. Type `/memories` and turn memory off. Then paste the message (it is on the clipboard) and send it.
+   - Codex app: the thread opens with an empty box on purpose. Type `/memories` and turn memory off. Press Enter in the terminal. The kit shows the prompt and puts the short message on the clipboard. Paste it and send.
+   - Codex CLI: a terminal opens. Type `/memories` and turn memory off. Press Enter in the first terminal. Then paste the message (it is on the clipboard) and send it.
    - Claude Code: the kit turns memory off and sends the message when the window opens. You do nothing.
    - Cursor: nothing to turn off. Paste the message (it is on the clipboard) in a new chat and send it.
    - Copilot: use the `vesper-clean` profile with `chat.copilot.memory.enabled` OFF. The kit opens that profile. The message is in the chat box. Send it.

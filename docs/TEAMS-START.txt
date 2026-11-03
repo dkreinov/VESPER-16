@@ -19,7 +19,7 @@ No flag = semi if the kit finds your app, else manual.
 App did not open? Run it again with --mode manual. A mistake? Start over: new s1 --restart
 
 MEMORY OFF (every workshop chat)
-- Codex: type /memories and turn it off BEFORE you send the prompt. In the Codex CLI, paste the message after that.
+- Codex: the thread opens empty. Type /memories, turn it off, press Enter in the terminal, then paste the message.
 - Claude Code: the kit does it in semi mode and sends the message itself.
 - Cursor: nothing to switch. Use a new chat for each run.
 - Copilot: VS Code profile "vesper-clean", turn OFF chat.copilot.memory.enabled.
