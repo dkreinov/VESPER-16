@@ -199,7 +199,7 @@ Memory must be OFF in every workshop chat.
 | Global skill blocked | Run `python workshop.py harvest --move-aside`. |
 | The model shows Auto | Pick a named model. An Auto row never counts as a matched pair. |
 | The agent did not finish | Run `python workshop.py done <run_id> --partial`. |
-| Nothing works | Do the exercise by hand: follow `MANUAL.md`. Or load the `vesper-helper` skill from `helper-skill/vesper-helper` into your agent. |
+| Nothing works | Do the exercise by hand: follow `MANUAL.md`. Or ask the guide: open a NEW chat in another folder (not a run folder) and paste `docs/GUIDE-PROMPT.txt`, or load the `vesper-guide` skill from `helper-skill/vesper-guide`. |
 
 Fallback commands:
 ```
