@@ -2,7 +2,8 @@
 
 Write the game described in [tasks/T3.md](tasks/T3.md) for the VESPER-16 handheld console.
 The kit contains the console's assembler + emulator and two tiny example programs.
-There is no manual — working out how the console behaves is part of the exercise.
+There is no manual for the console itself — working out how it behaves is part of the exercise.
+For the workshop steps (not the console), see [docs/MANUAL-FULL.md](docs/MANUAL-FULL.md).
 
 **Bonus:** [tasks/T4.md](tasks/T4.md) is a second game, Breakout, for anyone who finishes early or wants
 to try a skill on a game it was not written for.
@@ -120,7 +121,7 @@ outside its own folder unless you confirm.
   click Submit, and press Enter. If the paste is empty, copy the printed lines by hand.
   The form has only two fields, `alias` and `all_results` (one `vesper-results v1` line per run).
 - If `doctor` shows RED, follow [MANUAL.md](MANUAL.md). More exercises: [HOMEWORK.md](HOMEWORK.md).
-- **Take home:** [CHECKLIST.md](CHECKLIST.md): eight practical checks, connected to T3, T6, and the T4 follow-up.
+- **Take home:** [CHECKLIST.md](CHECKLIST.md): practical checks for a personal Skill and for a shared one, connected to T3, T6, and the T4 follow-up.
   [HOW-TO-TEST-A-SKILL.md](HOW-TO-TEST-A-SKILL.md) has the longer explanation for your own work.
 
 ### Stage 3 with `--auto`

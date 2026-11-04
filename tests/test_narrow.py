@@ -87,7 +87,7 @@ class DataLinesNotWrapped(unittest.TestCase):
     def test_all_results_lines_stay_whole(self):
         w, _ = fresh_ws()
         t = w.all_results_text([{"run_id": "s3-ab12-t6-9f3c", "stage": "3", "task": "T6", "isolation": "detected",
-                                 "isolation_note": "worked outside the run folder: ~/OneDrive - Mobileye/Documents/"
+                                 "isolation_note": "worked outside the run folder: ~/OneDrive - Contoso/Documents/"
                                                    "ChatGPT/workshop_testing/s1-5364 and more text", "score": "100.0"}])
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
