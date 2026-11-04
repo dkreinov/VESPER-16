@@ -199,7 +199,7 @@ Memory must be OFF in every workshop chat.
 | Global skill blocked | Run `python workshop.py harvest --move-aside`. |
 | The model shows Auto | Pick a named model. An Auto row never counts as a matched pair. |
 | The agent did not finish | Run `python workshop.py done <run_id> --partial`. |
-| Nothing works | Do the exercise by hand: follow `MANUAL.md`. Or ask the guide: open a NEW chat in another folder (not a run folder) and paste `docs/GUIDE-PROMPT.txt`, or load the `vesper-guide` skill from `helper-skill/vesper-guide`. |
+| Nothing works | Do the exercise by hand: follow `MANUAL.md`. Or ask the guide (see "Ask the guide" below). |
 
 Fallback commands:
 ```
@@ -209,3 +209,18 @@ python workshop.py doctor --agent <name>
 ```
 
 Note: the `--mode` flag is new. Run `python workshop.py new -h` to confirm that your copy has it. Run `git pull` if it does not.
+
+## Ask the guide
+
+The guide is an agent chat that explains the steps, the screens and the prompts. It gives no task answers.
+
+1. Make an empty folder, for example `C:\work\guide`. Do not use the kit folder or a run folder.
+2. Open your agent in that folder. Start a NEW chat. This chat is only for the guide.
+3. Send this message (change the path to your kit folder):
+   ```
+   You are my guide for the VESPER-16 workshop. Read the file <kit folder>/docs/GUIDE-PROMPT.txt and follow it for this whole chat. Read only that file. Then ask me which agent I use and which stage I am in.
+   ```
+   If your agent cannot read that file, open the file, copy all of its text, and paste the text as your first message.
+4. Keep the guide chat open next to your terminal. Paste the last 15 lines of the terminal when you are lost.
+5. Do not install the guide as a skill in your global skill folder. `doctor` finds a global VESPER skill and blocks the run.
+6. Do your workshop runs in other chats. Never run an experiment in the guide chat.
