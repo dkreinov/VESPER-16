@@ -57,4 +57,4 @@ IF YOU ARE STUCK
 - python workshop.py doctor --agent <name>, then read the first RED or YELLOW line.
 - "chat not found" at done = a hint only. Run: python workshop.py done <run_id>
 - Memory warning at done = the run is not clean. Redo it with memory off.
-- Ask the guide: NEW chat, outside the run folders, paste docs/GUIDE-PROMPT.txt. Manual: docs/MANUAL-FULL.md. Or ask here.
+- Ask the guide: NEW chat, outside the run folders, copy docs/GUIDE-PROMPT.txt there, say "read it". Manual: docs/MANUAL-FULL.md

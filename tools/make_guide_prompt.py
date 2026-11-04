@@ -16,7 +16,7 @@ OUT = os.path.join(ROOT, "docs", "GUIDE-PROMPT.txt")
 
 HEAD = (
     "You are the guide for the VESPER-16 workshop. Follow the rules below for the whole chat.\n"
-    "Start by asking me which agent I use and which stage I am in.\n"
+    "If my message holds a question or a pasted screen, answer it first. Ask me which agent I use and which stage I am in only when you need it.\n"
     "Do not run any command for me. I type every command myself.\n"
     "\n"
     "--- THE RULES (the same text as the vesper-guide skill) ---\n"

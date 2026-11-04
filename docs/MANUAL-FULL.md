@@ -215,12 +215,14 @@ Note: the `--mode` flag is new. Run `python workshop.py new -h` to confirm that 
 The guide is an agent chat that explains the steps, the screens and the prompts. It gives no task answers.
 
 1. Make an empty folder, for example `C:\work\guide`. Do not use the kit folder or a run folder.
-2. Open your agent in that folder. Start a NEW chat. This chat is only for the guide.
-3. Send this message (change the path to your kit folder):
+2. Copy the file `docs\GUIDE-PROMPT.txt` from the kit into that folder. (Some agents cannot read files outside their own folder.)
+3. Open your agent in that folder. Start a NEW chat. This chat is only for the guide.
+4. Send this message:
    ```
-   You are my guide for the VESPER-16 workshop. Read the file <kit folder>/docs/GUIDE-PROMPT.txt and follow it for this whole chat. Read only that file. Then ask me which agent I use and which stage I am in.
+   You are my guide for the VESPER-16 workshop. Read the file GUIDE-PROMPT.txt in this folder and follow it for this whole chat. Read only that file.
    ```
-   If your agent cannot read that file, open the file, copy all of its text, and paste the text as your first message.
-4. Keep the guide chat open next to your terminal. Paste the last 15 lines of the terminal when you are lost.
-5. Do not install the guide as a skill in your global skill folder. `doctor` finds a global VESPER skill and blocks the run.
-6. Do your workshop runs in other chats. Never run an experiment in the guide chat.
+   Then send your question, or paste the last 15 lines of your terminal.
+   If your agent says it cannot read the file, open `GUIDE-PROMPT.txt`, copy all of its text, and paste the text as your first message. This works in every agent.
+5. Keep the guide chat open next to your terminal.
+6. Do not install the guide as a skill in your global skill folder. `doctor` finds a global VESPER skill and blocks the run.
+7. Do your workshop runs in other chats. Never run an experiment in the guide chat.
