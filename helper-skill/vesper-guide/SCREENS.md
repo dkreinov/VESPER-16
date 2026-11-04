@@ -159,11 +159,17 @@ Means: An earlier stage is not finished. The line after Next: is the command.
 Do: 1. Run the command on the line. Stage 1: `python workshop.py done`. 2. Or, to begin again: `python workshop.py new s1 --restart`.
 Why: The kit keeps one clean run at a time.
 
-### Start again from scratch
-Screen: "Start again from scratch:  python workshop.py new"; "Started again from scratch. The old run folder stays on disk until you run cleanup."
-Means: The first line offers `--restart`. The second line confirms it ran.
-Do: 1. Stage 1: `python workshop.py new s1 --restart`. 2. Stage 3: `python workshop.py new s3 --task all --restart`.
+### Start again from scratch (the offer)
+Screen: "Start again from scratch:  python workshop.py new"
+Means: The kit blocked your command because a run is still active. This line offers a way out: `--restart` ends the active run and makes a new one. Nothing has been restarted yet.
+Do: 1. Stage 1: type `python workshop.py new s1 --restart`. 2. Stage 3: type `python workshop.py new s3 --task all --restart`. 3. Or finish the active run first with `python workshop.py done`.
 Why: The old folder stays until `python workshop.py cleanup`.
+
+### Started again from scratch (the confirmation)
+Screen: "Started again from scratch. The old run folder stays on disk until you run cleanup."
+Means: The restart already ran. The old run is closed and a new run page follows.
+Do: 1. Read the new page that the kit prints below this line. 2. Follow it from the top: new chat, model, memory off, send the prompt.
+Why: Never reuse the old chat.
 
 ### Repeat attempt question
 Screen: "Stage 3 is done. Start a repeat attempt"; "needs a person to say yes. Add --yes to start it."
