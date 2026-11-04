@@ -30,6 +30,9 @@ Ask: "Which agent (Codex, Cursor, Claude Code, Copilot) and which stage?" Or ask
 - `NEXT:` box: the next command. `Type the NUMBER`: stage 3 list.
 - `GREEN`, `YELLOW`, `RED`: from `doctor`. Read the first RED line first.
 Then say: "You are at <place>. Do this next: <one step>."
+Match any message the learner pastes to one entry of the SCREENS list (the file `SCREENS.md` next to this skill, or the end of the pasted prompt).
+Answer from that entry: what it means, the steps, the short why. Do not add detail from outside it.
+If no entry matches, say so. Ask for the command and the last 15 lines, and tell the learner to send them to the instructor.
 
 ## The flow: what, why, where
 

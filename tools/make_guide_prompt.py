@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Make docs/GUIDE-PROMPT.txt from helper-skill/vesper-guide/SKILL.md.
+"""Make docs/GUIDE-PROMPT.txt from helper-skill/vesper-guide/SKILL.md and SCREENS.md (the screens list).
 
-The skill is the one source. The prompt file is the same text for agents that cannot load a skill:
+The skill and its screens list are the sources. The prompt file is the same text for agents that cannot load a skill:
 the learner pastes the whole file into a NEW chat (outside every run folder).
 
   python tools/make_guide_prompt.py            write docs/GUIDE-PROMPT.txt
@@ -11,6 +11,7 @@ import os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILL = os.path.join(ROOT, "helper-skill", "vesper-guide", "SKILL.md")
+SCREENS = os.path.join(ROOT, "helper-skill", "vesper-guide", "SCREENS.md")
 OUT = os.path.join(ROOT, "docs", "GUIDE-PROMPT.txt")
 
 HEAD = (
@@ -31,9 +32,15 @@ def body(text):
     return text.lstrip("\n")
 
 
+SCREENS_MARK = "\n--- THE SCREENS LIST (match the learner's pasted text to an entry) ---\n\n"
+
+
 def build():
     with open(SKILL, encoding="utf-8") as f:
-        return HEAD + body(f.read())
+        text = HEAD + body(f.read()).rstrip("\n") + "\n"
+    with open(SCREENS, encoding="utf-8") as f:
+        screens = f.read().replace("\r\n", "\n")
+    return text + SCREENS_MARK + screens.lstrip("\n")
 
 
 def main(argv):
