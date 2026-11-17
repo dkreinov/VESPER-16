@@ -687,6 +687,17 @@ Means: Each run has a STOP time. It is 10 minutes after you sent the prompt.
 Do: 1. Stop each agent in the app at its time. 2. Type its number in the terminal.
 Why: Each run gets the same time.
 
+### The kit saves at the STOP time
+Screen: "At its STOP time the kit saves the result by itself."
+Means: At the STOP time the kit copies the run's result. Work after that time does not count.
+Do: 1. Stop the agent at its STOP time, or let it end by itself. 2. Then type its number.
+Why: Each run gets the same 10 minutes, also when you are busy.
+
+### Result saved at the STOP time
+Screen: "Result saved at"; "Later changes do not count."
+Means: `done` used the copy from the STOP time. Changes after that time are not in the score.
+Do: Nothing. This is normal.
+
 ### Type the NUMBER
 Screen: "Type the NUMBER (1-"
 Means: The kit waits for the number of a run whose agent has stopped.
