@@ -1,7 +1,7 @@
 """The OLD flows print the same text as before semi mode: manual pages with no launcher (every agent) and --auto.
 The golden files in tests/golden were captured from the code BEFORE the semi-mode change (commit fc7690d) with
 tests/golden_capture.py. Only text that the spec adds is ignored: the mode line, the doctor INFO line for the app,
-and the Cursor 'chat not found' hint. Windows only (the golden text was captured on Windows)."""
+and the Cursor 'chat not found' hint; since 2026-11-17 also the small-runs lines and the stage-2 model line. Windows only (the golden text was captured on Windows)."""
 import os, re, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import golden_capture as G  # noqa: E402
@@ -16,6 +16,10 @@ def strip_added(text):
     t = re.sub(r" ?Mode: MANUAL\..*?--mode semi", "", t)
     t = t.replace(" INFO app not found: semi mode falls back to manual", "")
     t = re.sub(r" ?Cursor chat not found\. This is only a hint.*?when the chat is saved\.", "", t)
+    # early-controls change (2026-11-17): the stage-1 NEXT box offers the small runs; the skill page has a model line
+    t = re.sub(r" ?\| \| \| While the agent works, start 2 small runs \| \| \(small model, 10 min each\): \| \|"
+               r" python workshop\.py new small \|", "", t)
+    t = t.replace(" Model: use the SAME large model as stage 1. Check the model picker.", "")
     for tok in ("Python <V>",):
         t = t.replace(tok, "")
     return t.strip()
