@@ -3023,6 +3023,11 @@ def finish_stage(reg, rid, stage, a, grade=True):
         t0, t1 = float(row["start"]), float(row["cutoff"])
     if not run.get("session"):
         run["session"] = pick_session(rid, run["folder"], t0, reg.data.get("agent") or None)
+    box = box_result(rid) if first and str(stage) == "3" and not run.get("auto") else None
+    if box and float(box["at"]) < t1:
+        t1 = float(box["at"])                 # measure up to the 10-minute save, grade its copy
+    else:
+        box = None
     m = measure_stage(run, t0, t1)
     if not m["measurement"]:
         prev = row or {}
@@ -3092,7 +3097,19 @@ def finish_stage(reg, rid, stage, a, grade=True):
         # 1, or one more than a failed --auto row of this run (that row may be submitted already)
         fields["revision"] = int(row.get("revision") or 0) + 1 if row and row.get("stopped") == "error" else 1
         if grade:
-            snap, sha = snapshot_solution(rid, run, stage)
+            if box:
+                snap, sha = None, ""
+                if box["path"]:
+                    snap = snap_path(rid, stage)
+                    os.makedirs(os.path.dirname(snap), exist_ok=True)
+                    shutil.copy2(box["path"], snap)
+                    sha = sha256_file(snap)
+                live = os.path.join(run["folder"], "solutions", run["task"] + ".vsa")
+                if os.path.isfile(live) and os.path.getmtime(live) > t1 and not run.get("stopped"):
+                    run["stopped"] = "time"           # the agent changed the file after 10 min: those changes do not count
+                print("  Result saved at %s (%d min). Later changes do not count." % (clock(t1), TIME_BOX_MIN))
+            else:
+                snap, sha = snapshot_solution(rid, run, stage)
             fields["solution_sha"] = sha
             score, status = grade_snapshot(run["task"], snap, run.get("name", ""))
             part = bool(getattr(a, "partial", False))
@@ -3114,6 +3131,8 @@ def finish_stage(reg, rid, stage, a, grade=True):
     fields["overrun"] = overrun_flag(stage, t0 if p0 is None else p0, last_act) if last_act is not None or stage != "3" else ""
     if run.get("auto") and stage == "3":
         fields["overrun"] = "no"           # --auto: the start is the launch and the tool stops the run at the box
+    if box:
+        fields["overrun"] = "no"              # the result is the copy at the time box
     fields["stopped"] = run.get("stopped", "")
     fields["error_note"] = run.get("error_note", "")
     fields["settings_confirmed"] = run.get("settings_confirmed", "")
@@ -5118,6 +5137,79 @@ def cmd_bgcheck(a):
 S3_STOPPED = "Stopped. Run the same command again to see the pages."
 
 
+# ---- 10-minute save: in the app the kit does not stop the agent, so at start + 10 min a background process
+# copies the solution. `done` after that time grades the copy and measures up to that time.
+BOX_GRACE = 120          # a copy made later than this after its time (the laptop slept) is not used
+
+
+def box_paths(rid):
+    base = os.path.join(ws_home(), ".snapshots", "%s-3-box" % rid)
+    return base + ".vsa", base + ".json"
+
+
+def start_boxsave(reg, rid):
+    """A semi stage-3 run was sent: start the background save at sent_at + the time box. Never fails, prints nothing."""
+    try:
+        run = reg.data["runs"][rid]
+        if os.environ.get("VESPER_NO_BOXSAVE") or run.get("auto") or run.get("box_at") or not run.get("sent_at"):
+            return
+        at = float(run["sent_at"]) + TIME_BOX_MIN * 60
+        run["box_at"] = at
+        reg.save()
+        os.makedirs(os.path.join(ws_home(), ".snapshots"), exist_ok=True)
+        bg_launch([sys.executable, os.path.abspath(__file__), "boxsave", rid, "--at", "%.0f" % at],
+                  os.path.join(ws_home(), BG_LOG))
+    except Exception:
+        pass
+
+
+def box_save(rid, at):
+    """Copy the solution of a stage-3 run that has no result yet. Writes <rid>-3-box.vsa and .json; returns the info."""
+    reg = Registry.load()
+    run = reg.data["runs"].get(rid)
+    if not run or run.get("abandoned") or reg.row(rid, "3"):
+        return None
+    src = os.path.join(run["folder"], "solutions", run["task"] + ".vsa")
+    vsa, js = box_paths(rid)
+    os.makedirs(os.path.dirname(vsa), exist_ok=True)
+    info = dict(at=float(at), saved_at=time.time(), exists=os.path.isfile(src), sha="")
+    if info["exists"]:
+        shutil.copy2(src, vsa)
+        info["sha"] = sha256_file(vsa)
+    with open(js, "w", encoding="utf-8") as f:
+        json.dump(info, f)
+    return info
+
+
+def cmd_boxsave(a):
+    """Internal (started when a semi stage-3 prompt is sent): wait until --at, then box_save."""
+    try:
+        wait = a.at - time.time()
+        if wait > 0:
+            _sleep(wait)
+        box_save(a.run_id, a.at)
+    except Exception:
+        pass
+    return 0
+
+
+def box_result(rid):
+    """The 10-minute copy of this run when it is valid (made on time), else None. path is None when no file existed."""
+    vsa, js = box_paths(rid)
+    try:
+        with open(js, encoding="utf-8") as f:
+            info = json.load(f)
+        if float(info["saved_at"]) > float(info["at"]) + BOX_GRACE:
+            return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    info["path"] = vsa if info.get("exists") and os.path.isfile(vsa) else None
+    return info
+
+
+BOX_LINE = "  At its STOP time the kit saves the result by itself. Then stop the agent (it may also end by itself)."
+
+
 def s3_pages(reg, a, entries, seed, total=None):
     """Show the stage-3 run pages for entries {key: (rid, folder, prompt)} in the printed start order,
     then the NEXT box with one done line per run."""
@@ -5422,6 +5514,7 @@ def stop_table(reg, made):
     print("  %-*s  %-8s  %-8s  %s" % (w, "Run", "Start", "STOP", "Run id"))
     for name, rid, st, sp in rows:
         print("  %-*s  %-8s  %-8s  %s" % (w, name, st, sp, rid))
+    print("\n" + BOX_LINE)
 
 
 def semi_done_all(reg, rids, a):
@@ -5554,6 +5647,7 @@ def semi_run_page(reg, a, i, total, key, rid, f, p, retry_cmd, resume=False):
         + ("The next page appears at once. " if i < total else "The list of runs appears next. "), "")
     run["sent_at"] = run.get("sent_at") or time.time()
     reg.save()
+    start_boxsave(reg, rid)
 
 
 def new_s3_semi(reg, a, task):
@@ -5626,6 +5720,10 @@ def parse(argv):
     s.add_argument("--agent", required=True, choices=list(AUTO_AGENTS))
     s.add_argument("--delay", type=float, default=0)
     s.set_defaults(func=cmd_bgcheck)
+    s = sub.add_parser("boxsave", help=argparse.SUPPRESS)      # internal: the 10-minute save of a semi stage-3 run
+    s.add_argument("run_id")
+    s.add_argument("--at", type=float, required=True)
+    s.set_defaults(func=cmd_boxsave)
     s = sub.add_parser("new")
     s.add_argument("stage", choices=["s1", "s3", "small"],
                    help="s1 = stage 1; small = the 2 small runs (start them while the stage-1 agent works); s3 = stage 3")

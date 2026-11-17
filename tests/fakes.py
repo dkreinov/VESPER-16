@@ -18,6 +18,7 @@ def fresh_ws():
     os.environ.pop("VESPER_LAUNCHER_DRYRUN", None)
     os.environ["VESPER_CODEX_STATE"] = os.path.join(home, "no-codex-state.sqlite")
     os.environ["VESPER_NO_BG_CHECK"] = "1"                                       # new s1 starts no background check
+    os.environ["VESPER_NO_BOXSAVE"] = "1"                                        # no 10-minute save process in tests
     if ROOT not in sys.path:
         sys.path.insert(0, ROOT)
     import workshop
