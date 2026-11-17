@@ -58,10 +58,11 @@ tokens, estimated API cost and score.
 
 ```sh
 python workshop.py new s1                 # stage 1: checks this computer (doctor), then a clean folder + the prompt
-python workshop.py done                   # the agent is done: measure and save (grade)
+python workshop.py new small              # while stage 1 works: the 2 small runs (T3 and T6, small model, no skill)
+python workshop.py done <run_id>          # an agent is done: measure and save (grade)
 python workshop.py skill                  # stage 2: the prompt that asks the SAME agent to write a skill
 python workshop.py harvest                # stage 2 is done: take the skill out and check it
-python workshop.py new s3 --task all      # stage 3, four runs (T3 and T6, each with and without the skill): the default way
+python workshop.py new s3 --task all      # stage 3: T3 and T6 WITH the skill (plus the small runs if they are missing): the default way
 python workshop.py new s3 --task both     # stage 3, two runs (T6, then T3)
 python workshop.py new s3 --task T6       # alternative: stage 3, run 1: T6 with YOUR name (it asks), a NEW agent thread
 python workshop.py new s3 --task T3       # stage 3, run 2: T3 again, a SECOND new agent thread (same time)
@@ -80,11 +81,13 @@ Open each run folder that `new` prints as its own project in your agent (Codex, 
 in a new thread, and paste the prompt. Stage 2 uses the same thread as stage 1.
 Codex: if Memories are on, type /memories first in each new workshop thread and turn memory off for that chat.
 
-**Stage 3 runs four agents at the same time.** `new s3 --task all` (the default way; `--name` works with it)
-makes four runs in one command: (1) T3 WITH your skill, (2) T3 WITHOUT the skill (the control: same model, same
+**The 2 small runs and stage 3 together make four runs.** While the stage-1 agent works, `new small` starts the two
+runs without the skill (2 and 4 below; small model, 10 min). Stage 2 does not wait for them. Then `new s3 --task all`
+(the default way) makes the two runs WITH the skill, and also any small run that is missing. The four runs are: (1) T3 WITH your skill, (2) T3 WITHOUT the skill (the control: same model, same
 task, no skill in the folder, and a prompt without the skill sentences),
 (3) T6 WITH your skill (a different task that shares components with T3), and (4) T6 WITHOUT the skill (control, same name on the
-nameplate). Stop EVERY one of the four at 10 min (the same time box for all arms), then run its `done` line. Runs 2 and 4 make the matched comparison: what the skill adds in one attempt; `show` compares each pair, marks each score
+nameplate). Stop EVERY one of the four at 10 min (the same time box for all arms), then run its `done` line. In the app the kit
+saves each result at the STOP time by itself (start + 10 min); work after that time does not count. Runs 2 and 4 make the matched comparison: what the skill adds in one attempt; `show` compares each pair, marks each score
 PASS or FAIL, and prints the observed score gains on T3 and T6. These results neither identify nor rule out answer
 reuse, and reliability is unknown (one attempt per condition). The tool prints the order to start the four threads
 (random per stage-1 run) and shows the runs in that order. At the end of each run it prints an isolation check: a scan
@@ -126,8 +129,9 @@ outside its own folder unless you confirm.
 
 ### Stage 3 with `--auto`
 
-`python workshop.py new s3 --task all --auto` makes the same four run folders, with the same prompts and the same start
-order. Then the tool starts the four agents itself, one after the other, without a window. Each agent works in its own
+`python workshop.py new s3 --task all --auto` makes the same run folders, with the same prompts (the 2 runs WITH the
+skill, plus any small run that is missing). `python workshop.py new small --auto` does the same for the 2 small runs.
+Then the tool starts the agents itself, one after the other, without a window. Each agent works in its own
 run folder with the stage-3 model of your agent (Codex: gpt-6-luna, effort high, Memories off; Claude Code: claude-haiku-5-5, only
 the project settings; Cursor: gpt-5.6-luna-high). `--model NAME` changes the model. The tool prints one short status
 block every 30 seconds, stops any agent still working at 10 minutes (the whole process tree), and finishes each run

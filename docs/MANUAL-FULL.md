@@ -107,13 +107,31 @@ Memory must be OFF in every workshop chat.
    - Copilot: use the `vesper-clean` profile with `chat.copilot.memory.enabled` OFF. The kit opens that profile. The message is in the chat box. Send it.
 6. The full prompt is on the page. It is the same text as `PROMPT.txt` in the run folder.
    The short message tells the agent to read `PROMPT.txt`.
-8. When the agent is done, run:
+7. While the agent works, start the 2 small runs (section 7b).
+8. When the agent is done, run its done line from the NEXT box:
    ```
-   python workshop.py done
+   python workshop.py done <run id>
    ```
 9. Cursor and Codex app: `done` reads the chat for the model, the time and (Codex) the memory state.
    `memory: OFF (verified)` is good. A memory warning means the run is not clean.
    "Chat not found" is a hint, not an error.
+
+## 7b. The 2 small runs (while stage 1 works)
+
+1. Do not wait for the stage-1 agent. Run:
+   ```
+   python workshop.py new small
+   ```
+2. The kit asks for your name for the T6 nameplate (up to 8 letters A-Z).
+3. The kit shows 2 pages: `SMALL RUN 1 of 2   T3` and `SMALL RUN 2 of 2   T6`.
+   The folder names start with `T3_LUNA` and `T6_LUNA` (`T3_HAIKU` for Claude Code).
+4. For each page: open the folder in a NEW window and a NEW chat. Pick the SMALL model (see section 9).
+   Turn memory off and send the prompt. Then press Enter in the terminal.
+5. The kit prints the STOP time of each run: 10 minutes after you pressed Enter.
+   At the STOP time the kit saves the result by itself. Work after that time does not count.
+6. Stop each agent at its STOP time, or let it end by itself. Then type its number in the terminal.
+7. `--auto` also works here: `python workshop.py new small --auto`. The tool runs the 2 agents with no window.
+8. The small runs do not stop stage 2. Run `skill` when stage 1 is done, also if a small run still works.
 
 ## 8. Stage 2: the same agent writes a skill
 
@@ -130,20 +148,21 @@ Memory must be OFF in every workshop chat.
    ```
 5. `harvest` takes the skill out and checks it. If it reports a global skill, run `python workshop.py harvest --move-aside` or `--remove-global`.
 
-## 9. Stage 3: four runs at the same time (small model)
+## 9. Stage 3: the runs with the skill (small model)
 
 1. Run:
    ```
    python workshop.py new s3 --task all
    ```
-2. The kit shows four pages, one after the other, in this order:
+2. The 2 small runs of section 7b were the runs WITHOUT the skill. So stage 3 shows 2 pages:
 
    | Page | Run | Folder name starts with |
    |---|---|---|
    | 1 | T3 with your skill | `T3_WITH_SKILL_` |
-   | 2 | T3 without the skill (control) | `T3_NO_SKILL_` |
-   | 3 | T6 with your skill | `T6_WITH_SKILL_` |
-   | 4 | T6 without the skill (control) | `T6_NO_SKILL_` |
+   | 2 | T6 with your skill | `T6_WITH_SKILL_` |
+
+   You did not do the small runs? Then stage 3 also makes them, as 2 more pages
+   (`T3_NO_SKILL_`, `T6_NO_SKILL_`).
 
 3. For each page, do this:
    1. Read the run name and the prompt.
@@ -155,11 +174,13 @@ Memory must be OFF in every workshop chat.
       - Copilot: Claude Haiku 5.5 or GPT-6 Luna.
    4. Turn memory off and send the prompt, as in section 7 step 5. Claude Code does both by itself.
    5. Press Enter in the terminal. The next page appears at once.
-4. Do not wait for a run to end. After page 4, the kit prints the stop time of each run (start plus 10 minutes).
-5. Stop every agent at its stop time.
-6. Press Enter once in the terminal. The kit then runs `done` for all four runs.
-   If you ran by hand, run `python workshop.py done <run_id>` for each run.
-7. The agent has a budget of 6 emulator runs and 10 minutes.
+4. Do not wait for a run to end. After the last page, the kit prints the STOP time of each run (start plus 10 minutes).
+   At the STOP time the kit saves the result by itself. Work after that time does not count.
+5. Stop each agent at its STOP time, or let it end by itself. Then type its number in the terminal.
+   An Enter alone does nothing. The row shows `ENDED` when the run is saved.
+   If you left the list, run `python workshop.py done <run_id>` for each run.
+6. The agent has a budget of 6 emulator runs and 10 minutes.
+7. `--auto`: `python workshop.py new s3 --task all --auto`. The tool runs the agents with no window.
 
 ## 10. Grade, show, submit, clean up
 
