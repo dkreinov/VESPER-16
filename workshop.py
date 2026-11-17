@@ -2902,7 +2902,7 @@ def compare_control(reg, rw, rc, task="T3", note=""):
                                         for r in (rc, rw)] + ([] if failed else [""]))
     print("\n" + "\n".join(render_table(head, body, fit_widths(head, body), right=(1, 2, 3))))
     print("  without = %s;  with skill = %s" % (rc["run_id"], rw["run_id"]))
-    autos = [bool(reg.data["runs"].get(r["run_id"], {}).get("auto")) for r in (rc, rw)]
+    autos = [bool(reg.data["runs"].get(r["run_id"], {}).get("auto")) for r in (rc, rw)] if reg else [False, False]
     if autos[0] != autos[1]:                    # a small run in the app, the skill run with --auto (or the reverse)
         print(MODES_NOTE)
     if failed:

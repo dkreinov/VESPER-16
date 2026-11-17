@@ -150,7 +150,7 @@ class RepeatQuestion(unittest.TestCase):                    # M1
         self.assertIn("needs a person to say yes. Add --yes", flat(out))
         self.assertEqual(len([r for r in w.Registry.load().data["runs"].values() if r.get("stage") == "3"]), n)
         out, rc = capture(w, "new", "s3", "--task", "all", "--name", "MIRA", "--yes")
-        self.assertEqual(len([r for r in w.Registry.load().data["runs"].values() if r.get("stage") == "3"]), n + 4)
+        self.assertEqual(len([r for r in w.Registry.load().data["runs"].values() if r.get("stage") == "3"]), n + 2)   # the controls stay (2026-11-17)
 
     def test_interactive_default_is_no(self):
         w = self._complete()
@@ -161,7 +161,7 @@ class RepeatQuestion(unittest.TestCase):                    # M1
         with mock.patch.object(sys.stdin, "isatty", return_value=True, create=True), \
                 mock.patch.object(sys, "stdout", tty), mock.patch.dict(os.environ, {"VESPER_NO_CLEAR": "1"}):
             rc = run(w, "new", "s3", "--task", "all", "--name", "MIRA")
-        self.assertIn("Stage 3 is done. Start a repeat attempt (4 new runs)? [y/N] ", asked)
+        self.assertIn("Stage 3 is done. Start a repeat attempt (2 new runs)? [y/N] ", asked)
         self.assertEqual(len(w.Registry.load().data["runs"]), n)
 
 

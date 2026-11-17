@@ -55,7 +55,7 @@ class LegacyRegistryTest(unittest.TestCase):
 class NextCmdTest(unittest.TestCase):
     def test_next_cmd(self):
         w, _ = fresh_ws()
-        self.assertEqual(w.next_cmd({"stage": "1", "run_id": "s1-x"}), "python workshop.py done")
+        self.assertEqual(w.next_cmd({"stage": "1", "run_id": "s1-x"}), "python workshop.py done s1-x")   # always the run id (2026-11-17)
         self.assertEqual(w.next_cmd({"stage": "2", "run_id": "s1-x"}), "python workshop.py harvest")
         self.assertEqual(w.next_cmd({"stage": "3", "run_id": "s3-x"}), "python workshop.py done s3-x")
 
