@@ -330,6 +330,25 @@ class Stage3(Base):
         self.assertIn("all agents are done", out)
 
 
+    def test_compare_says_when_the_pair_mixes_modes(self):
+        s1, _ = self.to_stage3()
+        capture(self.w, "new", "s3", "--task", "all")
+        reg = self.w.Registry.load()
+        for x in reg.actives("3"):
+            capture(self.w, "done", x["run_id"], "--no-form")
+        reg = self.w.Registry.load()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.w.show_compare(reg)
+        self.assertNotIn("Modes differ", out.getvalue())
+        t3 = [k for k, r in reg.data["runs"].items() if "-t3-" in k][0]
+        reg.data["runs"][t3]["auto"] = True
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.w.show_compare(reg)
+        self.assertEqual(out.getvalue().count("Modes differ: one run used --auto, the other ran in the app."), 1)
+
+
 class Restart(Base):
     def test_small_restart_abandons_only_the_small_runs(self):
         s1 = self.s1()

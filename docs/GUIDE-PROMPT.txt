@@ -801,6 +801,11 @@ Screen: "Observed results: one attempt per condition."; "Estimated cost under th
 Means: These notes describe the table. The numbers are one try each. The cost is an estimate.
 Do: 1. Go on.
 
+### Modes differ
+Screen: "Modes differ: one run used --auto, the other ran in the app."
+Means: In this pair one run ran with `--auto` and the other ran in the app. The setups are not the same.
+Do: 1. Go on. 2. Say it when you discuss the result.
+
 ### Waiting for a pair
 Screen: "waiting for its control run"; "waiting for the run WITH the skill"; "no control run"
 Means: The other run of this pair is not finished.
