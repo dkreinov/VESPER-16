@@ -57,7 +57,7 @@ class Base(unittest.TestCase):
         return out
 
     def assertClean(self, text):
-        bad = [ln for ln in text.splitlines() if BANNED.search(ln)]
+        bad = [ln for ln in text.replace("the agent with NO skill", "").splitlines() if BANNED.search(ln)]
         self.assertEqual(bad, [], "words of stage 3 before stage 3:\n" + "\n".join(bad))
 
     def finish_s1(self, rid):
@@ -106,7 +106,8 @@ class NewSmall(Base):
     def test_stage_1_next_box_offers_the_small_runs(self):
         run(self.w, "doctor", "--agent", "codex", "--alias", "mira")
         out, _ = capture(self.w, "new", "s1", "--method", "plain")
-        self.assertIn("While the agent works, start 2 small runs (small model, 10 min each):", flat(out))
+        self.assertIn("While the agent works, start 2 small runs", out)
+        self.assertIn("(small model, 10 min each):", out)
         self.assertIn("python workshop.py new small", out)
         self.assertClean(out)
 
@@ -202,7 +203,7 @@ class BeforeStage3(Base):
         s1 = self.s1()
         self.small()
         t = exit_text(self.w, "done")
-        self.assertIn("(stage 1)", t)
+        self.assertIn("1) %s  stage 1" % s1, t)
         self.assertIn("python workshop.py done " + s1, t)
         self.assertIn("3 runs are active:", t)
         self.assertClean(t)

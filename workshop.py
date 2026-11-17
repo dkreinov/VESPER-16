@@ -433,10 +433,12 @@ def cursor_app_lines(agent, total=4, semi=False):
 def s3_header(reg, a, both, total=None):
     """Compact stage-3 header: title (+ T6 name), one steps paragraph, one wait line."""
     agent = reg.data.get("agent") or ""
-    if total == 4:
+    if reg.data["runs"][a.s3_first].get("early"):
+        title = "SMALL RUNS - %s on the small model" % ("two NEW agents" if both else "a NEW agent")
+    elif total == 4:
         title = "STAGE 3 - four NEW agents (T3 and T6, each with and without the skill)"
     elif total == 3:
-        title = "STAGE 3 - three NEW agents (T3 with skill, T3 without skill, T6 with skill)"
+        title = "STAGE 3 - three NEW agents (T3 and T6 with the skill, one without)"
     else:
         title = "STAGE 3 - %s WITH your skill" % ("two NEW agents" if both else "a NEW agent")
     first = reg.data["runs"][a.s3_first]
@@ -476,12 +478,20 @@ def s3_header(reg, a, both, total=None):
           % (TIME_BOX_MIN, TIME_BOX_MIN))
 
 
-def s3_run_block(n, total, task, folder, prompt, desc=None):
+def small_head(run, n, total):
+    """Page title of a small run (made by `new small`): 'SMALL RUN 2 of 2   T6   name on T6: MIRA'. Else ''."""
+    if not run.get("early"):
+        return ""
+    nm = run.get("name", "") if run.get("task") == "T6" else ""
+    return "SMALL RUN %d of %d   %s%s" % (n, total, run.get("task", ""), ("   name on T6: " + nm) if nm else "")
+
+
+def s3_run_block(n, total, task, folder, prompt, desc=None, head=""):
     """One run: its title line with the full folder path, then the prompt between magenta lines."""
     desc = desc or {"T6": "T6 (new task)", "T3": "T3 (same task as stage 1)"}.get(task, task)
     of = " %d of %d" % (n, total) if total > 1 else ""
     num = " %d" % n if total > 1 else ""
-    print("\n" + c_bold("  RUN%s  %s" % (of, desc)) + "\n  Folder:\n       " + folder)
+    print("\n" + c_bold("  " + (head or "RUN%s  %s" % (of, desc))) + "\n  Folder:\n       " + folder)
     print(c_prompt((" PROMPT%s " % num).center(72, "-")))
     print(prompt.rstrip("\n"))
     print(c_prompt((" END OF PROMPT%s " % num).center(72, "-")))
@@ -536,12 +546,13 @@ def s3_show(reg, rid, n, total, task, folder, prompt, desc=None, extra=None):
     if not gate_on():
         reg.data["runs"][rid]["settings_confirmed"] = "not_asked"     # no terminal, no gate: unconfirmed, not "no"
         reg.save()
-        return s3_run_block(n, total, task, folder, prompt, desc=desc)
+        return s3_run_block(n, total, task, folder, prompt, desc=desc, head=small_head(run, n, total))
     agent = reg.data.get("agent") or ""
     model = SMALL_SHORT.get(agent) or "; ".join("%s %s" % (k, v) for k, v in SMALL_SHORT.items())
     desc = desc or {"T6": "T6 (new task)", "T3": "T3 (same task as stage 1)"}.get(task, task)
     nm = reg.data["runs"][rid].get("name", "")
-    head = "STAGE 3 - RUN %d of %d  %s%s" % (n, total, desc, ("   name on T6: " + nm) if nm and task == "T6" else "")
+    head = small_head(run, n, total) or "STAGE 3 - RUN %d of %d  %s%s" % (
+        n, total, desc, ("   name on T6: " + nm) if nm and task == "T6" else "")
     run_page(reg, rid, head, folder, prompt, model, n >= total, extra=extra,
              mem=codex_memories_on(reg) and agent in ("codex", ""),
              after="Send it and note the time. " + STOP_LINE,
@@ -564,22 +575,29 @@ def builtin_how(agent, guide):
 def next_cmd(act):
     if act["stage"] == "2":
         return "python workshop.py harvest"
-    if act["stage"] == "3":
-        return "python workshop.py done " + act["run_id"]
-    return "python workshop.py done"
+    return "python workshop.py done " + act["run_id"]
 
 
-def active_lines(reg):
-    return ["Stage %s of %s (%s) is still active. Next:  %s"
-            % (x["stage"], x["run_id"], reg.data["runs"].get(x["run_id"], {}).get("task", ""), next_cmd(x))
-            for x in reg.actives()]
+def active_lines(reg, acts=None):
+    out = []
+    for x in reg.actives() if acts is None else acts:
+        run = reg.data["runs"].get(x["run_id"], {})
+        what = ("Small run %s (%s)" if small_named(reg, run) else "Stage " + x["stage"] + " of %s (%s)") \
+            % (x["run_id"], run.get("task", ""))
+        out.append("%s is still active. Next:  %s" % (what, next_cmd(x)))
+    return out
+
+
+def act_label(reg, x):
+    """'(stage 1)' for a stage-1 or stage-2 active entry, else the run label."""
+    return "(stage %s)" % x["stage"] if x["stage"] in ("1", "2") else run_label(reg, x["run_id"])
 
 
 def choose_active(reg, acts):
-    """Several stage-3 runs are active: ask which agent is done (no TTY: name the run)."""
-    print("%d stage-3 runs are active:" % len(acts))
+    """Several runs are active: ask which agent is done (no TTY: name the run)."""
+    print("%d runs are active:" % len(acts))
     for i, x in enumerate(acts, 1):
-        print("  %d) %s  %s" % (i, x["run_id"], run_label(reg, x["run_id"]).strip("()")))
+        print("  %d) %s  %s" % (i, x["run_id"], act_label(reg, x).strip("()")))
     n = ask("Which agent is done? Type its number (Enter = cancel): ", "")
     if n.isdigit() and 1 <= int(n) <= len(acts):
         x = acts[int(n) - 1]
@@ -589,6 +607,84 @@ def choose_active(reg, acts):
 
 def is_control(run):
     return run.get("stage") == "3" and run.get("skill_source") == "none"
+
+
+# ---- early controls: `new small` makes the two control runs (T3, T6) while stage 1 works.
+# Before stage 3 the learner text calls them "small runs" (the skill is shown only in stage 3).
+def s3_named(reg):
+    """True from stage 3 on: a stage-2 row, or a stage-3 run that is not a small run, exists."""
+    return any(r["stage"] == "2" for r in reg.data["rows"].values()) or any(
+        r.get("stage") == "3" and not r.get("early") and not r.get("abandoned") for r in reg.data["runs"].values())
+
+
+def small_named(reg, run):
+    """This run is a small run and stage 3 has not started: name it 'T3 small run', never 'without the skill'."""
+    return bool(run.get("early")) and not s3_named(reg)
+
+
+def latest_s1(reg):
+    """Run id of the newest stage-1 run (active or done, not abandoned), or ''."""
+    cand = [(float(x["start"]), x["run_id"]) for x in reg.actives("1")]
+    cand += [(float(r["start"] or 0), r["run_id"]) for r in reg.data["rows"].values() if r["stage"] == "1"]
+    cand = [c for c in cand if not reg.data["runs"].get(c[1], {}).get("abandoned")]
+    return max(cand)[1] if cand else ""
+
+
+def latest_early_parent(reg):
+    """The stage-1 parent of the newest small runs, or ''."""
+    ps = [r.get("parent") for r in reg.data["runs"].values() if r.get("early") and not r.get("abandoned")]
+    return ps[-1] if ps else ""
+
+
+def controls_of(reg, parent):
+    """Keys ('n3', 'n6') of the control runs of this parent that count: not abandoned, no error, active or done."""
+    have = set()
+    for rid, run in reg.data["runs"].items():
+        if run.get("parent") != parent or not is_control(run) or run.get("abandoned") or run.get("stopped") == "error":
+            continue
+        row = reg.row(rid, "3")
+        if reg.get_active(rid) or (row and row.get("stopped") != "error"):
+            have.add("n" + run.get("task", "")[-1:])
+    return have
+
+
+def retire_failed_controls(reg, parent, keys):
+    """Stage 3 makes a control again: an active small run of the same key that failed (--auto error) ends."""
+    for rid, run in reg.data["runs"].items():
+        if run.get("early") and run.get("parent") == parent and reg.get_active(rid) \
+                and ("n" + run.get("task", "")[-1:]) in keys and run.get("stopped") == "error":
+            reg.end_active(rid)
+            run["abandoned"] = True
+    reg.save()
+
+
+def small_left_lines(reg):
+    """The small runs that still work: a head line, then one done line per run. [] when none works."""
+    lines = ["    %s   %s" % (next_cmd(x), run_label(reg, x["run_id"]))
+             for x in reg.actives("3") if reg.data["runs"].get(x["run_id"], {}).get("early")]
+    return ["\n  Still working from earlier. When each is done, run its line:"] + lines if lines else []
+
+
+def retry_cmd(a):
+    """The command that shows the pages of this run set again."""
+    if getattr(a, "stage", "") == "small":
+        return "python workshop.py new small"
+    return "python workshop.py new s3 --task %s" % getattr(a, "task", "all")
+
+
+def pre_s3_box(reg, exclude=()):
+    """Before stage 3: the NEXT box of the stage-1/2 flow. The runs that still work (stage 1, stage 2, small runs),
+    one line each; else the next step. Never the last steps (unlock, grade, submit)."""
+    left = [x for x in reg.actives() if x["run_id"] not in exclude]
+    if len(left) == 1 and left[0]["stage"] in ("1", "2"):
+        next_box(next_cmd(left[0]), "when the stage-1 agent is done, run:" if left[0]["stage"] == "1"
+                 else "when the skill is written, run:")
+    elif left:
+        still_working_box(reg, left)
+    elif not any(r["stage"] == "1" for r in reg.data["rows"].values()):
+        next_box("python workshop.py new s1", "start stage 1:")
+    else:
+        next_box("python workshop.py skill", "stage 2 (the SAME agent thread writes a skill), run:")
 
 
 def s3_run_id(reg, parent, task):
@@ -925,9 +1021,10 @@ def prompt_block(prompt):
     print(c_prompt("-" * 27 + " END OF PROMPT " + "-" * 30))
 
 
-def next_box(cmd, when):
+def next_box(cmd, when, more=None):
+    """The NEXT box. more = (text, command): one more step, under a blank line in the same box."""
     cmds = [cmd] if isinstance(cmd, str) else list(cmd)
-    w = max([70] + [len(x) + 10 for x in cmds])
+    w = max([70] + [len(x) + 10 for x in cmds + ([more[1]] if more else [])])
     wl = textwrap.wrap(when, w - 10) or [""]
     print("\n" + c_next("+" + "-" * w + "+"))
     print(c_next("|  NEXT: " + wl[0].ljust(w - 8) + "|"))
@@ -935,10 +1032,24 @@ def next_box(cmd, when):
         print(c_next("|        " + extra.ljust(w - 8) + "|"))
     for c in cmds:
         print(c_next("|        " + c.ljust(w - 8) + "|"))
+    if more:
+        print(c_next("|" + " " * w + "|"))
+        for t in [x for m in ([more[0]] if isinstance(more[0], str) else more[0]) for x in textwrap.wrap(m, w - 4)]:
+            print(c_next("|  " + t.ljust(w - 2) + "|"))
+        print(c_next("|        " + more[1].ljust(w - 8) + "|"))
     print(c_next("+" + "-" * w + "+") + "\n")
 
 
-def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False, model=None):
+SMALL_MORE = (("While the agent works, start 2 small runs", "(small model, 10 min each):"), "python workshop.py new small")
+
+
+def small_more(reg, rid):
+    """The stage-1 NEXT box offers the small runs: a T3 stage-1 run whose small runs are not made yet."""
+    run = reg.data["runs"].get(rid, {})
+    return SMALL_MORE if run.get("task") == "T3" and len(controls_of(reg, rid)) < 2 else None
+
+
+def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False, model=None, more=None):
     print("\n  1. Open this folder as a NEW project in your agent (choose exactly this folder, not a folder above it):")
     print("\n       %s" % folder)
     print("\n     Project name in the app: %s" % os.path.basename(os.path.normpath(folder)))
@@ -951,11 +1062,15 @@ def print_prompt(folder, prompt, then, cmd="python workshop.py done", mem=False,
           % (5 if mem else 4))
     print("     If it asks a question, reply: Make reasonable assumptions and continue.")
     if cmd:
-        next_box(cmd, then)
+        next_box(cmd, then, more)
 
 
-def t6_name(reg, a):
-    """The name on the T6 nameplate: --name, else the alias, else asked."""
+def t6_name(reg, a, parent=None):
+    """The name on the T6 nameplate: the name of the small T6 run of this stage-1 parent (stored on the parent),
+    else --name, else the alias, else asked."""
+    stored = reg.data["runs"].get(parent or "", {}).get("t6_name")
+    if stored:
+        return stored
     if a.name is not None:
         raw = a.name
     elif reg.data.get("alias"):
@@ -975,25 +1090,33 @@ def t6_name(reg, a):
     return name
 
 
-def create_s3_run(reg, a, task, name=None, control=False, labeled=False):
+def create_s3_run(reg, a, task, name=None, control=False, labeled=False, parent=None):
     """Create one stage-3 run (registry row, folder, active). Returns (run_id, folder, prompt).
+    parent given: a small run (control, made by `new small`): no skill is resolved, and the run gets early=True.
     On failure the registry row and active entry are removed, so no half state stays."""
-    src, parent, sh, shs = resolve_skill(reg, a.skill)
+    early = parent is not None
+    if early:
+        src, sh, shs = None, "", ""
+    else:
+        src, parent, sh, shs = resolve_skill(reg, a.skill)
     if task == "T6" and name is None:
-        name = t6_name(reg, a)
+        name = t6_name(reg, a, parent)
     name = name or ""
     rid = s3_run_id(reg, parent, ("n" + task[-1]) if control else task)
     if control:       # control run: same folder, no skill, no skill sentences in the prompt
         reg.data["runs"][rid] = dict(folder="", task=task, method="none", code=rid.rsplit("-", 1)[1], stage="3",
                                      parent=parent, skill_source="none", skill_hash="", skill_has_solution="",
                                      session=None, name=name)
+        if early:
+            reg.data["runs"][rid]["early"] = True
     else:
-        reg.data["runs"][rid] = dict(folder="", task=task, method=reg.data["runs"].get(parent, {}).get("method", ""),
+        method = reg.data["runs"].get(parent, {}).get("method", "") if a.skill == "own" else ""
+        reg.data["runs"][rid] = dict(folder="", task=task, method=method,
                                      code=rid.rsplit("-", 1)[1], stage="3", parent=parent,
                                      skill_source=a.skill if a.skill in ("own", "wiki") else "path",
                                      skill_hash=sh, skill_has_solution=shs, session=None, name=name)
     try:
-        dirname = "%s__%s" % (run_folder_label(reg, task, control), rid) if labeled else None
+        dirname = "%s__%s" % (run_folder_label(reg, task, control, early), rid) if labeled else None
         f = make_run_folder(reg, rid, task, skill_dir=None if control else src, name=name, dirname=dirname)
         prompt = render_prompt("stage3-noskill" if control else "stage3", task=task, run_id=rid)
         with open(os.path.join(f, "PROMPT.txt"), "w", encoding="utf-8", newline="\n") as fh:
@@ -1047,18 +1170,22 @@ def run_label(reg, rid):
     """'(T3 with skill)' style label of a stage-3 run."""
     run = reg.data["runs"].get(rid, {})
     task = run.get("task", "")
+    if run.get("stage") == "1":
+        return "(stage 1)"
+    if small_named(reg, run):
+        return "(%s small run)" % task
     return "(%s %s skill)" % (task, "without" if is_control(run) else "with")
 
 
 def still_working_box(reg, left):
-    """NEXT box listing every still-active stage-3 run, one line each, with its label."""
+    """NEXT box listing every still-active run (stage 3; before stage 3 also stage 1 or 2), one line each."""
     left = sorted(left, key=lambda x: float(x.get("start") or 0))
-    lines = ["%s   %s" % (next_cmd(x), run_label(reg, x["run_id"])) for x in left]
+    lines = ["%s   %s" % (next_cmd(x), act_label(reg, x)) for x in left]
+    box = " (or at 10 min)" if all(x["stage"] == "3" for x in left) else ""
     if len(left) == 1:
-        head = "1 agent is still working. When it is done (or at 10 min), run its line:"
+        head = "1 agent is still working. When it is done%s, run its line:" % box
     else:
-        head = ("%d agents are still working. When each is done (or at 10 min), run its line:"
-                % len(left))
+        head = "%d agents are still working. When each is done%s, run its line:" % (len(left), box)
     next_box(lines, head)
 
 
@@ -1084,39 +1211,73 @@ def start_order_keys(seed):
 
 BENCH_LINE = ("  Together, these 4 runs are a small benchmark of your skill: the same task and a different task,"
               " each with and without it.")
+BENCH_EARLY = "  With the 2 runs from earlier, they are a small benchmark of your skill."
 
 
 def start_order_line(seed):
     return "  Start in this order: " + " ".join("%d. %s" % (i, x) for i, x in enumerate(start_order(seed), 1))
 
 
-def new_s3_all(reg, a):
-    """new s3 --task all: T3 and T6, each with the skill and without it (control); one terminal."""
+S3_EARLY_LINE = "  Stage 3: 2 runs WITH the skill. The runs without the skill were done earlier."
+
+
+def s3_parent(reg, a, task):
+    """The stage-1 parent of the runs that this command makes."""
+    return latest_s1(reg) if task == "small" else resolve_skill(reg, a.skill)[1]
+
+
+def s3_plan(reg, a, task):
+    """Keys of the runs to make. all: t3 and t6, and each control (n3, n6) that does not exist yet; small: the
+    controls that do not exist yet. A control exists when it is not abandoned and has no error (active or done)."""
+    if task not in ("all", "small"):
+        return list(S3_KEYS.get(task, ("t" + task[-1:],)))
+    have = controls_of(reg, s3_parent(reg, a, task))
+    return [k for k in S3_KEYS[task] if k not in have]
+
+
+def s3_count(reg):
+    """How many runs `new s3 --task all` (own skill) makes now: 4, or 2 when the small runs exist."""
+    rows = [r for r in reg.data["rows"].values() if r["stage"] == "2"]
+    parent = max(rows, key=lambda r: float(r["cutoff"] or 0))["run_id"] if rows else latest_s1(reg)
+    return 4 - len(controls_of(reg, parent))
+
+
+def new_s3_all(reg, a, task="all"):
+    """new s3 --task all: T3 and T6, each with the skill and without it (control); one terminal.
+    The controls that exist already (made early by `new small`) are not made again.
+    task small: only the two controls (n3, n6), the small runs of `new small`."""
+    keys = s3_plan(reg, a, task)
+    small = task == "small"
+    parent = s3_parent(reg, a, task) if small else None
+    nm = t6_name(reg, a, s3_parent(reg, a, task)) if any(k[1] == "6" for k in keys) else ""
+    if small and nm:
+        reg.data["runs"][parent]["t6_name"] = nm          # stage 3 reuses it: the T6 pair has one name
+        reg.save()
     made = {}
     try:
-        made["t6"] = create_s3_run(reg, a, "T6")          # first: it asks for the T6 name
-        nm = reg.data["runs"][made["t6"][0]].get("name", "")
-        made["t3"] = create_s3_run(reg, a, "T3")
-        made["n3"] = create_s3_run(reg, a, "T3", control=True)
-        made["n6"] = create_s3_run(reg, a, "T6", name=nm, control=True)   # same name as the T6 skill run
+        for k in ("t6", "t3", "n3", "n6"):                # T6 first (as before)
+            if k in keys:
+                made[k] = create_s3_run(reg, a, "T" + k[1], name=nm if k[1] == "6" else None,
+                                        control=k[0] == "n", parent=parent)
     except Exception as e:
         print(c_err("\n  A run could not be created: %s" % e))
         print("  Runs already created stay valid; start the missing ones later with --task T6 or T3.")
     if not made:
         return 1
-    a.s3_first = made["t6"][0] if "t6" in made else next(iter(made.values()))[0]
+    a.s3_first = made["t6"][0] if "t6" in made else made["n6"][0] if "n6" in made else next(iter(made.values()))[0]
     seed = reg.data["runs"][next(iter(made.values()))[0]].get("parent", "")
     if getattr(a, "auto", False):
         order = [k for k in start_order_keys(seed) if k in made]
         rc = run_auto(reg, a, [auto_item(reg, a, made[k][0], made[k][1], made[k][2]) for k in order])
-        return rc or (0 if len(made) == 4 else 1)
+        return rc or (0 if len(made) == len(keys) else 1)
     if not gate_on():
-        s3_header(reg, a, True, total=4)
-    s3_pages(reg, a, made, seed, total=4)         # the start order line comes before the pages
-    return 0 if len(made) == 4 else 1
+        s3_header(reg, a, True, total=len(keys))
+    s3_pages(reg, a, made, seed, total=len(keys))         # the start order line comes before the pages
+    return 0 if len(made) == len(keys) else 1
 
 
-S3_KEYS = {"all": ("t3", "n3", "t6", "n6"), "both": ("t3", "t6"), "T3": ("t3",), "T6": ("t6",), "T4": ("t4",)}
+S3_KEYS = {"all": ("t3", "n3", "t6", "n6"), "both": ("t3", "t6"), "T3": ("t3",), "T6": ("t6",), "T4": ("t4",),
+           "small": ("n3", "n6")}
 
 
 def s3_complete(reg, parent, task):
@@ -1141,7 +1302,7 @@ def repeat_ok(reg, a, task):
             parent = max(rows, key=lambda r: float(r["cutoff"] or 0))["run_id"]
     if not parent or not s3_complete(reg, parent, task):
         return True
-    n = {"all": 4, "both": 2}.get(task, 1)
+    n = len(s3_plan(reg, a, task))           # all: 2 when the controls exist (they stay), else 4
     if getattr(a, "yes", False):
         return True
     if not (sys.stdin and sys.stdin.isatty() and sys.stdout.isatty()):
@@ -1168,18 +1329,26 @@ def cmd_new(a):
             sys.exit("\nFix the FAIL lines first (see doctor-report.txt and the help prompt above), "
                      "then run this command again.")
         reg = Registry.load()
-    task = a.task
+    small = a.stage == "small"          # the 2 small runs (the controls of stage 3), made while stage 1 works
+    task = "small" if small else a.task
     if task in ("both", "all") and a.stage != "s3":
         sys.exit("--task %s is for stage 3 only:  python workshop.py new s3 --task all" % task)
     acts = reg.actives()
     agent0 = reg.data.get("agent") or ""
-    if getattr(a, "auto", False) and a.stage != "s3":
+    if getattr(a, "auto", False) and a.stage == "s1":
         sys.exit("--auto is for stage 3 only:  python workshop.py new s3 --task all --auto")
+    parent = ""
+    if small:
+        parent = latest_s1(reg)
+        if not parent:
+            sys.exit("Start stage 1 first:  python workshop.py new s1")
+        if reg.data["runs"][parent].get("task") != "T3":
+            sys.exit("The small runs go with a T3 stage-1 run. Start one:  python workshop.py new s1")
     mode = want_mode(a, agent0)
     CUR_MODE_LINE[0] = None
     if mode != "auto":
         set_mode_line(a, agent0, mode, "python workshop.py new " + (
-            "s1" if a.stage == "s1" else "s3 --task %s" % task))
+            "s1" if a.stage == "s1" else "small" if small else "s3 --task %s" % task))
     if (a.stage == "s1" and getattr(a, "mode", None) in ("semi", "manual") and len(acts) == 1
             and acts[0]["stage"] == "1" and reg.data["runs"].get(acts[0]["run_id"], {}).get("mode") == "semi"):
         rid1 = acts[0]["run_id"]          # the app did not open: show the same run again, in the chosen mode
@@ -1188,7 +1357,9 @@ def cmd_new(a):
                        r1["method"], mode, again=True)
     kept_method = None            # --restart keeps the stage-2 method: a restart must not re-roll the random split
     if getattr(a, "restart", False):
-        gone = [x["run_id"] for x in acts if a.stage == "s1" or x["stage"] == "3"]
+        # s1: every active run; small: the active small runs only; s3: the stage-3 runs that are not small runs
+        gone = [x["run_id"] for x in acts if a.stage == "s1" or (
+            x["stage"] == "3" and bool(reg.data["runs"].get(x["run_id"], {}).get("early")) == small)]
         for rid0 in gone:
             if a.stage == "s1" and kept_method is None:
                 kept_method = reg.data["runs"].get(rid0, {}).get("method") or None
@@ -1198,14 +1369,18 @@ def cmd_new(a):
             reg.save()
             acts = reg.actives()
             print("Started again from scratch. The old run folder stays on disk until you run cleanup.")
-    blocking = acts if a.stage == "s1" else [x for x in acts if x["stage"] != "3"]
+    blocking = acts if a.stage == "s1" else [] if small else [x for x in acts if x["stage"] != "3"]
     if blocking:
         sys.exit("\n".join(active_lines(reg)) + "\nStart again from scratch:  python workshop.py new "
                  + ("s1" if a.stage == "s1" else "s3 --task %s" % task) + " --restart")
-    if a.stage == "s3":
+    if small:
+        same = [x for x in acts if reg.data["runs"].get(x["run_id"], {}).get("early")
+                and reg.data["runs"][x["run_id"]].get("parent") == parent]
+    elif a.stage == "s3":            # the small runs (made early) are never resumed here and never block
         same = [x for x in acts if reg.data["runs"].get(x["run_id"], {}).get("task") in
                 (("T6", "T3") if task in ("both", "all") else (task,))
-                and (task == "all" or not is_control(reg.data["runs"].get(x["run_id"], {})))]
+                and (task == "all" or not is_control(reg.data["runs"].get(x["run_id"], {})))
+                and not reg.data["runs"].get(x["run_id"], {}).get("early")]
     else:
         same = []
     if a.stage == "s3" and not same and not repeat_ok(reg, a, task):
@@ -1230,17 +1405,28 @@ def cmd_new(a):
         if g:
             sys.exit("A VESPER skill is in a global folder, so stage 3 would not be clean:\n  " + "\n  ".join(g)
                      + "\nMove it away (or run harvest / cleanup), then run this command again.")
+        keys = [] if same else s3_plan(reg, a, task)
+        if small and not same and not keys:
+            print("The 2 small runs of %s are done." % parent)
+            if s3_named(reg):
+                print("Next:  python workshop.py new s3 --task all")
+            else:
+                pre_s3_box(reg)
+            return 0
+        if task == "all" and keys:
+            retire_failed_controls(reg, s3_parent(reg, a, task), keys)
+            a.early_note = not any(k[0] == "n" for k in keys)      # both controls were made earlier
         if getattr(a, "auto", False):
             auto_setup(reg, a)
-            if not same and not auto_confirm(a, {"all": 4, "both": 2}.get(task, 1)):
+            if not same and not auto_confirm(a, len(keys)):
                 return 1                          # nothing is created: the learner can choose the manual flow
         try:
             if same:
                 return resume_s3(reg, a, same)
             if mode == "semi":
                 return new_s3_semi(reg, a, task)
-            if task == "all":
-                return new_s3_all(reg, a)
+            if task in ("all", "small"):
+                return new_s3_all(reg, a, task)
             if task == "both":
                 return new_s3_both(reg, a)
             rid, f, prompt = create_s3_run(reg, a, task)
@@ -1275,7 +1461,7 @@ def show_s1(reg, a, rid, f, prompt, method, mode, again=False):
         semi_page(reg, rid, "STAGE 1 - the agent with NO skill        run %s" % rid, f, prompt, "1",
                   "python workshop.py new s1", extra=lambda: method_notice(method, " (used in stage 2)"))
         partial_notice(reg, semi=True)
-        next_box(done_cmd, "when the agent says it is done, run:")
+        next_box(done_cmd, "when the agent says it is done, run:", small_more(reg, rid))
         return 0
     if run.get("mode") == "semi":
         run["mode"] = "manual"
@@ -1293,11 +1479,12 @@ def show_s1(reg, a, rid, f, prompt, method, mode, again=False):
             print("\n  Stopped. Run %s stays active. Its prompt:" % rid)
             prompt_block(prompt)
         partial_notice(reg)
-        next_box(done_cmd, "when the agent says it is done, run:")
+        next_box(done_cmd, "when the agent says it is done, run:", small_more(reg, rid))
         return 0
     agent1 = reg.data.get("agent") or ""
     print_prompt(f, prompt, "when the agent says it is done, run:", done_cmd, mem=mem,
-                 model=LARGE_SHORT.get(agent1) or "; ".join("%s: %s" % (k, v) for k, v in LARGE_SHORT.items()))
+                 model=LARGE_SHORT.get(agent1) or "; ".join("%s: %s" % (k, v) for k, v in LARGE_SHORT.items()),
+                 more=small_more(reg, rid))
     partial_notice(reg)
     return 0
 
@@ -2509,6 +2696,8 @@ def row_what(r, reg=None):
     if st == "2":
         return "2: new skill"
     run = ((reg.data["runs"].get(r.get("run_id", "")) if reg else None) or {})
+    if reg and small_named(reg, run):
+        return "%s small run" % task
     ctl = is_control(run) or r.get("method") == "none"
     return "%s%s" % (task, ", no skill" if ctl else " + skill")
 
@@ -2557,8 +2746,9 @@ def run_warnings(row):
         out.append("  CHECK: the agent may have read outside the run folder.")
         if row.get("isolation_note"):
             out.append("    " + row["isolation_note"])
-    if str(row.get("stage")) == "1" and re.search(r"luna|haiku", row.get("model") or "", re.I):
-        out.append("  CHECK: stage 1 ran on a small model (%s). Stage 1 needs the large model." % row["model"])
+    if str(row.get("stage")) in ("1", "2") and re.search(r"luna|haiku", row.get("model") or "", re.I):
+        out.append("  CHECK: stage %s ran on a small model (%s). Stages 1 and 2 need the large model."
+                   % (row["stage"], row["model"]))
     if row.get("overrun") == "yes":
         out.append("  Over the 10-minute time box: flagged in the results.")
     return out
@@ -2757,6 +2947,8 @@ def payback(reg, r1, r2, r3, t6=False, shown_table=False):
 def show_compare(reg, s3_id=None, cost_note=True, brief=False):
     """Real pairs only: the same task on the same model, WITH vs WITHOUT the skill (T3 and T6).
     The stage-1 writer (large model) is never put in a table; it appears in one cost line."""
+    if not s3_named(reg):
+        return                                  # before stage 3: only small runs, nothing to compare
     rows3 = [r for r in reg.data["rows"].values() if r["stage"] == "3"]
     runs = reg.data["runs"]
     pick = [r for r in rows3 if not s3_id or r["run_id"] == s3_id]
@@ -2986,7 +3178,9 @@ def cmd_done(a):
     else:
         show_compare(reg, rid, brief=True)         # only when the pair of this run is complete
         left = reg.actives("3")
-        if left:
+        if not s3_named(reg):
+            pre_s3_box(reg)                        # a small run: the stage-1/2 flow goes on
+        elif left:
             still_working_box(reg, left)
         else:
             all_done_box(reg)
@@ -3233,8 +3427,9 @@ def cmd_skill(a):
     reg = Registry.load()
     acts2 = reg.actives("2")
     again = bool(acts2)                # run again during stage 2: show the prompt again
-    if reg.actives() and not again:
-        sys.exit("\n".join(active_lines(reg)))
+    block = [x for x in reg.actives() if not reg.data["runs"].get(x["run_id"], {}).get("early")]
+    if block and not again:            # the small runs never block stage 2
+        sys.exit("\n".join(active_lines(reg, block)))
     s1 = [r for r in reg.data["rows"].values() if r["stage"] == "1"]
     if not s1:
         sys.exit("Do stage 1 first:  python workshop.py new s1")
@@ -3261,6 +3456,7 @@ def cmd_skill(a):
     banner("STAGE 2 - the SAME agent writes a skill        run %s" % rid)
     method_notice(run["method"], "")
     print("\n  1. Go back to the SAME thread as stage 1 (project %s)." % os.path.basename(run["folder"]))
+    print("     Model: use the SAME large model as stage 1. Check the model picker.")
     if run["method"] == "builtin":
         print("\n  2. " + BUILTIN_STEP.get(reg.data.get("agent", ""), BUILTIN_STEP["claude"]))
     else:
@@ -3275,6 +3471,9 @@ def cmd_skill(a):
     partial_notice(reg, semi=(mode == "semi"))
     print("\n  4. Wait until the agent says the skill is written.")
     next_box("python workshop.py harvest", "when the skill is written, run:")
+    small = small_left_lines(reg)
+    if small:
+        print("\n".join(small))
     return 0
 
 
@@ -3360,7 +3559,10 @@ def cmd_harvest(a):
     print("\n  Optional (2 min): python workshop.py judge")
     if getattr(a, "blocks", False):      # instructor view: where the shared code is
         print("\n".join(block_lines(dst, blocks)))
-    s3_choice_box(reg, "stage 3: FOUR new agents (T3, T3 control, T6, T6 control). Choose one:")
+    n = s3_count(reg)
+    s3_choice_box(reg, "stage 3: FOUR new agents (T3, T3 control, T6, T6 control). Choose one:" if n == 4
+                  else "stage 3: 2 new agents WITH the skill (T3 and T6). Choose one:" if n == 2
+                  else "stage 3: 3 new agents (T3 and T6 WITH the skill, 1 without). Choose one:")
     return 0
 
 
@@ -3424,10 +3626,10 @@ def resolve_skill(reg, name):
         d = os.path.join(ws_home(), ".prebuilt", "skills", "M4-distill")
         if not os.path.isdir(d):
             sys.exit("The wiki skill is in locked part 3:  python workshop.py unlock 3 <password from the slide>")
-        return d, "", skill_hash(d), "no"
+        return d, latest_early_parent(reg), skill_hash(d), "no"      # the parent of the small runs: pairs stay
     if not os.path.exists(os.path.join(name, "SKILL.md")):
         sys.exit("No SKILL.md in " + name)
-    return os.path.abspath(name), "", skill_hash(name), ""
+    return os.path.abspath(name), latest_early_parent(reg), skill_hash(name), ""
 
 
 # ------------------------------------------------------------------ unlock, show, cleanup, shadow
@@ -3468,12 +3670,14 @@ def cmd_show(a):
     else:
         cmp = getattr(a, "compare", False) or not reg.actives()
         show_rows(rows, note=not cmp, reg=reg)
+        named = s3_named(reg)
         if cmp:
             show_compare(reg)                       # the tables, then the notes once
-        elif any(r["stage"] == "3" for r in rows):
+        elif named and any(r["stage"] == "3" for r in rows):
             print("  The with/without tables: python workshop.py show --compare")
-        if not reg.actives() and any(needs_submit(r) for r in rows):
-            all_done_box(reg, show=False)
+        with_rows = any(r["stage"] == "3" and not is_control(reg.data["runs"].get(r["run_id"], {})) for r in rows)
+        if not reg.actives() and with_rows and any(needs_submit(r) for r in rows):
+            all_done_box(reg, show=False)           # the last steps only when WITH-skill results exist
     left = reg.actives("3")
     if left:
         still_working_box(reg, left)
@@ -4125,9 +4329,11 @@ def auto_item(reg, a, rid, folder, prompt):
     run.update(auto=True, mode="auto", auto_model=a.auto_model, settings_confirmed="auto")
     reg.save()
     key = ("n" if is_control(run) else "t") + run["task"][-1]
-    return dict(rid=rid, folder=folder, prompt=prompt, key=key, sol_task=run["task"], label=AUTO_LABEL.get(key, run["task"]),
+    small = small_named(reg, run)
+    label = run_label(reg, rid).strip("()") if small else AUTO_LABEL.get(key, run["task"])
+    return dict(rid=rid, folder=folder, prompt=prompt, key=key, sol_task=run["task"], label=label,
                 state="waiting", t0=0.0, end=None, proc=None, rc=None, agent=a.auto_agent,
-                task=getattr(a, "task", "all"))
+                task=getattr(a, "task", "all"), retry=retry_cmd(a), early=bool(run.get("early")), small=small)
 
 
 def fmt_mss(sec):
@@ -4327,8 +4533,8 @@ def auto_error(reg, it, reason):
     print("\n" + c_err("  RUN FAILED  %s: %s" % (it["label"], note.rstrip(". "))))
     if not _FAIL_HINT[0]:
         _FAIL_HINT[0] = True                      # the fix line once, not once per run
-        print(c_err("  Do the failed runs by hand: python workshop.py new s3 --task %s (shows their pages)"
-                    % (it.get("task") or "all")))
+        print(c_err("  Do the failed runs by hand: %s (shows their pages)"
+                    % (it.get("retry") or "python workshop.py new s3 --task %s" % (it.get("task") or "all"))))
     return reg.row(rid, "3")
 
 
@@ -4373,9 +4579,12 @@ def auto_finish(reg, it):
 
 def auto_start_screen(a, items):
     print("\n" + c_banner(WIDE))
-    print(c_banner("  STAGE 3 --auto - the tool runs %s for you"
-                   % ("the %d agents" % len(items) if len(items) > 1 else "the agent")))
+    print(c_banner("  %s --auto - the tool runs %s for you"
+                   % ("SMALL RUNS" if items[0].get("early") else "STAGE 3",
+                      "the %d agents" % len(items) if len(items) > 1 else "the agent")))
     print(c_banner(WIDE))
+    if getattr(a, "early_note", False):
+        print(S3_EARLY_LINE)
     eff = ", effort high" if a.auto_agent == "codex" else ""
     print("  Agent: %s   Model: %s%s" % (a.auto_agent, a.auto_model, eff))
     print("\n".join(auto_limit_lines(a)))
@@ -4521,12 +4730,19 @@ def live_header(model, items, box_min=None, budget=None):
     nc = n - nw
     who = ("%d use your skill, %d do not (the control)." % (nw, nc) if nw and nc
            else ("All use your skill." if nw else "None use your skill (the control)."))
+    if any(it.get("small") for it in items):        # before stage 3: the small runs, no word about the skill
+        return ["SMALL RUNS --auto: %d fresh agent%s (%s) work alone" % (n, "" if n == 1 else "s", model),
+                "They cannot see each other.",
+                "Each has %d min and %d emulator runs. Nothing to type: just watch." % (box_min, budget)]
     return ["STAGE 3 --auto: %d fresh agent%s (%s) work alone" % (n, "" if n == 1 else "s", model),
             who + " They cannot see each other.",
             "Each has %d min and %d emulator runs. Nothing to type: just watch." % (box_min, budget)]
 
 
-def live_footer(n):
+def live_footer(n, small=False):
+    if small:
+        return ["When all %d end: the tool saves them." % n if n > 1 else "When it ends: the tool saves it.",
+                "Ctrl+C stops all agents."]
     return ["When all %d end: the tool grades them and shows WITH vs WITHOUT." % n if n > 1
             else "When it ends: the tool grades it.",
             "Ctrl+C stops all agents."]
@@ -4563,7 +4779,7 @@ def live_block(items, now, box, uni=True, spin=0):
     out = []
     for it in items:
         out += live_agent_lines(it, now, box, uni, spin)
-    return out + [""] + live_footer(len(items))
+    return out + [""] + live_footer(len(items), any(it.get("small") for it in items))
 
 
 def live_refresh(items, now):
@@ -4697,17 +4913,20 @@ def auto_ctrl_c(reg, items):
 
 def auto_end_screen(reg, items, show=True):
     """The NEXT box after --auto: failed runs (by hand), runs still active elsewhere, or the last steps."""
-    if show:
+    pre = not s3_named(reg)                       # the small runs before stage 3: no submit, grade or compare text
+    if show and not pre:
         print("\n" + SAVED_LINE)
         show_compare(reg, items[0]["rid"] if len(items) == 1 else None)
     failed = [it for it in items if it["state"] == "failed"]
     ours = {it["rid"] for it in items}
     left = [x for x in reg.actives("3") if x["run_id"] not in ours]
     if failed:
-        task = failed[0].get("task") or "all"
-        next_box(["python workshop.py new s3 --task %s" % task, "   shows the page of each failed run"],
+        retry = failed[0].get("retry") or "python workshop.py new s3 --task %s" % (failed[0].get("task") or "all")
+        next_box([retry, "   shows the page of each failed run"],
                  "1 run failed. Do it by hand:" if len(failed) == 1
                  else "%d runs failed. Do them by hand:" % len(failed))
+    elif pre:
+        pre_s3_box(reg, exclude=ours)
     elif left:
         still_working_box(reg, left)
     else:
@@ -4742,9 +4961,10 @@ def s3_choice_box(reg, when):
     except Exception:
         found = False
     base = "python workshop.py new s3 --task all"
+    n = s3_count(reg)                     # 2 when the small runs (the controls) were made early
     default = (("SEMI", base, "the kit opens your app, one folder per page") if found
-               else ("MANUAL", base, "you open 4 threads in your agent app"))
-    auto = ("AUTO", base + " --auto", "the tool runs the 4 agents, about 10 min")
+               else ("MANUAL", base, "you open %d threads in your agent app" % n))
+    auto = ("AUTO", base + " --auto", "the tool runs the %d agents, about 10 min" % n)
     manual = ("MANUAL", base + " --mode manual", "you open the app yourself")
     if agent and agent not in AUTO_AGENTS:
         choice_box(when, [default] + ([manual] if found else []))
@@ -4900,18 +5120,30 @@ def s3_pages(reg, a, entries, seed, total=None):
     order = [k for k in start_order_keys(seed) if k in entries]
     total = total or len(order)
     labels = [x for x in start_order(seed) if ORDER_KEY[x] in entries]
+    small = bool(reg.data["runs"][entries[order[0]][0]].get("early"))    # the small runs: T3, then T6
     def order_line():
+        if small:
+            return
         print("  Start in this order: " + " ".join("%d. %s" % (i, x) for i, x in enumerate(labels, 1)))
         if total == 4:
             print(BENCH_LINE)              # organiser's decision: name the 4 runs a benchmark
+        elif getattr(a, "early_note", False):
+            print(S3_EARLY_LINE)
+            print(BENCH_EARLY)
     if not gate_on():
         order_line()                       # a terminal clears the screen at each page: the order is on page 1
     for i, k in enumerate(order, 1):
         rid, f, p = entries[k]
         s3_show(reg, rid, i, total, "T6" if k[1] == "6" else "T3", f, p, desc=ALL_DESC[k],
-                extra=order_line if gate_on() and i == 1 else None)
+                extra=order_line if gate_on() and i == 1 and not small else None)
+    if small:
+        pre_s3_box(reg)                    # the small runs and the stage-1 run, one done line each
+        return order
     next_box(["python workshop.py done %s   %s" % (entries[k][0], ALL_LABEL[k]) for k in order],
              "when an agent is done (or at 10 min), run its line:")
+    left = small_left_lines(reg)
+    if left:
+        print("\n".join(left))
     return order
 
 
@@ -4933,7 +5165,7 @@ def auto_resume_pick(reg, entries, order):
     for k in order:
         rid, folder, _ = entries[k]
         run = reg.data["runs"][rid]
-        lab = ALL_LABEL.get(k, run.get("task", ""))
+        lab = run_label(reg, rid) if run.get("early") else ALL_LABEL.get(k, run.get("task", ""))
         if run_mode(run) != "auto":
             print("  %s: you run it by hand. When it is done:" % lab)
             print("      python workshop.py done %s" % rid)
@@ -4955,10 +5187,14 @@ def resume_s3(reg, a, same):
     the runs that are still active again, in the start order. Prompts are rebuilt as create_s3_run builds them.
     With --auto: ask, then start only the runs that are not done."""
     runs = reg.data["runs"]
-    print("Stage 3 is already set up. Showing its pages again.")
+    small = getattr(a, "stage", "") == "small"
+    print("The small runs are already set up. Showing their pages again." if small
+          else "Stage 3 is already set up. Showing its pages again.")
     parent = runs[same[0]["run_id"]].get("parent")
-    multi = a.task in ("both", "all")
-    acts = [x for x in reg.actives("3") if runs[x["run_id"]].get("parent") == parent] if multi else same
+    multi = a.task in ("both", "all") or small
+    # the small runs and the stage-3 runs are two sets: a resume of one never shows the other
+    acts = [x for x in reg.actives("3") if runs[x["run_id"]].get("parent") == parent
+            and bool(runs[x["run_id"]].get("early")) == small] if multi else same
     entries = {}
     for x in acts:
         rid, run = x["run_id"], runs[x["run_id"]]
@@ -4968,7 +5204,7 @@ def resume_s3(reg, a, same):
     if multi:
         for r in sorted(reg.data["rows"].values(), key=lambda r: float(r.get("start") or 0)):
             if r["stage"] == "3" and runs.get(r["run_id"], {}).get("parent") == parent \
-                    and not reg.get_active(r["run_id"]):
+                    and not reg.get_active(r["run_id"]) and (not small or runs[r["run_id"]].get("early")):
                 print("  Already done: %s %s" % (run_label(reg, r["run_id"]), r["run_id"]))
     first = next(iter(entries.values()))[0]
     a.s3_first = first
@@ -4983,7 +5219,7 @@ def resume_s3(reg, a, same):
         return run_auto(reg, a, [auto_item(reg, a, entries[k][0], entries[k][1], entries[k][2]) for k in order])
     for k in list(entries):
         if lock_live(entries[k][1]):                   # another terminal runs this agent with --auto
-            print("  %s: an --auto agent works on it in another window." % ALL_LABEL[k])
+            print("  %s: an --auto agent works on it in another window." % run_label(reg, entries[k][0]))
             entries.pop(k)
     if not entries:
         return 1
@@ -5045,9 +5281,12 @@ def mem_line(agent, opened_ok=True):
     return MEM_LINE.get(agent, "Memory: turn memory off in your agent for this chat.")
 
 
-def run_folder_label(reg, task, control):
-    """T3_WITH_SKILL_LUNA: the run name that the folder name starts with."""
-    return "%s_%s_SKILL_%s" % (task, "NO" if control else "WITH", MODEL_TAG.get(reg.data.get("agent") or "", "SMALL"))
+def run_folder_label(reg, task, control, early=False):
+    """T3_WITH_SKILL_LUNA: the run name that the folder name starts with. A small run (made early): T3_LUNA."""
+    tag = MODEL_TAG.get(reg.data.get("agent") or "", "SMALL")
+    if early:
+        return "%s_%s" % (task, tag)
+    return "%s_%s_SKILL_%s" % (task, "NO" if control else "WITH", tag)
 
 
 def label_of(folder):
@@ -5228,8 +5467,15 @@ def semi_s3_finish(reg, a, made):
         return 1
     stop_table(reg, made)
     lines = ["python workshop.py done %s   %s" % (rid, label_of(f)) for _, rid, f, _ in made]
+    small = any(reg.data["runs"][m[1]].get("early") for m in made)     # the small runs of `new small`
     if not interactive():
+        if small:
+            pre_s3_box(reg)                # the small runs and the stage-1 run, one done line each
+            return 0
         next_box(lines, "when each agent is stopped or done, run its line:")
+        left = small_left_lines(reg)
+        if left:
+            print("\n".join(left))
         return 0
     stops = {}
     for _, rid, _, _ in made:
@@ -5243,6 +5489,12 @@ def semi_s3_finish(reg, a, made):
         print_run_list(made, stops)
         if not pending:
             print("\n  All %d runs are ENDED." % n)
+            if small:                      # before stage 3: no play, grade or show text
+                pre_s3_box(reg)
+                return 0
+            left = small_left_lines(reg)
+            if left:
+                print("\n".join(left))
             print("\n  PLAY what the agents made (a browser opens, key 1 = with the skill, key 2 = without):")
             tasks = []
             for _, rid0, _, _ in made:
@@ -5283,12 +5535,15 @@ def semi_s3_finish(reg, a, made):
 def semi_run_page(reg, a, i, total, key, rid, f, p, retry_cmd, resume=False):
     run = reg.data["runs"][rid]
     label = label_of(f)
-    head = "STAGE 3 - RUN %d of %d  %s" % (i, total, label)
-    nm = run.get("name", "")
-    if nm and run.get("task") == "T6":
-        head += "   name on T6: " + nm
+    head = small_head(run, i, total)
+    if not head:
+        head = "STAGE 3 - RUN %d of %d  %s" % (i, total, label)
+        nm = run.get("name", "")
+        if nm and run.get("task") == "T6":
+            head += "   name on T6: " + nm
     opened = bool(resume and run.get("semi_open") and run.get("semi_open") != "failed")
-    semi_page(reg, rid, head, f, p, "3", retry_cmd, label=label, reopen=not opened)
+    note = (lambda: print("\n" + S3_EARLY_LINE)) if i == 1 and getattr(a, "early_note", False) else None
+    semi_page(reg, rid, head, f, p, "3", retry_cmd, label=label, extra=note, reopen=not opened)
     if opened and run.get("sent_at"):             # a resume: keep the first send time, never send twice
         return
     ask("\n  Send the prompt in the app. Then press Enter here. "
@@ -5298,16 +5553,23 @@ def semi_run_page(reg, a, i, total, key, rid, f, p, retry_cmd, resume=False):
 
 
 def new_s3_semi(reg, a, task):
-    """Stage 3 in semi mode: ONE folder per page, made when its page shows. Order: t3, n3, t6, n6."""
-    plan = {"all": [("T3", False), ("T3", True), ("T6", False), ("T6", True)],
-            "both": [("T3", False), ("T6", False)]}.get(task, [(task, False)])
-    retry = "python workshop.py new s3 --task %s" % task
-    name = t6_name(reg, a) if any(t == "T6" for t, _ in plan) else ""
+    """Stage 3 in semi mode: ONE folder per page, made when its page shows. Order: t3, n3, t6, n6.
+    The controls that exist already (the small runs) are not made again. task small: the 2 small runs."""
+    keys = s3_plan(reg, a, task)
+    plan = [("T" + k[1], k[0] == "n") for k in ALL_ORDER if k in keys] or [(task, False)]
+    retry = retry_cmd(a)
+    parent = s3_parent(reg, a, task)
+    name = t6_name(reg, a, parent) if any(t == "T6" for t, _ in plan) else ""
+    early_parent = parent if task == "small" else None
+    if early_parent and name:
+        reg.data["runs"][parent]["t6_name"] = name        # stage 3 reuses it: the T6 pair has one name
+        reg.save()
     made = []
     a.s3_first = None
     for i, (t, ctl) in enumerate(plan, 1):
         try:
-            rid, f, p = create_s3_run(reg, a, t, name=name if t == "T6" else None, control=ctl, labeled=True)
+            rid, f, p = create_s3_run(reg, a, t, name=name if t == "T6" else None, control=ctl, labeled=True,
+                                      parent=early_parent)
         except Exception as e:
             print(c_err("\n  A run could not be created: %s" % e))
             print("  Runs already created stay valid. Start the missing ones later with --task T6 or T3.")
@@ -5323,7 +5585,7 @@ def resume_s3_semi(reg, a, entries):
     """Pages of the semi runs that are still active, again, in the semi order."""
     order = [k for k in ALL_ORDER if k in entries]
     made = [(k, entries[k][0], entries[k][1], entries[k][2]) for k in order]
-    retry = "python workshop.py new s3 --task %s" % a.task
+    retry = retry_cmd(a)
     for i, m in enumerate(made, 1):
         semi_run_page(reg, a, i, len(made), m[0], m[1], m[2], m[3], retry, resume=True)
     return semi_s3_finish(reg, a, made)
@@ -5361,7 +5623,8 @@ def parse(argv):
     s.add_argument("--delay", type=float, default=0)
     s.set_defaults(func=cmd_bgcheck)
     s = sub.add_parser("new")
-    s.add_argument("stage", choices=["s1", "s3"])
+    s.add_argument("stage", choices=["s1", "s3", "small"],
+                   help="s1 = stage 1; small = the 2 small runs (start them while the stage-1 agent works); s3 = stage 3")
     s.add_argument("--task", default="T3", choices=["T3", "T4", "T6", "both", "all"],
                    help="stage 3: use all (recommended) = T3 with skill, T3 without skill (control), T6")
     s.add_argument("--name", help="T6 (or both) only: your name on the screen (up to 8 letters A-Z; default: asked)")
