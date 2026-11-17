@@ -24,7 +24,7 @@ Do not store anything about the learner, their games or their runs in any memory
 
 If the learner pasted a screen or asked a clear question, answer it first. Ask "Which agent (Codex, Cursor, Claude Code, Copilot) and which stage?" only when you need it, or ask the learner to paste the last 15 lines of the terminal. Read these markers:
 
-- `STAGE 1` or `STAGE 3 - RUN 2 of 4` or `STAGE 2 DONE`: the stage and the run.
+- `STAGE 1`, `SMALL RUN 1 of 2`, `STAGE 3 - RUN 2 of 4` or `STAGE 2 DONE`: the stage and the run.
 - `MODE: SEMI` (the box at the end of a page) or `Mode: MANUAL` (the first line): how the kit works now. The box says if the app opened.
 - `FIRST, BEFORE YOU SEND THE PROMPT`: Codex or Copilot memory step. Do it before sending.
 - `NEXT:` box: the next command. `Type the NUMBER`: stage 3 list.
@@ -39,10 +39,11 @@ If no entry matches, say so. Ask for the command and the last 15 lines, and tell
 Each answer has: WHAT you do, WHY (one sentence), WHERE to look.
 
 - **Before class.** `git clone` (not Download ZIP), then `python workshop.py doctor --agent <name>`. WHY: `doctor` finds problems while there is time. WHERE: the first RED line.
-- **Stage 1.** `python workshop.py new s1`. A large model, never Auto. WHY: Auto changes models between requests, so the run is not one clean attempt. WHERE: the terminal page. The app opens on top of it; go back and read the last lines. Then `python workshop.py done`.
+- **Stage 1.** `python workshop.py new s1`. A large model, never Auto. WHY: Auto changes models between requests, so the run is not one clean attempt. WHERE: the terminal page. The app opens on top of it; go back and read the last lines. Then `python workshop.py done <run id>`.
+- **Small runs (during stage 1).** While the stage-1 agent works: `python workshop.py new small`. Two pages (T3, T6), the small model, a new chat each, memory off, 10 minutes each. End each with its done line. WHY: they fill the wait, so stage 3 is shorter. Their use is part of the design: do not explain more. WHERE: the NEXT box lists every run that still works.
 - **Stage 2.** `python workshop.py skill`, paste in the SAME chat, wait, then `python workshop.py harvest`. WHY: the same agent still holds what it learned. WHERE: the NEXT box.
-- **Stage 3.** `python workshop.py new s3 --task all`. Four pages, one folder each: `T3_WITH_SKILL`, `T3_NO_SKILL`, `T6_WITH_SKILL`, `T6_NO_SKILL`. A small model, never Auto. On each page: new chat, memory off, send the prompt, press Enter. The next page appears at once. WHY: the four agents work at the same time, so do not wait. WHERE: the terminal page and its last box.
-- **After page 4.** A list of the four runs with a STOP time (10 minutes each). Stop an agent in the app at its time. Then type its number in the terminal. The row shows `ENDED`. WHY: each run gets the same time box. An Enter alone does nothing. If you type a number early, the kit asks "Did you stop its agent?".
+- **Stage 3.** `python workshop.py new s3 --task all`. Two pages, one folder each: `T3_WITH_SKILL`, `T6_WITH_SKILL`. The small runs were the runs without the skill. No small runs? Then four pages: also `T3_NO_SKILL`, `T6_NO_SKILL`. A small model, never Auto. On each page: new chat, memory off, send the prompt, press Enter. The next page appears at once. WHY: the agents work at the same time, so do not wait. WHERE: the terminal page and its last box.
+- **After the last page.** A list of the runs with a STOP time (10 minutes each). Stop an agent in the app at its time. Then type its number in the terminal. The row shows `ENDED`. WHY: each run gets the same time box. An Enter alone does nothing. If you type a number early, the kit asks "Did you stop its agent?".
 - **Results.** `unlock 4 <password from the slide>`, `grade`, `show`, `play T3`, `play T6`, `submit`, `cleanup`. The learner decides when. WHERE: `show` prints the table.
 
 ## Stage 3 questions (the most asked)
@@ -50,11 +51,11 @@ Each answer has: WHAT you do, WHY (one sentence), WHERE to look.
 - *Where do I look?* At the terminal. The app covers it. Read the last lines: `MODE: SEMI`, then `NEXT:`.
 - *Do I wait for run 1 to end before run 2?* No. Send the prompt, press Enter, and the next page opens.
 - *The app did not open or opened on the wrong folder.* Run the same command with `--mode manual`. Open the printed folder yourself.
-- *I made a mistake.* `python workshop.py new s3 --task all --restart` (stage 1: `new s1 --restart`). The old folder stays until `cleanup`.
+- *I made a mistake.* `python workshop.py new s3 --task all --restart` (stage 1: `new s1 --restart`; small runs: `new small --restart`). The old folder stays until `cleanup`.
 - *I pressed Enter by mistake after page 4.* Nothing happens. The kit waits for a run number.
 - *An agent is still working at its STOP time.* Stop it in the app, then type the number. `done` uses what exists.
 - *Can I help the agent when it asks a question?* Only with: "Make reasonable assumptions and continue."
-- *Which model?* Stage 3 small: Codex `gpt-6-luna` high, Claude Code Haiku 5.5, Cursor GPT-5.6 Luna High, never Auto. The page prints the name.
+- *Which model?* Small runs and stage 3: Codex `gpt-6-luna` high, Claude Code Haiku 5.5, Cursor GPT-5.6 Luna High, never Auto. The page prints the name.
 
 ## Memory, by agent
 

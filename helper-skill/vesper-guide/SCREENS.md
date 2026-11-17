@@ -153,16 +153,48 @@ Screen: "T6 is a stage-3 task."
 Means: Stage 1 uses T3 only.
 Do: 1. Run `python workshop.py new s1`.
 
+### Small runs offer
+Screen: "While the agent works, start 2 small runs"; "(small model, 10 min each):"
+Means: The stage-1 NEXT box offers 2 more runs, T3 and T6, on the small model. They work while the stage-1 agent works.
+Do: 1. Leave the stage-1 agent alone. 2. Run `python workshop.py new small`. 3. Later, end stage 1 with its done line.
+Why: The small runs fill the wait. Stage 3 at the end is then shorter.
+
+### Small runs pages
+Screen: "SMALL RUN"; "SMALL RUNS - "
+Means: One page per small run. Each run has its own folder (`T3_LUNA`, `T6_LUNA` or the run id).
+Do: 1. Open the folder as a NEW project. 2. Start a NEW chat. 3. Pick the small model on the page. Never Auto. 4. Turn memory off. 5. Send the prompt.
+Why: Each run is a fresh agent. It must not see the stage-1 chat.
+
+### Small runs need stage 1
+Screen: "Start stage 1 first:  python workshop.py new s1"; "The small runs go with a T3 stage-1 run."
+Means: `new small` needs a stage-1 run on T3. There is none.
+Do: 1. Run `python workshop.py new s1`. 2. Then run `python workshop.py new small`.
+
+### Small runs already set up
+Screen: "The small runs are already set up. Showing their pages again."
+Means: The small runs exist and work. The kit shows their pages again. It makes no new run.
+Do: 1. Use the same folders and chats. 2. Do not send a prompt twice. 3. To begin them again: `python workshop.py new small --restart`.
+
+### Small runs done
+Screen: "small runs of"; "are done."
+Means: Both small runs are ended. The kit makes no new run.
+Do: 1. Run the command in the NEXT box.
+
+### Small runs still working
+Screen: "Still working from earlier. When each is done, run its line:"
+Means: A small run still works. It does not stop your next step.
+Do: 1. Go on with the next step. 2. When the small agent is done, or at 10 min, run its done line.
+
 ### Stage is still active
 Screen: "is still active. Next:"
 Means: An earlier stage is not finished. The line after Next: is the command.
-Do: 1. Run the command on the line. Stage 1: `python workshop.py done`. 2. Or, to begin again: `python workshop.py new s1 --restart`.
+Do: 1. Run the command on the line, for example `python workshop.py done <run id>`. 2. Or, to begin again: `python workshop.py new s1 --restart`.
 Why: The kit keeps one clean run at a time.
 
 ### Start again from scratch (the offer)
 Screen: "Start again from scratch:  python workshop.py new"
 Means: The kit blocked your command because a run is still active. This line offers a way out: `--restart` ends the active run and makes a new one. Nothing has been restarted yet.
-Do: 1. Stage 1: type `python workshop.py new s1 --restart`. 2. Stage 3: type `python workshop.py new s3 --task all --restart`. 3. Or finish the active run first with `python workshop.py done`.
+Do: 1. Stage 1: type `python workshop.py new s1 --restart`. It also ends the small runs. 2. Small runs only: `python workshop.py new small --restart`. 3. Stage 3: type `python workshop.py new s3 --task all --restart`. 4. Or finish the active run first with `python workshop.py done <run id>`.
 Why: The old folder stays until `python workshop.py cleanup`.
 
 ### Started again from scratch (the confirmation)
@@ -305,9 +337,14 @@ Means: The kit gives the order to start the four runs.
 Do: 1. Start the runs in that order. 2. Do not wait between runs.
 
 ### Benchmark line
-Screen: "Together, these 4 runs are a small benchmark of your skill"
+Screen: "Together, these 4 runs are a small benchmark of your skill"; "With the 2 runs from earlier, they are a small benchmark of your skill."
 Means: The four runs show your skill with and without the skill.
-Do: 1. Go on with the four pages.
+Do: 1. Go on with the pages.
+
+### Stage 3 with 2 runs
+Screen: "Stage 3: 2 runs WITH the skill. The runs without the skill were done earlier."; "stage 3: 2 new agents WITH the skill (T3 and T6)."
+Means: The small runs of stage 1 were the runs without the skill. Stage 3 makes only the 2 runs with the skill.
+Do: 1. Go on with the 2 pages. 2. A small run that still works: run its done line when it ends.
 
 ### Method line
 Screen: "Stage-2 method for you:"; "(the room is split 3 ways at random)"
@@ -337,9 +374,9 @@ Means: You ran `skill` twice. The kit shows the same prompt again.
 Do: 1. Paste it in the SAME chat as stage 1. 2. Then run `python workshop.py harvest`.
 
 ### Same chat for stage 2
-Screen: "Go back to the SAME thread as stage 1"
+Screen: "Go back to the SAME thread as stage 1"; "Model: use the SAME large model as stage 1. Check the model picker."
 Means: The agent must still hold what it learned in stage 1.
-Do: 1. Open the stage 1 chat. 2. Paste the prompt there.
+Do: 1. Open the stage 1 chat. 2. Check the model: the large model of stage 1, not the small model of the small runs. 3. Paste the prompt there.
 
 ### Prompt on the clipboard
 Screen: "The prompt is on the clipboard. Paste it (Ctrl+V) in the SAME chat as stage 1."
@@ -432,7 +469,7 @@ Means: This run was done before. The kit reads it again.
 Do: 1. Go on. This is safe.
 
 ### Several runs are active
-Screen: "stage-3 runs are active:"; "Which agent is done? Type its number"
+Screen: "runs are active:"; "Which agent is done? Type its number"
 Means: The kit asks which run to end.
 Do: 1. Type the number of the run. 2. Or name the run: `python workshop.py done <run id>`.
 
@@ -504,9 +541,9 @@ Means: The agent worked in a folder other than the run folder.
 Do: 1. In the agent, open exactly the run folder path on the screen as the project. Not a folder above it. 2. Ask the agent to redo the step there. 3. Run `python workshop.py done` or `python workshop.py harvest` again.
 
 ### Small model in stage 1
-Screen: "CHECK: stage 1 ran on a small model"
-Means: Stage 1 needs the large model.
-Do: 1. Run `python workshop.py new s1 --restart`. 2. Pick the large model. Never Auto.
+Screen: "ran on a small model"; "Stages 1 and 2 need the large model."
+Means: Stage 1 or stage 2 ran on a small model. Stages 1 and 2 need the large model.
+Do: 1. Stage 1: run `python workshop.py new s1 --restart`. 2. Stage 2: tell the instructor. 3. Pick the large model. Never Auto.
 
 ### Overrun
 Screen: "Over the 10-minute time box: flagged in the results."
@@ -524,9 +561,9 @@ Means: Stage 1 is over.
 Do: 1. Run `python workshop.py skill`.
 
 ### Agents still working
-Screen: "agents are still working. When each is done (or at 10 min), run its line:"; "1 agent is still working."
-Means: Some runs are not ended.
-Do: 1. Stop each agent at its STOP time. 2. Run the line for that run.
+Screen: "agents are still working. When each is done"; "1 agent is still working."; "when the stage-1 agent is done, run:"
+Means: Some runs are not ended. The box has one line per run. `(stage 1)` is the stage-1 run.
+Do: 1. Stop each small or stage-3 agent at its STOP time. 2. Run the line for that run. 3. End stage 1 when its agent says it is done.
 
 ### All agents done
 Screen: "all agents are done. Now:"
@@ -741,7 +778,12 @@ Do: 1. Read the lines. 2. Type y to start, or n.
 ### Auto run failed
 Screen: "RUN FAILED"; "Do the failed runs by hand:"
 Means: The tool could not run one agent.
-Do: 1. Read the reason on the line. 2. Run `python workshop.py new s3 --task all`. It shows the page of each failed run.
+Do: 1. Read the reason on the line. 2. Run the command in the box: `python workshop.py new s3 --task all`, or `python workshop.py new small` for a small run. It shows the page of each failed run.
+
+### Small runs with auto
+Screen: "SMALL RUNS --auto"; "the tool saves them."
+Means: The tool runs the 2 small runs for you, with no window.
+Do: 1. Leave the terminal open. 2. Go on with stage 1 in the app.
 
 ### Auto usage limit
 Screen: "A usage limit stopped the agent."
